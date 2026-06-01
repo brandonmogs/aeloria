@@ -1,0 +1,21 @@
+{
+  "name": "aeloria",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "description": "An OSRS-inspired tile-and-tick game with modern WebGL rendering.",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "@types/three": "^0.160.0",
+    "typescript": "^5.3.3",
+    "vite": "^5.0.0"
+  }
+}
