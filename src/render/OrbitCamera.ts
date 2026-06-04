@@ -35,6 +35,21 @@ export class OrbitCamera {
     this.camera.updateProjectionMatrix();
   }
 
+  /**
+   * The compass direction the camera looks toward, in radians clockwise from
+   * north (+z / tile +y). At yaw 0 the camera sits north of its focus looking
+   * south, so the heading is yaw + π. The compass and minimap read this to show
+   * which way the view is pointing.
+   */
+  get heading(): number {
+    return this.yaw + Math.PI;
+  }
+
+  /** Snap the view to look due north — driven by clicking the compass. */
+  faceNorth(): void {
+    this.yaw = Math.PI;
+  }
+
   /** Smoothly ease the focus toward a world-space target (the player). */
   follow(target: THREE.Vector3): void {
     this.focus.lerp(target, 0.15);

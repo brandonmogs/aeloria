@@ -20,6 +20,23 @@ export class Entity {
   /** When true the entity covers two tiles per tick instead of one. */
   running = false;
 
+  // --- Combat state --------------------------------------------------------
+  /** Current and maximum hitpoints. */
+  hitpoints = 10;
+  maxHitpoints = 10;
+
+  /** The entity this one is fighting, or null when not in combat. */
+  targetId: number | null = null;
+
+  /** Ticks remaining before this entity can attack again. */
+  attackCooldown = 0;
+
+  /**
+   * Damage amounts applied to this entity since the renderer last looked, so it
+   * can pop a hitsplat. Render-only: the sim pushes, the view drains.
+   */
+  readonly splatQueue: number[] = [];
+
   constructor(
     readonly id: number,
     position: Tile,
@@ -30,5 +47,9 @@ export class Entity {
 
   get isMoving(): boolean {
     return this.path.length > 0;
+  }
+
+  get isAlive(): boolean {
+    return this.hitpoints > 0;
   }
 }

@@ -25,6 +25,7 @@ export class Hud {
       'AELORIA · vertical slice',
       `tick     ${world.tickCount}`,
       `tile     (${tracked.position.x}, ${tracked.position.y})`,
+      `hp       ${tracked.hitpoints}/${tracked.maxHitpoints}`,
       `moving   ${tracked.isMoving ? `yes (${tracked.path.length} left)` : 'no'}`,
       `fps      ${this.fps}`,
     ].join('\n');

@@ -1,12 +1,14 @@
 import * as THREE from 'three';
+import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
 import { TileMap } from '../sim/TileMap';
 import { Tile } from '../sim/coords';
 
 /**
- * Renders the static world: the ground plane, the tile grid overlay, and a mesh
- * for every blocked tile. It also owns two bits of interactive feedback — the
- * tile the mouse is hovering and the fading marker that appears where you click
- * to walk, echoing RuneScape's flag/X.
+ * Renders the static *ground*: the grass plane and the tile grid overlay. Solid
+ * world props (trees, rocks, the castle) are drawn by {@link SceneryView}; this
+ * class also owns two bits of interactive feedback — the tile the mouse is
+ * hovering and the fading marker that appears where you click to walk, echoing
+ * RuneScape's flag/X.
  */
 export class TileGridView {
   private readonly hover: THREE.Mesh;
@@ -16,7 +18,6 @@ export class TileGridView {
   constructor(scene: THREE.Scene, map: TileMap) {
     scene.add(this.buildGround(map));
     scene.add(this.buildGrid(map));
-    scene.add(this.buildObstacles(map));
 
     this.hover = this.buildQuad(0x9fe8ff, 0.3);
     this.hover.visible = false;
@@ -54,9 +55,35 @@ export class TileGridView {
   }
 
   private buildGround(map: TileMap): THREE.Mesh {
-    const geo = new THREE.PlaneGeometry(map.width, map.height);
+    // Subdivided so we can tint it per-vertex; it stays perfectly flat (y = 0)
+    // so the click-to-walk raycast against the ground plane is still exact.
+    const segs = Math.max(map.width, map.height);
+    const geo = new THREE.PlaneGeometry(map.width, map.height, segs, segs);
     geo.rotateX(-Math.PI / 2);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x3c5a3a, roughness: 1 });
+
+    // Drift between a few grass tones with simplex noise, with rarer dirt
+    // patches, so the clearing reads as living turf rather than a flat sheet.
+    const noise = new SimplexNoise();
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const colors = new Float32Array(pos.count * 3);
+    const dark = new THREE.Color(0x35512f);
+    const light = new THREE.Color(0x5a7a44);
+    const dirt = new THREE.Color(0x6b5536);
+    const c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i);
+      const z = pos.getZ(i);
+      const grass = noise.noise(x * 0.12, z * 0.12) * 0.5 + 0.5;
+      const patch = noise.noise(x * 0.05 + 50, z * 0.05 - 50) * 0.5 + 0.5;
+      c.copy(dark).lerp(light, grass);
+      if (patch > 0.82) c.lerp(dirt, (patch - 0.82) / 0.18);
+      colors[i * 3] = c.r;
+      colors[i * 3 + 1] = c.g;
+      colors[i * 3 + 2] = c.b;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 1, envMapIntensity: 0.5 });
     const mesh = new THREE.Mesh(geo, mat);
     // Tile (x, y) is centred on integer coords, so the plane is offset by half.
     mesh.position.set(map.width / 2 - 0.5, 0, map.height / 2 - 0.5);
@@ -75,25 +102,8 @@ export class TileGridView {
     }
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
-    const mat = new THREE.LineBasicMaterial({ color: 0x294a2e, transparent: true, opacity: 0.5 });
+    const mat = new THREE.LineBasicMaterial({ color: 0x223d27, transparent: true, opacity: 0.18 });
     return new THREE.LineSegments(geo, mat);
-  }
-
-  private buildObstacles(map: TileMap): THREE.Group {
-    const group = new THREE.Group();
-    const geo = new THREE.BoxGeometry(0.92, 1.0, 0.92);
-    const mat = new THREE.MeshStandardMaterial({ color: 0x6b6f78, roughness: 0.9 });
-    for (let y = 0; y < map.height; y++) {
-      for (let x = 0; x < map.width; x++) {
-        if (!map.isBlocked(x, y)) continue;
-        const block = new THREE.Mesh(geo, mat);
-        block.position.set(x, 0.5, y);
-        block.castShadow = true;
-        block.receiveShadow = true;
-        group.add(block);
-      }
-    }
-    return group;
   }
 
   private buildQuad(color: number, opacity: number): THREE.Mesh {
