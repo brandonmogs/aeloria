@@ -14,6 +14,7 @@ import { SceneryView } from './render/SceneryView';
 import { WaterView } from './render/WaterView';
 import { EntityView } from './render/EntityView';
 import { InputController } from './input/InputController';
+import { xpForLevel } from './sim/Skills';
 import { Hud } from './ui/Hud';
 import { Compass } from './ui/Compass';
 import { MiniMap } from './ui/MiniMap';
@@ -64,7 +65,8 @@ function runGame(): void {
   const player = world.spawnPlayer(spawn, 'You');
   giveStarterKit(player);
 
-  // A test goblin on the grass south of the moat: 10 HP, respawns 10s after death.
+  // A test goblin on the grass south of the moat: 5 HP like OSRS, respawns
+  // 10s after death.
   world.spawnNpc(
     { x: 22, y: 26 },
     {
@@ -73,7 +75,7 @@ function runGame(): void {
       attack: 1,
       strength: 1,
       defense: 1,
-      maxHitpoints: 10,
+      maxHitpoints: 5,
       attackSpeed: 4,
       respawnTicks: Math.round(10 * TICKS_PER_SECOND),
     },
@@ -131,6 +133,24 @@ function runGame(): void {
     },
   });
   loop.start();
+
+  // Expose a read/drive handle for automated smoke tests and console debugging.
+  // Commands pushed here go through the exact same queue as real input.
+  (window as unknown as Record<string, unknown>).__aeloria = {
+    world,
+    player,
+    push: (cmd: Command) => commandQueue.push(cmd),
+    attack: (npcName: string) => {
+      for (const e of world.entities.values()) {
+        if (e instanceof Npc && e.isAlive && e.name === npcName) {
+          commandQueue.push(attackCommand(player.id, e.id));
+          return e.id;
+        }
+      }
+      return null;
+    },
+    moveTo: (x: number, y: number) => commandQueue.push(moveCommand(player.id, { x, y })),
+  };
 }
 
 /**
@@ -139,6 +159,12 @@ function runGame(): void {
  * placeholder content — real drops and a skills-driven cape come later.
  */
 function giveStarterKit(player: Player): void {
+  // A fresh adventurer, not a newborn: level 10 melee stats so early fights
+  // resolve in a handful of hits instead of a war of 1s.
+  player.skills.addXp('attack', xpForLevel(10));
+  player.skills.addXp('strength', xpForLevel(10));
+  player.skills.addXp('defense', xpForLevel(10));
+
   const inv = player.inventory;
   inv.slots[0] = { id: 'bronze_helm', name: 'Bronze Helmet', icon: '⛑️', equip: 'helmet' };
   inv.slots[1] = { id: 'iron_platebody', name: 'Iron Platebody', icon: '🦺', equip: 'chestplate' };

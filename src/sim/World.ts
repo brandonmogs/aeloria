@@ -102,6 +102,7 @@ export class World {
     const damage = rollDamage(this.profileOf(attacker), this.profileOf(defender), this.rng);
     defender.hitpoints = Math.max(0, defender.hitpoints - damage);
     defender.splatQueue.push(damage);
+    attacker.swingQueue.push(defender.id);
 
     // Combat XP, OSRS-style: 4 per damage to the attack-style skill, plus a
     // third of that (1.33×) to Hitpoints.

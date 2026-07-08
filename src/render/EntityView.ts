@@ -27,8 +27,18 @@ interface Avatar {
   legR: THREE.Object3D;
   armL: THREE.Object3D;
   armR: THREE.Object3D;
+  /** The arm holding the weapon; the one that swings on attack. */
+  weaponArm: THREE.Object3D;
   /** Eased 0..1 gait weight: 0 standing, 1 walking. */
   gait: number;
+  /** Seconds left of the attack-swing animation (0 = not swinging). */
+  swingT: number;
+  /** Seconds left of the hit-flinch animation (0 = not flinching). */
+  flinchT: number;
+  /** Seconds left of the death animation; -1 when alive. */
+  deathT: number;
+  /** Whether the entity was alive last frame, to detect the death transition. */
+  wasAlive: boolean;
   /** Currently worn gear meshes, torn down and rebuilt when equipment changes. */
   gear: THREE.Object3D[];
   /** Signature of the rendered equipment, to detect when a rebuild is needed. */
@@ -51,6 +61,13 @@ interface Splat {
 }
 
 const CAPE_HEIGHT = 0.8;
+
+/** Attack swing duration in seconds — snappy, well inside one game tick. */
+const SWING_TIME = 0.38;
+/** Hit-flinch duration in seconds. */
+const FLINCH_TIME = 0.28;
+/** Death fall duration in seconds. */
+const DEATH_TIME = 0.7;
 
 /**
  * Renders entities as little humanoid adventurers and — crucially — makes their
@@ -84,8 +101,17 @@ export class EntityView {
         this.scene.add(avatar.group);
       }
 
-      // A dead NPC hides until it respawns.
-      avatar.group.visible = !(entity instanceof Npc && entity.isDead);
+      // Death: play a fall-over animation on the tick an NPC dies, then hide
+      // it until it respawns.
+      const dead = entity instanceof Npc && entity.isDead;
+      if (dead && avatar.wasAlive) avatar.deathT = DEATH_TIME;
+      if (!dead && !avatar.wasAlive) {
+        // Respawned: stand back up.
+        avatar.deathT = -1;
+        avatar.group.rotation.x = 0;
+      }
+      avatar.wasAlive = !dead;
+      avatar.group.visible = !dead || avatar.deathT > 0;
 
       // Reflect equipment changes: rebuild the worn gear when it differs from
       // what's currently drawn. Cheap to check every frame; only rebuilds on a
@@ -105,6 +131,20 @@ export class EntityView {
       const moving = !this.prev.equals(this.curr);
       if (moving) {
         avatar.group.rotation.y = Math.atan2(this.curr.x - this.prev.x, this.curr.z - this.prev.z);
+      } else if (entity.targetId !== null && entity.isAlive) {
+        // Standing in combat: square up to the opponent.
+        const foe = this.world.entities.get(entity.targetId);
+        if (foe) {
+          const dx = foe.position.x - entity.position.x;
+          const dz = foe.position.y - entity.position.y;
+          if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
+        }
+      }
+
+      // Drain sim combat events into animation timers.
+      if (entity.swingQueue.length > 0) {
+        avatar.swingT = SWING_TIME;
+        entity.swingQueue.length = 0;
       }
       this.animate(avatar, moving, dt);
       this.updateHealthBar(avatar, entity);
@@ -142,6 +182,7 @@ export class EntityView {
       sprite.position.set(p.x, avatar.barHeight + 0.28, p.z);
       this.scene.add(sprite);
       this.splats.push({ sprite, life: 0.9 });
+      if (damage > 0) avatar.flinchT = FLINCH_TIME; // recoil from a real hit
     }
     entity.splatQueue.length = 0;
   }
@@ -151,6 +192,10 @@ export class EntityView {
       const splat = this.splats[i];
       splat.life -= dt;
       splat.sprite.position.y += dt * 0.7;
+      // Punchy entrance: overshoot the scale for the first instant, then settle.
+      const age = 0.9 - splat.life;
+      const pop = age < 0.1 ? 0.5 + (age / 0.1) * 0.72 : Math.max(1, 1.22 - (age - 0.1) * 1.4);
+      splat.sprite.scale.set(0.5 * pop, 0.5 * pop, 1);
       (splat.sprite.material as THREE.SpriteMaterial).opacity = Math.max(0, Math.min(1, splat.life / 0.3));
       if (splat.life <= 0) {
         this.scene.remove(splat.sprite);
@@ -175,6 +220,37 @@ export class EntityView {
     avatar.armL.rotation.x = -swing;
     avatar.armR.rotation.x = swing;
     avatar.group.position.y = Math.abs(Math.sin(this.clock * 9)) * 0.04 * avatar.gait;
+
+    // Attack: raise the weapon arm overhead, then snap it down, with a small
+    // lunge toward the facing direction at the moment of the strike.
+    if (avatar.swingT > 0) {
+      avatar.swingT = Math.max(0, avatar.swingT - dt);
+      const p = 1 - avatar.swingT / SWING_TIME; // 0 → 1 over the swing
+      const wind = Math.min(1, p / 0.45); // raise phase
+      const strike = p < 0.45 ? 0 : Math.min(1, (p - 0.45) / 0.3); // downswing
+      const raise = -2.3 * Math.sin((wind * Math.PI) / 2);
+      avatar.weaponArm.rotation.x = raise * (1 - strike) + 0.5 * strike;
+
+      const lunge = 0.22 * Math.sin(p * Math.PI);
+      avatar.group.position.x += Math.sin(avatar.group.rotation.y) * lunge;
+      avatar.group.position.z += Math.cos(avatar.group.rotation.y) * lunge;
+    }
+
+    // Flinch: a quick lean back after taking a real hit.
+    let lean = 0;
+    if (avatar.flinchT > 0) {
+      avatar.flinchT = Math.max(0, avatar.flinchT - dt);
+      lean = -0.22 * Math.sin((1 - avatar.flinchT / FLINCH_TIME) * Math.PI);
+    }
+
+    // Death: keel over backwards, then sink slightly before hiding.
+    if (avatar.deathT > 0) {
+      avatar.deathT = Math.max(0, avatar.deathT - dt);
+      const p = 1 - avatar.deathT / DEATH_TIME;
+      lean = (-Math.PI / 2) * Math.min(1, p * 1.4);
+      if (p > 0.7) avatar.group.position.y -= ((p - 0.7) / 0.3) * 0.15;
+    }
+    avatar.group.rotation.x = lean;
 
     if (avatar.cape) this.billowCape(avatar.cape, avatar.gait);
   }
@@ -208,6 +284,8 @@ export class EntityView {
     if (entity instanceof Npc && entity.kind === 'goblin') return buildGoblinAvatar();
 
     const group = new THREE.Group();
+    // Yaw first, then lean: flinch/death tilts happen relative to facing.
+    group.rotation.order = 'YXZ';
 
     const skin = mat(0xe0ac79, 0.65);
     const tunic = mat(0x3f6f4a, 0.7);
@@ -285,7 +363,12 @@ export class EntityView {
       legR,
       armL,
       armR,
+      weaponArm: armL, // the sword hand — see rebuildGear
       gait: 0,
+      swingT: 0,
+      flinchT: 0,
+      deathT: -1,
+      wasAlive: true,
       gear: [],
       gearSig: '',
       hpBar: hp.sprite,
@@ -414,6 +497,8 @@ function clamp01(v: number): number {
 /** A small, hunched green goblin clutching a crude club. */
 function buildGoblinAvatar(): Avatar {
   const group = new THREE.Group();
+  // Yaw first, then lean: flinch/death tilts happen relative to facing.
+  group.rotation.order = 'YXZ';
   const skin = mat(0x6f8f3d, 0.85);
   const cloth = mat(0x6b4a2f, 0.9);
   const eye = mat(0x1c1a12, 0.5);
@@ -485,7 +570,12 @@ function buildGoblinAvatar(): Avatar {
     legR,
     armL,
     armR,
+    weaponArm: armR, // the goblin's club hand
     gait: 0,
+    swingT: 0,
+    flinchT: 0,
+    deathT: -1,
+    wasAlive: true,
     gear: [],
     gearSig: '',
     hpBar: hp.sprite,
@@ -505,6 +595,7 @@ function attachHealthBar(
   canvas.width = 64;
   canvas.height = 12;
   const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace; // canvas pixels are sRGB, not linear
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
   );
@@ -547,6 +638,7 @@ function makeSplatSprite(damage: number): THREE.Sprite {
   ctx.fillText(String(damage), 24, 25);
 
   const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace; // canvas pixels are sRGB, not linear
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
   );

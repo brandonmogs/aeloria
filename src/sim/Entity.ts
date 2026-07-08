@@ -37,6 +37,13 @@ export class Entity {
    */
   readonly splatQueue: number[] = [];
 
+  /**
+   * Target ids of attacks this entity performed since the renderer last looked,
+   * so it can play a swing animation. Render-only: the sim pushes, the view
+   * drains.
+   */
+  readonly swingQueue: number[] = [];
+
   constructor(
     readonly id: number,
     position: Tile,
