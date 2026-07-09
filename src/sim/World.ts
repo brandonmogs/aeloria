@@ -7,6 +7,8 @@ import { Command } from './commands';
 import { Tile, chebyshev } from './coords';
 import { EQUIP_SLOTS } from './Inventory';
 import { CombatProfile, rollDamage, styleSkill } from './combat';
+import { SkillId } from './Skills';
+import { GameEvent } from './events';
 import { WALK_SPEED, RUN_SPEED } from '../engine/constants';
 
 /**
@@ -22,6 +24,9 @@ export class World {
   readonly pathfinder: Pathfinder;
   readonly entities = new Map<number, Entity>();
   tickCount = 0;
+
+  /** Announcements for the UI (XP drops, level-ups, kills). Sim pushes, UI drains. */
+  readonly eventQueue: GameEvent[] = [];
 
   private nextEntityId = 1;
   private playerSpawn: Tile | null = null;
@@ -108,8 +113,8 @@ export class World {
     // third of that (1.33×) to Hitpoints.
     if (attacker instanceof Player && damage > 0) {
       const profile = this.profileOf(attacker);
-      attacker.skills.addXp(styleSkill(profile.style), damage * 4);
-      attacker.skills.addXp('hitpoints', (damage * 4) / 3);
+      this.grantXp(attacker, styleSkill(profile.style), damage * 4);
+      this.grantXp(attacker, 'hitpoints', (damage * 4) / 3);
     }
 
     // Auto-retaliate: an idle defender turns on its attacker.
@@ -117,10 +122,26 @@ export class World {
       defender.targetId = attacker.id;
     }
 
-    if (!defender.isAlive) this.handleDeath(defender);
+    if (!defender.isAlive) this.handleDeath(defender, attacker);
   }
 
-  private handleDeath(victim: Entity): void {
+  /** Award XP with UI events: an XP drop, plus a level-up announcement. */
+  private grantXp(player: Player, skill: SkillId, amount: number): void {
+    const gained = player.skills.addXp(skill, amount);
+    this.eventQueue.push({ type: 'xp', entityId: player.id, skill, amount });
+    if (gained > 0) {
+      const level = player.skills.levelOf(skill);
+      this.eventQueue.push({ type: 'levelup', entityId: player.id, skill, level });
+      // Hitpoints level-ups raise the health pool (and heal the difference).
+      if (skill === 'hitpoints') {
+        const grow = level - player.maxHitpoints;
+        player.maxHitpoints = level;
+        player.hitpoints = Math.min(player.maxHitpoints, player.hitpoints + Math.max(0, grow));
+      }
+    }
+  }
+
+  private handleDeath(victim: Entity, killer?: Entity): void {
     for (const other of this.entities.values()) {
       if (other.targetId === victim.id) other.targetId = null;
     }
@@ -129,7 +150,11 @@ export class World {
 
     if (victim instanceof Npc) {
       victim.respawnTimer = victim.respawnTicks; // stays dead, then returns
+      if (killer instanceof Player) {
+        this.eventQueue.push({ type: 'kill', killerId: killer.id, victimName: victim.name });
+      }
     } else if (victim instanceof Player) {
+      this.eventQueue.push({ type: 'died', entityId: victim.id });
       // Simple death for now: full heal and back to the spawn tile.
       victim.hitpoints = victim.maxHitpoints;
       victim.attackCooldown = 0;

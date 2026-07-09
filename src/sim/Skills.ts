@@ -63,9 +63,11 @@ export class Skills {
     return levelForXp(this.xp[id]);
   }
 
-  /** Award experience, capped at the XP for the max level. */
-  addXp(id: SkillId, amount: number): void {
+  /** Award experience, capped at the XP for the max level. Returns levels gained. */
+  addXp(id: SkillId, amount: number): number {
+    const before = this.levelOf(id);
     this.xp[id] = Math.min(this.xp[id] + amount, xpForLevel(MAX_LEVEL));
+    return this.levelOf(id) - before;
   }
 
   /** Sum of every skill's level — the headline "total level". */

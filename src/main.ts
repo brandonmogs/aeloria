@@ -19,6 +19,9 @@ import { Hud } from './ui/Hud';
 import { Compass } from './ui/Compass';
 import { MiniMap } from './ui/MiniMap';
 import { InventoryPanel } from './ui/InventoryPanel';
+import { MessageLog } from './ui/MessageLog';
+import { XpDrops } from './ui/XpDrops';
+import { SKILL_META } from './ui/skillMeta';
 import { tileToWorld } from './render/coords3d';
 import { buildStartingWorld } from './world/startingWorld';
 import { hasWebGL, showFatal, installErrorHandlers } from './diagnostics';
@@ -92,6 +95,9 @@ function runGame(): void {
   const compass = new Compass(renderer.camera);
   const minimap = new MiniMap(map, world, player.id, renderer.camera, props);
   const panel = new InventoryPanel(player.inventory, player.skills);
+  const log = new MessageLog();
+  const xpDrops = new XpDrops();
+  log.add('Welcome to Aeloria.');
 
   // Start the camera already framing the player instead of flying in from origin.
   renderer.camera.focus.copy(tileToWorld(player.position));
@@ -112,9 +118,39 @@ function runGame(): void {
   });
 
   // --- Game loop -----------------------------------------------------------
+  // Turn sim announcements into UI: XP drops, level-up banners, log lines.
+  const drainEvents = (): void => {
+    for (const ev of world.eventQueue.splice(0)) {
+      switch (ev.type) {
+        case 'xp':
+          if (ev.entityId === player.id) xpDrops.drop(ev.skill, ev.amount);
+          break;
+        case 'levelup':
+          if (ev.entityId === player.id) {
+            xpDrops.levelUp(ev.skill, ev.level);
+            log.add(
+              `Congratulations! Your ${SKILL_META[ev.skill].label} level is now ${ev.level}.`,
+              'levelup',
+            );
+          }
+          break;
+        case 'kill':
+          if (ev.killerId === player.id) log.add(`You have defeated the ${ev.victimName}.`);
+          break;
+        case 'died':
+          if (ev.entityId === player.id) log.add('Oh dear, you are dead!', 'danger');
+          break;
+        case 'message':
+          log.add(ev.text);
+          break;
+      }
+    }
+  };
+
   const loop = new GameLoop({
     onTick: () => {
       world.tick(commandQueue.splice(0));
+      drainEvents();
       panel.refresh(); // reflect XP/level changes from combat this tick
     },
     onRender: (alpha, dt) => {
@@ -139,6 +175,7 @@ function runGame(): void {
   (window as unknown as Record<string, unknown>).__aeloria = {
     world,
     player,
+    xpForLevel,
     push: (cmd: Command) => commandQueue.push(cmd),
     attack: (npcName: string) => {
       for (const e of world.entities.values()) {

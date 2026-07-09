@@ -46,6 +46,141 @@ body {
   user-select: none;
 }
 
+/* Game message log — a quiet scrollback above the controls hint. */
+#message-log {
+  position: fixed;
+  bottom: 34px;
+  left: 12px;
+  width: 340px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  pointer-events: none;
+  user-select: none;
+  font-size: 12px;
+  line-height: 1.45;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+
+.log-line {
+  color: #dce7f7;
+  animation: log-in 0.18s ease-out;
+}
+
+.log-line.log-xp {
+  color: #9fc3e8;
+}
+
+.log-line.log-levelup {
+  color: #f2d06b;
+  font-weight: 700;
+}
+
+.log-line.log-danger {
+  color: #e87a6e;
+  font-weight: 700;
+}
+
+@keyframes log-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Floating XP drops, drifting up just left of the minimap like OSRS. */
+#xp-lane {
+  position: fixed;
+  top: 60px;
+  right: 240px;
+  width: 120px;
+  height: 220px;
+  pointer-events: none;
+  user-select: none;
+}
+
+.xp-drop {
+  position: absolute;
+  top: 150px;
+  right: 0;
+  font: 700 15px ui-monospace, Menlo, Consolas, monospace;
+  color: #efe6c8;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  animation: xp-rise 1.15s ease-out forwards;
+}
+
+@keyframes xp-rise {
+  0% {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  12% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-120px);
+  }
+}
+
+/* Golden level-up banner, front and center for a couple of seconds. */
+.levelup-banner {
+  position: fixed;
+  top: 18%;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 14px 28px;
+  text-align: center;
+  background: linear-gradient(180deg, rgba(38, 30, 12, 0.92), rgba(24, 18, 8, 0.92));
+  border: 1px solid rgba(232, 200, 115, 0.85);
+  border-radius: 10px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 32px rgba(232, 200, 115, 0.25);
+  pointer-events: none;
+  user-select: none;
+  animation: banner 2.6s ease-in-out forwards;
+  z-index: 10;
+}
+
+.levelup-title {
+  font: 700 18px ui-monospace, Menlo, Consolas, monospace;
+  color: #f2d06b;
+  letter-spacing: 0.06em;
+}
+
+.levelup-body {
+  margin-top: 4px;
+  font: 600 13px ui-monospace, Menlo, Consolas, monospace;
+  color: #efe6c8;
+}
+
+@keyframes banner {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-14px) scale(0.92);
+  }
+  8% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0) scale(1.03);
+  }
+  14% {
+    transform: translateX(-50%) scale(1);
+  }
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-10px);
+  }
+}
+
 /* World-view minimap in the top-right; compass pinned to its top-left corner. */
 #compass {
   position: fixed;

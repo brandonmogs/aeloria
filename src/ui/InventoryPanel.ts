@@ -1,5 +1,6 @@
 import { Inventory, EquipSlot, Item, SlotRef, INVENTORY_SIZE } from '../sim/Inventory';
 import { Skills, SkillId, SKILL_IDS } from '../sim/Skills';
+import { SKILL_META } from './skillMeta';
 
 type Tab = 'inventory' | 'armour' | 'skills';
 
@@ -22,16 +23,6 @@ const EQUIP_LAYOUT: ReadonlyArray<EquipCell> = [
   { slot: 'boots', label: 'Boots', col: 2, row: 4 },
   { slot: 'ring', label: 'Ring', col: 3, row: 4 },
 ];
-
-/** Display name and icon for each skill, plus the accent its progress bar uses. */
-const SKILL_META: Record<SkillId, { label: string; icon: string; color: string }> = {
-  attack: { label: 'Attack', icon: '⚔️', color: '#b8453a' },
-  strength: { label: 'Strength', icon: '💪', color: '#4f8a45' },
-  defense: { label: 'Defence', icon: '🛡️', color: '#3f73b0' },
-  hitpoints: { label: 'Hitpoints', icon: '❤️', color: '#c24a4a' },
-  range: { label: 'Ranged', icon: '🏹', color: '#6c9a3f' },
-  magic: { label: 'Magic', icon: '🔮', color: '#7d6ad0' },
-};
 
 /** Live elements for one skill cell, so XP gains can repaint just that cell. */
 interface SkillCell {
