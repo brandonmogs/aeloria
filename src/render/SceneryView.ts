@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
 import { Prop } from '../sim/Scenery';
+import { World } from '../sim/World';
+
+/** The intact and depleted looks of one gatherable prop, toggled by the sim. */
+interface ResourceVisual {
+  main: THREE.Object3D;
+  depleted: THREE.Object3D;
+}
 
 /**
  * Renders the static, decorative world: trees, boulders, and the castle. Each
@@ -19,6 +26,8 @@ export class SceneryView {
   private readonly root = new THREE.Group();
   private readonly geo = makeGeometries();
   private readonly mat = makeMaterials();
+  /** Toggleable visuals for gatherable props, keyed by "x,y". */
+  private readonly resources = new Map<string, ResourceVisual>();
 
   constructor(scene: THREE.Scene, props: ReadonlyArray<Prop>) {
     for (const prop of props) {
@@ -27,8 +36,57 @@ export class SceneryView {
         obj.position.set(prop.tile.x, 0, prop.tile.y);
         this.root.add(obj);
       }
+
+      // Trees and rocks get a hidden "depleted" counterpart (stump / rubble)
+      // so the sim can visibly consume them.
+      if (obj && (prop.kind === 'tree' || prop.kind === 'rock')) {
+        const depleted = prop.kind === 'tree' ? this.buildStump(prop.seed) : this.buildRubble(prop.seed);
+        depleted.position.set(prop.tile.x, 0, prop.tile.y);
+        depleted.visible = false;
+        this.root.add(depleted);
+        this.resources.set(`${prop.tile.x},${prop.tile.y}`, { main: obj, depleted });
+      }
     }
     scene.add(this.root);
+  }
+
+  /** Swap gatherable props between intact and depleted to match the sim. */
+  sync(world: World): void {
+    for (const node of world.resourceNodes.values()) {
+      const visual = this.resources.get(`${node.tile.x},${node.tile.y}`);
+      if (!visual) continue;
+      const spent = node.regrowTimer > 0;
+      if (visual.main.visible === spent) {
+        visual.main.visible = !spent;
+        visual.depleted.visible = spent;
+      }
+    }
+  }
+
+  /** What's left after a tree is felled: a low cut trunk. */
+  private buildStump(seed: number): THREE.Object3D {
+    const g = new THREE.Group();
+    const stump = new THREE.Mesh(this.geo.stump, this.mat.bark);
+    stump.position.y = 0.14;
+    g.add(this.shadowed(stump));
+    g.rotation.y = seed * Math.PI * 2;
+    return g;
+  }
+
+  /** What's left after a rock is mined out: low, darker rubble. */
+  private buildRubble(seed: number): THREE.Object3D {
+    const g = new THREE.Group();
+    for (let i = 0; i < 3; i++) {
+      const s = seedAt(seed, i + 20);
+      const variant = this.geo.rocks[Math.floor(seedAt(seed, i + 23) * this.geo.rocks.length)];
+      const rock = new THREE.Mesh(variant, this.mat.rubble);
+      const size = 0.1 + s * 0.12;
+      rock.scale.set(size, size * 0.6, size);
+      rock.position.set((s - 0.5) * 0.5, size * 0.25, (seedAt(seed, i + 27) - 0.5) * 0.5);
+      rock.rotation.set(s * 3, s * 6, s * 2);
+      g.add(this.shadowed(rock));
+    }
+    return g;
   }
 
   private build(prop: Prop): THREE.Object3D | null {
@@ -206,6 +264,7 @@ function seedAt(seed: number, i: number): number {
 function makeGeometries() {
   return {
     trunk: new THREE.CylinderGeometry(0.13, 0.2, 1.1, 12),
+    stump: new THREE.CylinderGeometry(0.17, 0.21, 0.28, 12),
     canopy: new THREE.IcosahedronGeometry(1, 2),
     rocks: [0, 1, 2, 3].map((i) => makeBoulder(i)),
     wall: new RoundedBoxGeometry(1.0, 2.2, 1.0, 4, 0.07),
@@ -252,6 +311,7 @@ function makeMaterials() {
     leafA: new THREE.MeshStandardMaterial({ color: 0x3f7d3a, roughness: 0.85, envMapIntensity: 0.4 }),
     leafB: new THREE.MeshStandardMaterial({ color: 0x559449, roughness: 0.85, envMapIntensity: 0.4 }),
     rock: new THREE.MeshStandardMaterial({ color: 0x868c96, roughness: 0.95, envMapIntensity: 0.5 }),
+    rubble: new THREE.MeshStandardMaterial({ color: 0x5c6069, roughness: 0.98, envMapIntensity: 0.4 }),
     stone,
     roof: new THREE.MeshStandardMaterial({ color: 0x873f3f, roughness: 0.6, envMapIntensity: 0.7 }),
     gold: new THREE.MeshStandardMaterial({ color: 0xe8c66a, roughness: 0.25, metalness: 0.85, envMapIntensity: 1 }),

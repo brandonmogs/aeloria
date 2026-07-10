@@ -139,6 +139,14 @@ export class EntityView {
           const dz = foe.position.y - entity.position.y;
           if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
         }
+      } else if (entity instanceof Player && entity.gatherTarget !== null) {
+        // Working a tree or rock: face it.
+        const node = this.world.resourceNodes.get(entity.gatherTarget);
+        if (node) {
+          const dx = node.tile.x - entity.position.x;
+          const dz = node.tile.y - entity.position.y;
+          if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
+        }
       }
 
       // Drain sim combat events into animation timers.

@@ -5,7 +5,7 @@ import { World } from './sim/World';
 import { Player } from './sim/Player';
 import { Npc } from './sim/Npc';
 import { Tile, tilesEqual } from './sim/coords';
-import { Command, moveCommand, attackCommand, pickupCommand } from './sim/commands';
+import { Command, moveCommand, attackCommand, pickupCommand, gatherCommand } from './sim/commands';
 import { GameLoop } from './engine/GameLoop';
 import { TICKS_PER_SECOND } from './engine/constants';
 import { Renderer } from './render/Renderer';
@@ -69,6 +69,13 @@ function runGame(): void {
   const player = world.spawnPlayer(spawn, 'You');
   giveStarterKit(player);
 
+  // Every tree and rock prop is also a gatherable resource node in the sim.
+  for (const prop of props) {
+    if (prop.kind === 'tree' || prop.kind === 'rock') {
+      world.addResourceNode(prop.kind, prop.tile);
+    }
+  }
+
   // A test goblin on the grass south of the moat: 5 HP like OSRS, respawns
   // 10s after death.
   world.spawnNpc(
@@ -93,7 +100,7 @@ function runGame(): void {
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const renderer = new Renderer(canvas);
   const tileView = new TileGridView(renderer.scene, map);
-  new SceneryView(renderer.scene, props);
+  const scenery = new SceneryView(renderer.scene, props);
   const water = new WaterView(renderer.scene, moat, renderer.sunDirection);
   const entityView = new EntityView(renderer.scene, world);
   const groundView = new GroundItemView(renderer.scene, world);
@@ -117,10 +124,13 @@ function runGame(): void {
     // bare ground walks there.
     const npc = npcAt(world, target);
     const ground = world.groundItemAt(target);
+    const node = world.resourceNodeAt(target);
     if (npc) {
       commandQueue.push(attackCommand(player.id, npc.id));
     } else if (ground) {
       commandQueue.push(pickupCommand(player.id, ground.id));
+    } else if (node && node.regrowTimer <= 0) {
+      commandQueue.push(gatherCommand(player.id, node.id));
     } else {
       commandQueue.push(moveCommand(player.id, target));
       tileView.showClickMarker(target);
@@ -167,6 +177,7 @@ function runGame(): void {
       water.update(dt);
       entityView.sync(alpha, dt);
       groundView.sync(dt);
+      scenery.sync(world);
 
       const followTarget = entityView.positionOf(player.id);
       if (followTarget) renderer.camera.follow(followTarget);
@@ -198,6 +209,11 @@ function runGame(): void {
       return null;
     },
     moveTo: (x: number, y: number) => commandQueue.push(moveCommand(player.id, { x, y })),
+    gather: (x: number, y: number) => {
+      const node = world.resourceNodeAt({ x, y });
+      if (node) commandQueue.push(gatherCommand(player.id, node.id));
+      return node?.id ?? null;
+    },
   };
 }
 

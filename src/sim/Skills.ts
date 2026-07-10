@@ -6,7 +6,15 @@
  * Only the starting set is modelled for now (combat skills). More slot in by
  * extending {@link SkillId} and {@link SKILL_IDS}.
  */
-export type SkillId = 'attack' | 'strength' | 'defense' | 'hitpoints' | 'range' | 'magic';
+export type SkillId =
+  | 'attack'
+  | 'strength'
+  | 'defense'
+  | 'hitpoints'
+  | 'range'
+  | 'magic'
+  | 'woodcutting'
+  | 'mining';
 
 /** Display/storage order. */
 export const SKILL_IDS: readonly SkillId[] = [
@@ -16,6 +24,8 @@ export const SKILL_IDS: readonly SkillId[] = [
   'hitpoints',
   'range',
   'magic',
+  'woodcutting',
+  'mining',
 ];
 
 export const MAX_LEVEL = 99;
@@ -53,6 +63,8 @@ export class Skills {
     hitpoints: xpForLevel(10),
     range: 0,
     magic: 0,
+    woodcutting: 0,
+    mining: 0,
   };
 
   xpOf(id: SkillId): number {

@@ -23,6 +23,11 @@ export type Command =
       type: 'pickup';
       entityId: number;
       groundItemId: number;
+    }
+  | {
+      type: 'gather';
+      entityId: number;
+      nodeId: number;
     };
 
 export function moveCommand(entityId: number, target: Tile, run = false): Command {
@@ -35,4 +40,8 @@ export function attackCommand(entityId: number, targetId: number): Command {
 
 export function pickupCommand(entityId: number, groundItemId: number): Command {
   return { type: 'pickup', entityId, groundItemId };
+}
+
+export function gatherCommand(entityId: number, nodeId: number): Command {
+  return { type: 'gather', entityId, nodeId };
 }

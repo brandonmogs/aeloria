@@ -8,4 +8,6 @@ export const SKILL_META: Record<SkillId, { label: string; icon: string; color: s
   hitpoints: { label: 'Hitpoints', icon: '❤️', color: '#c24a4a' },
   range: { label: 'Ranged', icon: '🏹', color: '#6c9a3f' },
   magic: { label: 'Magic', icon: '🔮', color: '#7d6ad0' },
+  woodcutting: { label: 'Woodcutting', icon: '🪓', color: '#8a6b3f' },
+  mining: { label: 'Mining', icon: '⛏️', color: '#7a8494' },
 };

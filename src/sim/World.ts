@@ -10,6 +10,7 @@ import { CombatProfile, rollDamage, styleSkill } from './combat';
 import { SkillId } from './Skills';
 import { GameEvent } from './events';
 import { GroundItem, GROUND_ITEM_TTL } from './GroundItem';
+import { ResourceKind, ResourceNode, RESOURCE_DEFS, gatherChance } from './gathering';
 import { WALK_SPEED, RUN_SPEED } from '../engine/constants';
 
 /**
@@ -32,8 +33,12 @@ export class World {
   /** Items lying on the ground, keyed by their ground-item id. */
   readonly groundItems = new Map<number, GroundItem>();
 
+  /** Gatherable trees and rocks, keyed by node id. */
+  readonly resourceNodes = new Map<number, ResourceNode>();
+
   private nextEntityId = 1;
   private nextGroundItemId = 1;
+  private nextNodeId = 1;
   private playerSpawn: Tile | null = null;
   private readonly rng = mulberry32(0x9e3779b9);
 
@@ -61,9 +66,25 @@ export class World {
     this.updateCombat();
     this.moveEntities();
     this.updatePickups();
+    this.updateGathering();
     this.updateGroundItems();
     this.updateRespawns();
     this.tickCount++;
+  }
+
+  /** Register a gatherable node (the world builder calls this for trees/rocks). */
+  addResourceNode(kind: ResourceKind, tile: Tile): ResourceNode {
+    const node: ResourceNode = { id: this.nextNodeId++, kind, tile, regrowTimer: 0 };
+    this.resourceNodes.set(node.id, node);
+    return node;
+  }
+
+  /** The gatherable node on a tile, if any. */
+  resourceNodeAt(tile: Tile): ResourceNode | null {
+    for (const node of this.resourceNodes.values()) {
+      if (tilesEqual(node.tile, tile)) return node;
+    }
+    return null;
   }
 
   /** Place an item on the ground; it despawns after {@link GROUND_ITEM_TTL} ticks. */
@@ -91,23 +112,40 @@ export class World {
       const entity = this.entities.get(cmd.entityId);
       if (!entity) continue;
 
+      // Any new intent replaces the previous one wholesale.
+      const clearIntents = (): void => {
+        entity.targetId = null;
+        if (entity instanceof Player) {
+          entity.pickupTarget = null;
+          entity.gatherTarget = null;
+        }
+      };
+
       if (cmd.type === 'move') {
-        entity.targetId = null; // walking somewhere cancels the current fight
-        if (entity instanceof Player) entity.pickupTarget = null;
+        clearIntents();
         entity.running = cmd.run ?? entity.running;
         entity.path = this.pathfinder.findPath(entity.position, cmd.target);
       } else if (cmd.type === 'attack') {
         const target = this.entities.get(cmd.targetId);
         if (target && target.isAlive && target.id !== entity.id) {
+          clearIntents();
           entity.targetId = cmd.targetId;
-          if (entity instanceof Player) entity.pickupTarget = null;
         }
       } else if (cmd.type === 'pickup' && entity instanceof Player) {
         const ground = this.groundItems.get(cmd.groundItemId);
         if (ground) {
-          entity.targetId = null;
+          clearIntents();
           entity.pickupTarget = ground.id;
           entity.path = this.pathfinder.findPath(entity.position, ground.tile);
+        }
+      } else if (cmd.type === 'gather' && entity instanceof Player) {
+        const node = this.resourceNodes.get(cmd.nodeId);
+        if (node && node.regrowTimer <= 0) {
+          clearIntents();
+          entity.gatherTarget = node.id;
+          const dest = this.adjacentDestination(entity.position, node.tile);
+          entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
+          this.eventQueue.push({ type: 'message', text: RESOURCE_DEFS[node.kind].startMsg });
         }
       }
     }
@@ -229,10 +267,50 @@ export class World {
     }
   }
 
-  /** Remove ground items whose despawn tick has passed. */
+  /** Players beside their gather target chop/mine: a success roll per tick. */
+  private updateGathering(): void {
+    for (const entity of this.entities.values()) {
+      if (!(entity instanceof Player) || entity.gatherTarget === null) continue;
+
+      const node = this.resourceNodes.get(entity.gatherTarget);
+      if (!node || node.regrowTimer > 0) {
+        entity.gatherTarget = null; // depleted under us (or gone)
+        continue;
+      }
+      if (chebyshev(entity.position, node.tile) > 1) continue; // still walking
+
+      entity.path.length = 0; // in position — stand and work
+      const def = RESOURCE_DEFS[node.kind];
+
+      const free = entity.inventory.firstFreeSlot();
+      if (free < 0) {
+        this.eventQueue.push({
+          type: 'message',
+          text: `Your backpack is too full to hold any more ${def.item.name.toLowerCase()}.`,
+        });
+        entity.gatherTarget = null;
+        continue;
+      }
+
+      // Swing every tick (the renderer animates it); roll for the harvest.
+      entity.swingQueue.push(node.id);
+      if (this.rng() < gatherChance(def, entity.skills.levelOf(def.skill))) {
+        entity.inventory.slots[free] = def.item;
+        this.grantXp(entity, def.skill, def.xp);
+        this.eventQueue.push({ type: 'message', text: def.successMsg });
+        node.regrowTimer = def.regrowTicks;
+        entity.gatherTarget = null;
+      }
+    }
+  }
+
+  /** Remove ground items whose despawn tick has passed; regrow spent nodes. */
   private updateGroundItems(): void {
     for (const [id, ground] of this.groundItems) {
       if (this.tickCount >= ground.despawnAtTick) this.groundItems.delete(id);
+    }
+    for (const node of this.resourceNodes.values()) {
+      if (node.regrowTimer > 0) node.regrowTimer--;
     }
   }
 

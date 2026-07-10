@@ -15,6 +15,9 @@ export class Player extends Entity {
   /** Ground item this player is walking toward to pick up, or null. */
   pickupTarget: number | null = null;
 
+  /** Resource node this player is gathering (or walking toward), or null. */
+  gatherTarget: number | null = null;
+
   /**
    * Whether this player has earned the max cape (level 99 in every skill). The
    * skills system doesn't exist yet, so this is set manually for now; once it
