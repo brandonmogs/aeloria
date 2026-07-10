@@ -18,6 +18,11 @@ export type Command =
       type: 'attack';
       entityId: number;
       targetId: number;
+    }
+  | {
+      type: 'pickup';
+      entityId: number;
+      groundItemId: number;
     };
 
 export function moveCommand(entityId: number, target: Tile, run = false): Command {
@@ -26,4 +31,8 @@ export function moveCommand(entityId: number, target: Tile, run = false): Comman
 
 export function attackCommand(entityId: number, targetId: number): Command {
   return { type: 'attack', entityId, targetId };
+}
+
+export function pickupCommand(entityId: number, groundItemId: number): Command {
+  return { type: 'pickup', entityId, groundItemId };
 }

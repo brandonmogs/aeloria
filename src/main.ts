@@ -5,7 +5,7 @@ import { World } from './sim/World';
 import { Player } from './sim/Player';
 import { Npc } from './sim/Npc';
 import { Tile, tilesEqual } from './sim/coords';
-import { Command, moveCommand, attackCommand } from './sim/commands';
+import { Command, moveCommand, attackCommand, pickupCommand } from './sim/commands';
 import { GameLoop } from './engine/GameLoop';
 import { TICKS_PER_SECOND } from './engine/constants';
 import { Renderer } from './render/Renderer';
@@ -13,6 +13,7 @@ import { TileGridView } from './render/TileGridView';
 import { SceneryView } from './render/SceneryView';
 import { WaterView } from './render/WaterView';
 import { EntityView } from './render/EntityView';
+import { GroundItemView } from './render/GroundItemView';
 import { InputController } from './input/InputController';
 import { xpForLevel } from './sim/Skills';
 import { Hud } from './ui/Hud';
@@ -81,6 +82,10 @@ function runGame(): void {
       maxHitpoints: 5,
       attackSpeed: 4,
       respawnTicks: Math.round(10 * TICKS_PER_SECOND),
+      drops: [
+        { item: { id: 'bones', name: 'Bones', icon: '🦴' }, chance: 1 },
+        { item: { id: 'coins', name: 'Coins', icon: '🪙' }, chance: 0.5 },
+      ],
     },
   );
 
@@ -91,6 +96,7 @@ function runGame(): void {
   new SceneryView(renderer.scene, props);
   const water = new WaterView(renderer.scene, moat, renderer.sunDirection);
   const entityView = new EntityView(renderer.scene, world);
+  const groundView = new GroundItemView(renderer.scene, world);
   const hud = new Hud();
   const compass = new Compass(renderer.camera);
   const minimap = new MiniMap(map, world, player.id, renderer.camera, props);
@@ -107,10 +113,14 @@ function runGame(): void {
   // queue is the stand-in for "messages sent to the server".
   const commandQueue: Command[] = [];
   const input = new InputController(canvas, renderer.camera, (target) => {
-    // Clicking a living NPC attacks it; clicking the ground walks there.
+    // Clicking a living NPC attacks it; a ground item walks over and takes it;
+    // bare ground walks there.
     const npc = npcAt(world, target);
+    const ground = world.groundItemAt(target);
     if (npc) {
       commandQueue.push(attackCommand(player.id, npc.id));
+    } else if (ground) {
+      commandQueue.push(pickupCommand(player.id, ground.id));
     } else {
       commandQueue.push(moveCommand(player.id, target));
       tileView.showClickMarker(target);
@@ -156,6 +166,7 @@ function runGame(): void {
     onRender: (alpha, dt) => {
       water.update(dt);
       entityView.sync(alpha, dt);
+      groundView.sync(dt);
 
       const followTarget = entityView.positionOf(player.id);
       if (followTarget) renderer.camera.follow(followTarget);

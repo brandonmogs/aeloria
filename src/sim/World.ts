@@ -4,11 +4,12 @@ import { Entity } from './Entity';
 import { Player } from './Player';
 import { Npc, NpcConfig } from './Npc';
 import { Command } from './commands';
-import { Tile, chebyshev } from './coords';
-import { EQUIP_SLOTS } from './Inventory';
+import { Tile, chebyshev, tilesEqual } from './coords';
+import { EQUIP_SLOTS, Item } from './Inventory';
 import { CombatProfile, rollDamage, styleSkill } from './combat';
 import { SkillId } from './Skills';
 import { GameEvent } from './events';
+import { GroundItem, GROUND_ITEM_TTL } from './GroundItem';
 import { WALK_SPEED, RUN_SPEED } from '../engine/constants';
 
 /**
@@ -28,7 +29,11 @@ export class World {
   /** Announcements for the UI (XP drops, level-ups, kills). Sim pushes, UI drains. */
   readonly eventQueue: GameEvent[] = [];
 
+  /** Items lying on the ground, keyed by their ground-item id. */
+  readonly groundItems = new Map<number, GroundItem>();
+
   private nextEntityId = 1;
+  private nextGroundItemId = 1;
   private playerSpawn: Tile | null = null;
   private readonly rng = mulberry32(0x9e3779b9);
 
@@ -55,8 +60,30 @@ export class World {
     this.applyCommands(commands);
     this.updateCombat();
     this.moveEntities();
+    this.updatePickups();
+    this.updateGroundItems();
     this.updateRespawns();
     this.tickCount++;
+  }
+
+  /** Place an item on the ground; it despawns after {@link GROUND_ITEM_TTL} ticks. */
+  dropItem(item: Item, tile: Tile): GroundItem {
+    const ground: GroundItem = {
+      id: this.nextGroundItemId++,
+      item,
+      tile,
+      despawnAtTick: this.tickCount + GROUND_ITEM_TTL,
+    };
+    this.groundItems.set(ground.id, ground);
+    return ground;
+  }
+
+  /** The topmost ground item on a tile, if any. */
+  groundItemAt(tile: Tile): GroundItem | null {
+    for (const ground of this.groundItems.values()) {
+      if (tilesEqual(ground.tile, tile)) return ground;
+    }
+    return null;
   }
 
   private applyCommands(commands: Command[]): void {
@@ -66,12 +93,21 @@ export class World {
 
       if (cmd.type === 'move') {
         entity.targetId = null; // walking somewhere cancels the current fight
+        if (entity instanceof Player) entity.pickupTarget = null;
         entity.running = cmd.run ?? entity.running;
         entity.path = this.pathfinder.findPath(entity.position, cmd.target);
       } else if (cmd.type === 'attack') {
         const target = this.entities.get(cmd.targetId);
         if (target && target.isAlive && target.id !== entity.id) {
           entity.targetId = cmd.targetId;
+          if (entity instanceof Player) entity.pickupTarget = null;
+        }
+      } else if (cmd.type === 'pickup' && entity instanceof Player) {
+        const ground = this.groundItems.get(cmd.groundItemId);
+        if (ground) {
+          entity.targetId = null;
+          entity.pickupTarget = ground.id;
+          entity.path = this.pathfinder.findPath(entity.position, ground.tile);
         }
       }
     }
@@ -153,6 +189,10 @@ export class World {
       if (killer instanceof Player) {
         this.eventQueue.push({ type: 'kill', killerId: killer.id, victimName: victim.name });
       }
+      // Roll the drop table onto the tile the NPC died on.
+      for (const entry of victim.drops) {
+        if (this.rng() < entry.chance) this.dropItem(entry.item, victim.position);
+      }
     } else if (victim instanceof Player) {
       this.eventQueue.push({ type: 'died', entityId: victim.id });
       // Simple death for now: full heal and back to the spawn tile.
@@ -162,6 +202,37 @@ export class World {
         victim.position = this.playerSpawn;
         victim.previousPosition = this.playerSpawn;
       }
+    }
+  }
+
+  /** Players standing on their pickup target collect it into the backpack. */
+  private updatePickups(): void {
+    for (const entity of this.entities.values()) {
+      if (!(entity instanceof Player) || entity.pickupTarget === null) continue;
+
+      const ground = this.groundItems.get(entity.pickupTarget);
+      if (!ground) {
+        entity.pickupTarget = null; // despawned or someone else took it
+        continue;
+      }
+      if (!tilesEqual(entity.position, ground.tile)) continue; // still walking
+
+      const free = entity.inventory.firstFreeSlot();
+      if (free < 0) {
+        this.eventQueue.push({ type: 'message', text: "You don't have enough inventory space." });
+      } else {
+        entity.inventory.slots[free] = ground.item;
+        this.groundItems.delete(ground.id);
+        this.eventQueue.push({ type: 'message', text: `You pick up the ${ground.item.name}.` });
+      }
+      entity.pickupTarget = null;
+    }
+  }
+
+  /** Remove ground items whose despawn tick has passed. */
+  private updateGroundItems(): void {
+    for (const [id, ground] of this.groundItems) {
+      if (this.tickCount >= ground.despawnAtTick) this.groundItems.delete(id);
     }
   }
 

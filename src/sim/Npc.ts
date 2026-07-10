@@ -1,9 +1,17 @@
 import { Entity } from './Entity';
 import { Tile } from './coords';
 import { AttackStyle } from './combat';
+import { Item } from './Inventory';
 
 /** What the renderer should draw this NPC as. */
 export type NpcKind = 'goblin';
+
+/** One entry in an NPC's drop table: the item and its per-kill drop chance. */
+export interface DropEntry {
+  item: Item;
+  /** 0..1; 1 is a guaranteed drop. */
+  chance: number;
+}
 
 export interface NpcConfig {
   name: string;
@@ -18,6 +26,8 @@ export interface NpcConfig {
   respawnTicks: number;
   /** Whether it strikes back when attacked. */
   aggressive?: boolean;
+  /** Items rolled onto the ground when this NPC dies. */
+  drops?: DropEntry[];
 }
 
 /**
@@ -37,6 +47,7 @@ export class Npc extends Entity {
   readonly aggressive: boolean;
   readonly spawnTile: Tile;
   readonly style: AttackStyle = 'aggressive';
+  readonly drops: DropEntry[];
 
   /** Set while dead; counts down to respawn. */
   respawnTimer = 0;
@@ -51,6 +62,7 @@ export class Npc extends Entity {
     this.attackSpeed = config.attackSpeed;
     this.respawnTicks = config.respawnTicks;
     this.aggressive = config.aggressive ?? true;
+    this.drops = config.drops ?? [];
     this.spawnTile = position;
     this.maxHitpoints = config.maxHitpoints;
     this.hitpoints = config.maxHitpoints;
