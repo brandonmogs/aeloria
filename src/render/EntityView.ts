@@ -289,18 +289,92 @@ export class EntityView {
   }
 
   private createAvatar(entity: Entity): Avatar {
-    if (entity instanceof Npc && entity.kind === 'goblin') return buildGoblinAvatar();
+    if (entity instanceof Npc) {
+      if (entity.kind === 'goblin') return buildGoblinAvatar();
+      if (entity.kind === 'rat') return buildRatAvatar();
+      if (entity.kind === 'guard') {
+        // Castle guards are the human rig in steel and crimson.
+        return buildHumanAvatar({ skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x5a2f2f, leather: 0x3a3f4a });
+      }
+    }
+    return buildHumanAvatar({ skin: 0xe0ac79, tunic: 0x3f6f4a, trouser: 0x4a4754, leather: 0x4a3525 });
+  }
 
-    const group = new THREE.Group();
-    // Yaw first, then lean: flinch/death tilts happen relative to facing.
-    group.rotation.order = 'YXZ';
+  /** Tear down the worn gear and rebuild it from the current equipment. */
+  private rebuildGear(avatar: Avatar, eq: Record<EquipSlot, Item | null>): void {
+    for (const obj of avatar.gear) obj.parent?.remove(obj);
+    avatar.gear = [];
+    avatar.cape = undefined;
 
-    const skin = mat(0xe0ac79, 0.65);
-    const tunic = mat(0x3f6f4a, 0.7);
-    const trouser = mat(0x4a4754, 0.8);
-    const leather = mat(0x4a3525, 0.8);
+    const add = (obj: THREE.Object3D, parent: THREE.Object3D): void => {
+      obj.traverse((o) => {
+        if (o instanceof THREE.Mesh) o.castShadow = true;
+      });
+      parent.add(obj);
+      avatar.gear.push(obj);
+    };
 
-    // Torso — a smoothly revolved profile (narrow waist, fuller chest), then
+    if (eq.helmet) add(buildHelmet(eq.helmet), avatar.group);
+    if (eq.chestplate) add(buildChest(eq.chestplate), avatar.group);
+    if (eq.legs) {
+      add(buildLegGuard(eq.legs), avatar.legL);
+      add(buildLegGuard(eq.legs), avatar.legR);
+    }
+    if (eq.boots) {
+      add(buildBoot(eq.boots), avatar.legL);
+      add(buildBoot(eq.boots), avatar.legR);
+    }
+    if (eq.gloves) {
+      add(buildGlove(eq.gloves), avatar.armL);
+      add(buildGlove(eq.gloves), avatar.armR);
+    }
+    // armL sits on the body's right side as seen facing north, armR on the left.
+    if (eq.weapon) add(buildWeapon(eq.weapon), avatar.armL); // sword on the right
+    if (eq.shield) add(buildShield(eq.shield), avatar.armR); // shield on the left
+
+    if (eq.cape) {
+      const { cloth, clasp, cape } = this.createCape();
+      add(cloth, avatar.group);
+      add(clasp, avatar.group);
+      avatar.cape = cape;
+    }
+  }
+
+  /** Build the animated cape cloth plus its gold neck clasp. */
+  private createCape(): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cape } {
+    const cape = makeCape();
+    const cloth = new THREE.Mesh(cape.geo, makeCapeMaterial());
+    cloth.position.set(0, 1.17, -0.12); // off the back of the shoulders
+    cloth.rotation.x = 0.18;
+    const clasp = new THREE.Mesh(
+      new THREE.SphereGeometry(0.045, 12, 10),
+      new THREE.MeshStandardMaterial({ color: 0xe8c66a, metalness: 0.8, roughness: 0.3 }),
+    );
+    clasp.position.set(0, 1.21, -0.03);
+    return { cloth, clasp, cape };
+  }
+}
+
+/** The colour set a human avatar is dressed in. */
+interface HumanPalette {
+  skin: number;
+  tunic: number;
+  trouser: number;
+  leather: number;
+}
+
+/** The standard human rig: torso, head, four swinging limbs, health bar. */
+function buildHumanAvatar(palette: HumanPalette): Avatar {
+  const group = new THREE.Group();
+  // Yaw first, then lean: flinch/death tilts happen relative to facing.
+  group.rotation.order = 'YXZ';
+
+  const skin = mat(palette.skin, 0.65);
+  const tunic = mat(palette.tunic, 0.7);
+  const trouser = mat(palette.trouser, 0.8);
+  const leather = mat(palette.leather, 0.8);
+
+  // Torso — a smoothly revolved profile (narrow waist, fuller chest), then
     // flattened front-to-back. A curved surface like this is what stops it
     // reading as a box the way flat-faced geometry does.
     const torso = mesh(makeTorso(), tunic);
@@ -385,61 +459,6 @@ export class EntityView {
       lastHpFrac: -1,
       barHeight,
     };
-  }
-
-  /** Tear down the worn gear and rebuild it from the current equipment. */
-  private rebuildGear(avatar: Avatar, eq: Record<EquipSlot, Item | null>): void {
-    for (const obj of avatar.gear) obj.parent?.remove(obj);
-    avatar.gear = [];
-    avatar.cape = undefined;
-
-    const add = (obj: THREE.Object3D, parent: THREE.Object3D): void => {
-      obj.traverse((o) => {
-        if (o instanceof THREE.Mesh) o.castShadow = true;
-      });
-      parent.add(obj);
-      avatar.gear.push(obj);
-    };
-
-    if (eq.helmet) add(buildHelmet(eq.helmet), avatar.group);
-    if (eq.chestplate) add(buildChest(eq.chestplate), avatar.group);
-    if (eq.legs) {
-      add(buildLegGuard(eq.legs), avatar.legL);
-      add(buildLegGuard(eq.legs), avatar.legR);
-    }
-    if (eq.boots) {
-      add(buildBoot(eq.boots), avatar.legL);
-      add(buildBoot(eq.boots), avatar.legR);
-    }
-    if (eq.gloves) {
-      add(buildGlove(eq.gloves), avatar.armL);
-      add(buildGlove(eq.gloves), avatar.armR);
-    }
-    // armL sits on the body's right side as seen facing north, armR on the left.
-    if (eq.weapon) add(buildWeapon(eq.weapon), avatar.armL); // sword on the right
-    if (eq.shield) add(buildShield(eq.shield), avatar.armR); // shield on the left
-
-    if (eq.cape) {
-      const { cloth, clasp, cape } = this.createCape();
-      add(cloth, avatar.group);
-      add(clasp, avatar.group);
-      avatar.cape = cape;
-    }
-  }
-
-  /** Build the animated cape cloth plus its gold neck clasp. */
-  private createCape(): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cape } {
-    const cape = makeCape();
-    const cloth = new THREE.Mesh(cape.geo, makeCapeMaterial());
-    cloth.position.set(0, 1.17, -0.12); // off the back of the shoulders
-    cloth.rotation.x = 0.18;
-    const clasp = new THREE.Mesh(
-      new THREE.SphereGeometry(0.045, 12, 10),
-      new THREE.MeshStandardMaterial({ color: 0xe8c66a, metalness: 0.8, roughness: 0.3 }),
-    );
-    clasp.position.set(0, 1.21, -0.03);
-    return { cloth, clasp, cape };
-  }
 }
 
 /** Stable string of equipped item ids, so EntityView can spot a change cheaply. */
@@ -579,6 +598,82 @@ function buildGoblinAvatar(): Avatar {
     armL,
     armR,
     weaponArm: armR, // the goblin's club hand
+    gait: 0,
+    swingT: 0,
+    flinchT: 0,
+    deathT: -1,
+    wasAlive: true,
+    gear: [],
+    gearSig: '',
+    hpBar: hp.sprite,
+    hpCanvas: hp.canvas,
+    hpTex: hp.tex,
+    lastHpFrac: -1,
+    barHeight,
+  };
+}
+
+/** A scruffy giant rat: low body, pointed snout, bald tail, four stubby legs. */
+function buildRatAvatar(): Avatar {
+  const group = new THREE.Group();
+  group.rotation.order = 'YXZ';
+  const fur = mat(0x71604c, 0.9);
+  const dark = mat(0x4c4034, 0.9);
+  const pink = mat(0xc98b8b, 0.75);
+
+  const body = mesh(new THREE.SphereGeometry(0.24, 16, 12), fur);
+  body.position.set(0, 0.24, -0.05);
+  body.scale.set(0.85, 0.8, 1.35);
+  group.add(body);
+
+  const head = mesh(new THREE.SphereGeometry(0.14, 14, 10), fur);
+  head.position.set(0, 0.28, 0.28);
+  head.scale.set(0.9, 0.9, 1.15);
+  group.add(head);
+  const snout = mesh(new THREE.ConeGeometry(0.06, 0.16, 8), pink);
+  snout.rotation.x = Math.PI / 2;
+  snout.position.set(0, 0.26, 0.45);
+  group.add(snout);
+  for (const sx of [-0.08, 0.08]) {
+    const ear = mesh(new THREE.SphereGeometry(0.05, 8, 6), pink);
+    ear.position.set(sx, 0.4, 0.24);
+    ear.scale.set(1, 1.1, 0.5);
+    group.add(ear);
+  }
+
+  // Tail: a thin curved cylinder trailing behind.
+  const tail = mesh(new THREE.CylinderGeometry(0.012, 0.03, 0.5, 6), pink);
+  tail.rotation.x = Math.PI / 2 - 0.35;
+  tail.position.set(0, 0.18, -0.5);
+  group.add(tail);
+
+  // Four stubby legs; the front pair doubles as the "arms" for the walk cycle.
+  const legL = limb(0.045, 0.12, fur, dark);
+  legL.position.set(-0.12, 0.16, -0.18);
+  group.add(legL);
+  const legR = limb(0.045, 0.12, fur, dark);
+  legR.position.set(0.12, 0.16, -0.18);
+  group.add(legR);
+  const armL = limb(0.045, 0.12, fur, dark);
+  armL.position.set(-0.12, 0.16, 0.16);
+  group.add(armL);
+  const armR = limb(0.045, 0.12, fur, dark);
+  armR.position.set(0.12, 0.16, 0.16);
+  group.add(armR);
+
+  group.traverse((o) => {
+    if (o instanceof THREE.Mesh) o.castShadow = true;
+  });
+
+  const barHeight = 0.85;
+  const hp = attachHealthBar(group, barHeight);
+  return {
+    group,
+    legL,
+    legR,
+    armL,
+    armR,
+    weaponArm: armR, // a front paw — swings on its bite
     gait: 0,
     swingT: 0,
     flinchT: 0,

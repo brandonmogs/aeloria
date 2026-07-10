@@ -63,11 +63,13 @@ export class World {
   /** Advance the simulation by exactly one game tick (600ms). Deterministic. */
   tick(commands: Command[]): void {
     this.applyCommands(commands);
+    this.updateNpcAi();
     this.updateCombat();
     this.moveEntities();
     this.updatePickups();
     this.updateGathering();
     this.updateGroundItems();
+    this.updateRegen();
     this.updateRespawns();
     this.tickCount++;
   }
@@ -146,6 +148,55 @@ export class World {
           const dest = this.adjacentDestination(entity.position, node.tile);
           entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
           this.eventQueue.push({ type: 'message', text: RESOURCE_DEFS[node.kind].startMsg });
+        }
+      }
+    }
+  }
+
+  /**
+   * NPC behaviour outside combat: leash back home when dragged too far, pick a
+   * fight with nearby players when aggressive, otherwise idle-wander around the
+   * spawn tile. All rolls use the seeded rng, so it stays deterministic.
+   */
+  private updateNpcAi(): void {
+    for (const entity of this.entities.values()) {
+      if (!(entity instanceof Npc) || entity.isDead) continue;
+
+      // Chasing something: give up and stroll home once past the leash.
+      if (entity.targetId !== null) {
+        if (chebyshev(entity.position, entity.spawnTile) > entity.leashRange) {
+          entity.targetId = null;
+          entity.path = this.pathfinder.findPath(entity.position, entity.spawnTile);
+        }
+        continue;
+      }
+
+      // Aggro: jump any living player inside the aggro radius.
+      if (entity.aggroRange > 0) {
+        let picked = false;
+        for (const other of this.entities.values()) {
+          if (
+            other instanceof Player &&
+            other.isAlive &&
+            chebyshev(entity.position, other.position) <= entity.aggroRange
+          ) {
+            entity.targetId = other.id;
+            picked = true;
+            break;
+          }
+        }
+        if (picked) continue;
+      }
+
+      // Idle wander: occasionally amble to a nearby tile around the spawn.
+      if (entity.path.length === 0 && this.rng() < 0.06) {
+        const r = entity.wanderRadius;
+        const dest = {
+          x: entity.spawnTile.x + Math.floor(this.rng() * (2 * r + 1)) - r,
+          y: entity.spawnTile.y + Math.floor(this.rng() * (2 * r + 1)) - r,
+        };
+        if (this.map.inBounds(dest.x, dest.y) && !this.map.isBlocked(dest.x, dest.y)) {
+          entity.path = this.pathfinder.findPath(entity.position, dest);
         }
       }
     }
@@ -311,6 +362,16 @@ export class World {
     }
     for (const node of this.resourceNodes.values()) {
       if (node.regrowTimer > 0) node.regrowTimer--;
+    }
+  }
+
+  /** Passive recovery, OSRS-style: players regain 1 HP per 100 ticks (~1min). */
+  private updateRegen(): void {
+    if (this.tickCount % 100 !== 0 || this.tickCount === 0) return;
+    for (const entity of this.entities.values()) {
+      if (entity instanceof Player && entity.isAlive && entity.hitpoints < entity.maxHitpoints) {
+        entity.hitpoints++;
+      }
     }
   }
 

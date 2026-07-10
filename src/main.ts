@@ -76,25 +76,7 @@ function runGame(): void {
     }
   }
 
-  // A test goblin on the grass south of the moat: 5 HP like OSRS, respawns
-  // 10s after death.
-  world.spawnNpc(
-    { x: 22, y: 26 },
-    {
-      name: 'Goblin',
-      kind: 'goblin',
-      attack: 1,
-      strength: 1,
-      defense: 1,
-      maxHitpoints: 5,
-      attackSpeed: 4,
-      respawnTicks: Math.round(10 * TICKS_PER_SECOND),
-      drops: [
-        { item: { id: 'bones', name: 'Bones', icon: '🦴' }, chance: 1 },
-        { item: { id: 'coins', name: 'Coins', icon: '🪙' }, chance: 0.5 },
-      ],
-    },
-  );
+  populateNpcs(world, map);
 
   // --- Rendering -----------------------------------------------------------
   const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -215,6 +197,75 @@ function runGame(): void {
       return node?.id ?? null;
     },
   };
+}
+
+/** The starting cast: a goblin camp, sewer rats by the treeline, gate guards. */
+function populateNpcs(world: World, map: TileMap): void {
+  const bones = { id: 'bones', name: 'Bones', icon: '🦴' };
+  const coins = { id: 'coins', name: 'Coins', icon: '🪙' };
+  const respawn = Math.round(15 * TICKS_PER_SECOND);
+
+  // A camp of goblins on the grass south of the moat. Aggressive, like the
+  // low-level pests they are.
+  const goblin = {
+    name: 'Goblin',
+    kind: 'goblin' as const,
+    attack: 1,
+    strength: 1,
+    defense: 1,
+    maxHitpoints: 5,
+    attackSpeed: 4,
+    respawnTicks: respawn,
+    aggroRange: 2,
+    wanderRadius: 3,
+    drops: [
+      { item: bones, chance: 1 },
+      { item: coins, chance: 0.5 },
+    ],
+  };
+  for (const tile of [{ x: 22, y: 26 }, { x: 20, y: 24 }, { x: 24, y: 23 }, { x: 30, y: 27 }]) {
+    if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, goblin);
+  }
+
+  // Giant rats scurrying along the southern treeline. Weak but bitey.
+  const rat = {
+    name: 'Giant rat',
+    kind: 'rat' as const,
+    attack: 1,
+    strength: 1,
+    defense: 1,
+    maxHitpoints: 3,
+    attackSpeed: 4,
+    respawnTicks: respawn,
+    aggroRange: 2,
+    wanderRadius: 4,
+    drops: [{ item: bones, chance: 1 }],
+  };
+  for (const tile of [{ x: 18, y: 12 }, { x: 27, y: 10 }, { x: 31, y: 13 }]) {
+    if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, rat);
+  }
+
+  // Two guards flanking the bridge approach. Passive, but they hit back hard —
+  // a first "don't poke that yet" enemy.
+  const guard = {
+    name: 'Guard',
+    kind: 'guard' as const,
+    attack: 15,
+    strength: 14,
+    defense: 12,
+    maxHitpoints: 22,
+    attackSpeed: 5,
+    respawnTicks: respawn * 2,
+    aggroRange: 0,
+    wanderRadius: 2,
+    drops: [
+      { item: bones, chance: 1 },
+      { item: coins, chance: 1 },
+    ],
+  };
+  for (const tile of [{ x: 22, y: 31 }, { x: 26, y: 31 }]) {
+    if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, guard);
+  }
 }
 
 /**

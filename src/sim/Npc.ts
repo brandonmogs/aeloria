@@ -4,7 +4,7 @@ import { AttackStyle } from './combat';
 import { Item } from './Inventory';
 
 /** What the renderer should draw this NPC as. */
-export type NpcKind = 'goblin';
+export type NpcKind = 'goblin' | 'rat' | 'guard';
 
 /** One entry in an NPC's drop table: the item and its per-kill drop chance. */
 export interface DropEntry {
@@ -26,6 +26,10 @@ export interface NpcConfig {
   respawnTicks: number;
   /** Whether it strikes back when attacked. */
   aggressive?: boolean;
+  /** Tiles within which this NPC attacks players unprovoked (0 = passive). */
+  aggroRange?: number;
+  /** How far from its spawn tile it idles around. */
+  wanderRadius?: number;
   /** Items rolled onto the ground when this NPC dies. */
   drops?: DropEntry[];
 }
@@ -45,6 +49,10 @@ export class Npc extends Entity {
   readonly attackSpeed: number;
   readonly respawnTicks: number;
   readonly aggressive: boolean;
+  readonly aggroRange: number;
+  readonly wanderRadius: number;
+  /** Beyond this distance from spawn an NPC gives up the chase and walks home. */
+  readonly leashRange: number;
   readonly spawnTile: Tile;
   readonly style: AttackStyle = 'aggressive';
   readonly drops: DropEntry[];
@@ -62,6 +70,9 @@ export class Npc extends Entity {
     this.attackSpeed = config.attackSpeed;
     this.respawnTicks = config.respawnTicks;
     this.aggressive = config.aggressive ?? true;
+    this.aggroRange = config.aggroRange ?? 0;
+    this.wanderRadius = config.wanderRadius ?? 3;
+    this.leashRange = this.wanderRadius + 6;
     this.drops = config.drops ?? [];
     this.spawnTile = position;
     this.maxHitpoints = config.maxHitpoints;
