@@ -11,4 +11,7 @@ export type GameEvent =
   | { type: 'levelup'; entityId: number; skill: SkillId; level: number }
   | { type: 'kill'; killerId: number; victimName: string }
   | { type: 'died'; entityId: number }
+  | { type: 'hit'; entityId: number; damage: number }
+  | { type: 'swing'; kind: 'chop' | 'mine' }
+  | { type: 'pickup' }
   | { type: 'message'; text: string };

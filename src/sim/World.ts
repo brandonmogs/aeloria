@@ -233,6 +233,7 @@ export class World {
     defender.hitpoints = Math.max(0, defender.hitpoints - damage);
     defender.splatQueue.push(damage);
     attacker.swingQueue.push(defender.id);
+    this.eventQueue.push({ type: 'hit', entityId: defender.id, damage });
 
     // Combat XP, OSRS-style: 4 per damage to the attack-style skill, plus a
     // third of that (1.33×) to Hitpoints.
@@ -312,6 +313,7 @@ export class World {
       } else {
         entity.inventory.slots[free] = ground.item;
         this.groundItems.delete(ground.id);
+        this.eventQueue.push({ type: 'pickup' });
         this.eventQueue.push({ type: 'message', text: `You pick up the ${ground.item.name}.` });
       }
       entity.pickupTarget = null;
@@ -345,6 +347,7 @@ export class World {
 
       // Swing every tick (the renderer animates it); roll for the harvest.
       entity.swingQueue.push(node.id);
+      this.eventQueue.push({ type: 'swing', kind: node.kind === 'tree' ? 'chop' : 'mine' });
       if (this.rng() < gatherChance(def, entity.skills.levelOf(def.skill))) {
         entity.inventory.slots[free] = def.item;
         this.grantXp(entity, def.skill, def.xp);

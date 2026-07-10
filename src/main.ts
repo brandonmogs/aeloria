@@ -23,6 +23,7 @@ import { InventoryPanel } from './ui/InventoryPanel';
 import { MessageLog } from './ui/MessageLog';
 import { XpDrops } from './ui/XpDrops';
 import { ContextMenu, MenuOption } from './ui/ContextMenu';
+import { Sfx } from './audio/Sfx';
 import { SKILL_META } from './ui/skillMeta';
 import { combatLevel } from './sim/combat';
 import { tileToWorld } from './render/coords3d';
@@ -95,6 +96,7 @@ function runGame(): void {
   const log = new MessageLog();
   const xpDrops = new XpDrops();
   const menu = new ContextMenu();
+  const sfx = new Sfx();
   log.add('Welcome to Aeloria.');
 
   // Start the camera already framing the player instead of flying in from origin.
@@ -187,6 +189,7 @@ function runGame(): void {
         case 'levelup':
           if (ev.entityId === player.id) {
             xpDrops.levelUp(ev.skill, ev.level);
+            sfx.levelUp();
             log.add(
               `Congratulations! Your ${SKILL_META[ev.skill].label} level is now ${ev.level}.`,
               'levelup',
@@ -194,10 +197,27 @@ function runGame(): void {
           }
           break;
         case 'kill':
-          if (ev.killerId === player.id) log.add(`You have defeated the ${ev.victimName}.`);
+          if (ev.killerId === player.id) {
+            log.add(`You have defeated the ${ev.victimName}.`);
+            sfx.death();
+          }
           break;
         case 'died':
-          if (ev.entityId === player.id) log.add('Oh dear, you are dead!', 'danger');
+          if (ev.entityId === player.id) {
+            log.add('Oh dear, you are dead!', 'danger');
+            sfx.death();
+          }
+          break;
+        case 'hit':
+          if (ev.damage > 0) sfx.hit();
+          else sfx.block();
+          break;
+        case 'swing':
+          if (ev.kind === 'chop') sfx.chop();
+          else sfx.mine();
+          break;
+        case 'pickup':
+          sfx.pickup();
           break;
         case 'message':
           log.add(ev.text);
@@ -249,6 +269,7 @@ function runGame(): void {
     },
     moveTo: (x: number, y: number) => commandQueue.push(moveCommand(player.id, { x, y })),
     hoverTile: () => input.hoverTile,
+    sfx,
     gather: (x: number, y: number) => {
       const node = world.resourceNodeAt({ x, y });
       if (node) commandQueue.push(gatherCommand(player.id, node.id));
