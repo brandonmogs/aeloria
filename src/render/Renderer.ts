@@ -42,6 +42,7 @@ export class Renderer {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+    this.renderer.info.autoReset = false;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; // applied at the OutputPass
     this.renderer.toneMappingExposure = 1.0;
 
@@ -59,7 +60,15 @@ export class Renderer {
   }
 
   render(): void {
+    // Manual reset so the counters reflect a full frame when read between frames.
+    this.renderer.info.reset();
     this.composer.render();
+  }
+
+  /** Live WebGL counters (draw calls, triangles) for perf diagnostics. */
+  get stats(): { calls: number; triangles: number } {
+    const r = this.renderer.info.render;
+    return { calls: r.calls, triangles: r.triangles };
   }
 
   /** Build the atmospheric sky dome and return the unit direction to the sun. */

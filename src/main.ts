@@ -275,6 +275,7 @@ function runGame(): void {
     moveTo: (x: number, y: number) => commandQueue.push(moveCommand(player.id, { x, y })),
     hoverTile: () => input.hoverTile,
     sfx,
+    stats: () => renderer.stats,
     gather: (x: number, y: number) => {
       const node = world.resourceNodeAt({ x, y });
       if (node) commandQueue.push(gatherCommand(player.id, node.id));

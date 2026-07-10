@@ -1,52 +1,50 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Prop } from '../sim/Scenery';
 import { World } from '../sim/World';
 
-/** The intact and depleted looks of one gatherable prop, toggled by the sim. */
+/** Where a gatherable prop's instances live, so the sim can hide/show them. */
 interface ResourceVisual {
-  main: THREE.Object3D;
-  depleted: THREE.Object3D;
+  /** Instanced slots making up the intact prop (trunk + canopy, or boulders). */
+  slots: Array<{ mesh: THREE.InstancedMesh; index: number; matrix: THREE.Matrix4 }>;
+  /** Lazily-built depleted stand-in (stump / rubble). */
+  depleted?: THREE.Object3D;
+  buildDepleted: () => THREE.Object3D;
+  isDepleted: boolean;
 }
 
 /**
- * Renders the static, decorative world: trees, boulders, and the castle. Each
- * {@link Prop} from the world builder becomes a small mesh group placed on its
- * tile. Geometries and materials are created once and shared across every prop
- * of a kind, so a whole forest costs almost nothing beyond its draw calls.
+ * Renders the static, decorative world: trees, boulders, and the castle.
  *
- * Shapes are kept smooth and rounded rather than faceted — stone uses beveled
- * rounded boxes so edges catch a highlight, boulders are noise-displaced spheres
- * with recomputed normals, and foliage is subdivided. With the scene's filmic
- * tone mapping and image-based lighting that reads as "carved" rather than
- * "blocky", while staying cheap by sharing geometry across every prop of a kind.
+ * Draw-call budget is the whole design here. The castle — hundreds of wall
+ * blocks and merlons — is baked into ONE merged mesh per material. Trees and
+ * rocks, which must be hidden individually when the sim depletes them, are
+ * drawn with a handful of InstancedMeshes (one per geometry+material pair);
+ * a depleted node just zeroes its instance matrices and shows a small stump
+ * or rubble mesh instead. The result is a scene that renders in tens of draw
+ * calls rather than thousands, which matters fourfold once shadows, water
+ * reflections, and SSAO each re-render it.
  */
 export class SceneryView {
   private readonly root = new THREE.Group();
   private readonly geo = makeGeometries();
   private readonly mat = makeMaterials();
-  /** Toggleable visuals for gatherable props, keyed by "x,y". */
+  /** Gatherable props keyed by "x,y". */
   private readonly resources = new Map<string, ResourceVisual>();
+  private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
 
   constructor(scene: THREE.Scene, props: ReadonlyArray<Prop>) {
-    for (const prop of props) {
-      const obj = this.build(prop);
-      if (obj) {
-        obj.position.set(prop.tile.x, 0, prop.tile.y);
-        this.root.add(obj);
-      }
+    const trees = props.filter((p) => p.kind === 'tree');
+    const rocks = props.filter((p) => p.kind === 'rock');
+    const castle = props.filter(
+      (p) => p.kind !== 'tree' && p.kind !== 'rock' && p.kind !== 'water',
+    );
 
-      // Trees and rocks get a hidden "depleted" counterpart (stump / rubble)
-      // so the sim can visibly consume them.
-      if (obj && (prop.kind === 'tree' || prop.kind === 'rock')) {
-        const depleted = prop.kind === 'tree' ? this.buildStump(prop.seed) : this.buildRubble(prop.seed);
-        depleted.position.set(prop.tile.x, 0, prop.tile.y);
-        depleted.visible = false;
-        this.root.add(depleted);
-        this.resources.set(`${prop.tile.x},${prop.tile.y}`, { main: obj, depleted });
-      }
-    }
+    this.buildCastleMerged(castle);
+    this.buildTreesInstanced(trees);
+    this.buildRocksInstanced(rocks);
     scene.add(this.root);
   }
 
@@ -56,45 +54,59 @@ export class SceneryView {
       const visual = this.resources.get(`${node.tile.x},${node.tile.y}`);
       if (!visual) continue;
       const spent = node.regrowTimer > 0;
-      if (visual.main.visible === spent) {
-        visual.main.visible = !spent;
-        visual.depleted.visible = spent;
+      if (visual.isDepleted === spent) continue;
+      visual.isDepleted = spent;
+
+      for (const slot of visual.slots) {
+        slot.mesh.setMatrixAt(slot.index, spent ? this.zeroMatrix : slot.matrix);
+        slot.mesh.instanceMatrix.needsUpdate = true;
       }
+      if (spent && !visual.depleted) {
+        visual.depleted = visual.buildDepleted();
+        this.root.add(visual.depleted);
+      }
+      if (visual.depleted) visual.depleted.visible = spent;
     }
   }
 
-  /** What's left after a tree is felled: a low cut trunk. */
-  private buildStump(seed: number): THREE.Object3D {
-    const g = new THREE.Group();
-    const stump = new THREE.Mesh(this.geo.stump, this.mat.bark);
-    stump.position.y = 0.14;
-    g.add(this.shadowed(stump));
-    g.rotation.y = seed * Math.PI * 2;
-    return g;
-  }
+  // --- Castle: bake everything into one mesh per material -------------------
 
-  /** What's left after a rock is mined out: low, darker rubble. */
-  private buildRubble(seed: number): THREE.Object3D {
-    const g = new THREE.Group();
-    for (let i = 0; i < 3; i++) {
-      const s = seedAt(seed, i + 20);
-      const variant = this.geo.rocks[Math.floor(seedAt(seed, i + 23) * this.geo.rocks.length)];
-      const rock = new THREE.Mesh(variant, this.mat.rubble);
-      const size = 0.1 + s * 0.12;
-      rock.scale.set(size, size * 0.6, size);
-      rock.position.set((s - 0.5) * 0.5, size * 0.25, (seedAt(seed, i + 27) - 0.5) * 0.5);
-      rock.rotation.set(s * 3, s * 6, s * 2);
-      g.add(this.shadowed(rock));
+  private buildCastleMerged(props: ReadonlyArray<Prop>): void {
+    const buckets = new Map<THREE.Material, THREE.BufferGeometry[]>();
+    const collect = (group: THREE.Object3D): void => {
+      group.updateMatrixWorld(true);
+      group.traverse((o) => {
+        if (o instanceof THREE.Mesh) {
+          // Normalize to non-indexed: merge requires all-or-none indexing.
+          let geo = (o.geometry as THREE.BufferGeometry).clone();
+          if (geo.index) geo = geo.toNonIndexed();
+          geo.applyMatrix4(o.matrixWorld);
+          const list = buckets.get(o.material as THREE.Material) ?? [];
+          list.push(geo);
+          buckets.set(o.material as THREE.Material, list);
+        }
+      });
+    };
+
+    for (const prop of props) {
+      const obj = this.buildCastlePiece(prop);
+      if (!obj) continue;
+      obj.position.set(prop.tile.x, 0, prop.tile.y);
+      collect(obj);
     }
-    return g;
+
+    for (const [material, geos] of buckets) {
+      const merged = mergeGeometries(geos);
+      for (const g of geos) g.dispose();
+      const mesh = new THREE.Mesh(merged, material);
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      this.root.add(mesh);
+    }
   }
 
-  private build(prop: Prop): THREE.Object3D | null {
+  private buildCastlePiece(prop: Prop): THREE.Object3D | null {
     switch (prop.kind) {
-      case 'tree':
-        return this.buildTree(prop.seed);
-      case 'rock':
-        return this.buildRock(prop.seed);
       case 'castle-wall':
         return this.buildWall();
       case 'castle-tower':
@@ -108,50 +120,173 @@ export class SceneryView {
     }
   }
 
-  private buildTree(seed: number): THREE.Object3D {
-    const g = new THREE.Group();
+  // --- Trees: three instanced meshes for the whole forest -------------------
 
-    const trunk = new THREE.Mesh(this.geo.trunk, this.mat.bark);
-    trunk.position.y = 0.55;
-    g.add(this.shadowed(trunk));
-
-    // A few overlapping blobs make a fuller canopy than a single sphere. Tint
-    // and size drift with the seed so no two trees look stamped from the same die.
-    const leaf = seed > 0.5 ? this.mat.leafA : this.mat.leafB;
-    const base = 1.2 + seed * 0.4;
-    const blobs: ReadonlyArray<readonly [number, number, number, number]> = [
-      [0, base, 0, 0.62],
-      [0.28, base + 0.32, 0.12, 0.42],
-      [-0.24, base + 0.28, -0.16, 0.4],
-      [0.05, base + 0.6, 0, 0.34],
+  private buildTreesInstanced(trees: ReadonlyArray<Prop>): void {
+    // The same canopy blob layout buildTree used, kept verbatim so the look
+    // doesn't change: [x, y-above-base, z, radius].
+    const blobLayout: ReadonlyArray<readonly [number, number, number, number]> = [
+      [0, 0, 0, 0.62],
+      [0.28, 0.32, 0.12, 0.42],
+      [-0.24, 0.28, -0.16, 0.4],
+      [0.05, 0.6, 0, 0.34],
     ];
-    for (const [x, y, z, r] of blobs) {
-      const blob = new THREE.Mesh(this.geo.canopy, leaf);
-      blob.scale.setScalar(r);
-      blob.position.set(x, y, z);
-      g.add(this.shadowed(blob));
+
+    const treesA = trees.filter((t) => t.seed > 0.5);
+    const treesB = trees.filter((t) => t.seed <= 0.5);
+
+    const trunks = this.instanced(this.geo.trunk, this.mat.bark, trees.length);
+    const canopyA = this.instanced(this.geo.canopy, this.mat.leafA, treesA.length * blobLayout.length);
+    const canopyB = this.instanced(this.geo.canopy, this.mat.leafB, treesB.length * blobLayout.length);
+
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scl = new THREE.Vector3();
+    const m = new THREE.Matrix4();
+
+    let trunkI = 0;
+    const canopyI = { A: 0, B: 0 };
+
+    for (const tree of trees) {
+      const seed = tree.seed;
+      const s = 0.85 + seed * 0.35; // whole-tree scale
+      const yaw = seed * Math.PI * 2;
+      const slots: ResourceVisual['slots'] = [];
+
+      // Trunk: local (0, 0.55, 0), uniform scale, yaw irrelevant but applied.
+      quat.setFromAxisAngle(UP, yaw);
+      pos.set(tree.tile.x, 0.55 * s, tree.tile.y);
+      scl.setScalar(s);
+      m.compose(pos, quat, scl);
+      trunks.setMatrixAt(trunkI, m);
+      slots.push({ mesh: trunks, index: trunkI, matrix: m.clone() });
+      trunkI++;
+
+      const isA = seed > 0.5;
+      const canopy = isA ? canopyA : canopyB;
+      const base = 1.2 + seed * 0.4;
+      for (const [bx, by, bz, r] of blobLayout) {
+        // Rotate the blob offset by the tree's yaw, scale by the tree scale.
+        pos.set(bx, base + by, bz).multiplyScalar(s).applyQuaternion(quat);
+        pos.x += tree.tile.x;
+        pos.z += tree.tile.y;
+        scl.setScalar(r * s);
+        m.compose(pos, quat, scl);
+        const idx = isA ? canopyI.A++ : canopyI.B++;
+        canopy.setMatrixAt(idx, m);
+        slots.push({ mesh: canopy, index: idx, matrix: m.clone() });
+      }
+
+      this.resources.set(`${tree.tile.x},${tree.tile.y}`, {
+        slots,
+        isDepleted: false,
+        buildDepleted: () => this.buildStump(tree),
+      });
     }
 
-    g.rotation.y = seed * Math.PI * 2;
-    g.scale.setScalar(0.85 + seed * 0.35);
+    for (const mesh of [trunks, canopyA, canopyB]) mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  // --- Rocks: one instanced mesh per boulder variant -------------------------
+
+  private buildRocksInstanced(rocks: ReadonlyArray<Prop>): void {
+    // First pass: count instances per variant so the meshes can be sized.
+    interface Boulder {
+      variant: number;
+      matrix: THREE.Matrix4;
+      tileKey: string;
+    }
+    const boulders: Boulder[] = [];
+
+    const pos = new THREE.Vector3();
+    const quat = new THREE.Quaternion();
+    const scl = new THREE.Vector3();
+    const euler = new THREE.Euler();
+
+    for (const rock of rocks) {
+      const seed = rock.seed;
+      const count = 2 + Math.floor(seed * 3);
+      for (let i = 0; i < count; i++) {
+        const s = seedAt(seed, i);
+        const variant = Math.floor(seedAt(seed, i + 3) * this.geo.rocks.length);
+        const size = 0.24 + s * 0.32;
+        pos.set(rock.tile.x + (s - 0.5) * 0.6, size * 0.32, rock.tile.y + (seedAt(seed, i + 9) - 0.5) * 0.6);
+        scl.set(size, size * (0.7 + s * 0.35), size);
+        euler.set(s * 3, s * 6, s * 2);
+        quat.setFromEuler(euler);
+        boulders.push({
+          variant,
+          matrix: new THREE.Matrix4().compose(pos, quat, scl),
+          tileKey: `${rock.tile.x},${rock.tile.y}`,
+        });
+      }
+    }
+
+    const perVariant = this.geo.rocks.map((geo, v) => {
+      const count = boulders.filter((b) => b.variant === v).length;
+      return this.instanced(geo, this.mat.rock, Math.max(1, count));
+    });
+
+    const nextIndex = this.geo.rocks.map(() => 0);
+    for (const b of boulders) {
+      const mesh = perVariant[b.variant];
+      const index = nextIndex[b.variant]++;
+      mesh.setMatrixAt(index, b.matrix);
+
+      let visual = this.resources.get(b.tileKey);
+      if (!visual) {
+        const [x, y] = b.tileKey.split(',').map(Number);
+        const seed = rocks.find((r) => r.tile.x === x && r.tile.y === y)!.seed;
+        visual = {
+          slots: [],
+          isDepleted: false,
+          buildDepleted: () => this.buildRubble(seed, x, y),
+        };
+        this.resources.set(b.tileKey, visual);
+      }
+      visual.slots.push({ mesh, index, matrix: b.matrix });
+    }
+
+    for (const mesh of perVariant) mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  private instanced(
+    geo: THREE.BufferGeometry,
+    material: THREE.Material,
+    count: number,
+  ): THREE.InstancedMesh {
+    const mesh = new THREE.InstancedMesh(geo, material, count);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    this.root.add(mesh);
+    return mesh;
+  }
+
+  /** What's left after a tree is felled: a low cut trunk. */
+  private buildStump(tree: Prop): THREE.Object3D {
+    const g = new THREE.Group();
+    const stump = new THREE.Mesh(this.geo.stump, this.mat.bark);
+    stump.position.y = 0.14;
+    g.add(this.shadowed(stump));
+    g.rotation.y = tree.seed * Math.PI * 2;
+    g.position.set(tree.tile.x, 0, tree.tile.y);
     return g;
   }
 
-  private buildRock(seed: number): THREE.Object3D {
+  /** What's left after a rock is mined out: low, darker rubble. */
+  private buildRubble(seed: number, x: number, y: number): THREE.Object3D {
     const g = new THREE.Group();
-    const count = 2 + Math.floor(seed * 3);
-    for (let i = 0; i < count; i++) {
-      const s = seedAt(seed, i);
-      const variant = this.geo.rocks[Math.floor(seedAt(seed, i + 3) * this.geo.rocks.length)];
-      const rock = new THREE.Mesh(variant, this.mat.rock);
-      const size = 0.24 + s * 0.32;
-      // Sink each boulder a little into the ground so it doesn't look like it's
-      // resting on a seam, and squash it slightly for a settled, weighty stance.
-      rock.scale.set(size, size * (0.7 + s * 0.35), size);
-      rock.position.set((s - 0.5) * 0.6, size * 0.32, (seedAt(seed, i + 9) - 0.5) * 0.6);
+    for (let i = 0; i < 3; i++) {
+      const s = seedAt(seed, i + 20);
+      const variant = this.geo.rocks[Math.floor(seedAt(seed, i + 23) * this.geo.rocks.length)];
+      const rock = new THREE.Mesh(variant, this.mat.rubble);
+      const size = 0.1 + s * 0.12;
+      rock.scale.set(size, size * 0.6, size);
+      rock.position.set((s - 0.5) * 0.5, size * 0.25, (seedAt(seed, i + 27) - 0.5) * 0.5);
       rock.rotation.set(s * 3, s * 6, s * 2);
       g.add(this.shadowed(rock));
     }
+    g.position.set(x, 0, y);
     return g;
   }
 
@@ -254,6 +389,8 @@ export class SceneryView {
     return mesh;
   }
 }
+
+const UP = new THREE.Vector3(0, 1, 0);
 
 /** Deterministic sub-seed in [0, 1) so a prop's parts vary without randomness. */
 function seedAt(seed: number, i: number): number {

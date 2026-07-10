@@ -243,9 +243,14 @@ export class World {
       this.grantXp(attacker, 'hitpoints', (damage * 4) / 3);
     }
 
-    // Auto-retaliate: an idle defender turns on its attacker.
+    // Auto-retaliate: an idle defender turns on its attacker. Getting jumped
+    // also interrupts skilling/looting, like OSRS.
     if (defender.targetId === null && defender.isAlive) {
       defender.targetId = attacker.id;
+      if (defender instanceof Player) {
+        defender.gatherTarget = null;
+        defender.pickupTarget = null;
+      }
     }
 
     if (!defender.isAlive) this.handleDeath(defender, attacker);
@@ -330,7 +335,16 @@ export class World {
         entity.gatherTarget = null; // depleted under us (or gone)
         continue;
       }
-      if (chebyshev(entity.position, node.tile) > 1) continue; // still walking
+      if (chebyshev(entity.position, node.tile) > 1) {
+        // Still out of reach. If nothing is queued (a fight interrupted the
+        // approach, say), path back to the node rather than standing dumb.
+        if (entity.path.length === 0) {
+          const dest = this.adjacentDestination(entity.position, node.tile);
+          entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
+          if (entity.path.length === 0) entity.gatherTarget = null; // unreachable
+        }
+        continue;
+      }
 
       entity.path.length = 0; // in position — stand and work
       const def = RESOURCE_DEFS[node.kind];

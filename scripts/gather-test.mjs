@@ -30,15 +30,25 @@ const treeTile = await page.evaluate(() => {
   return best;
 });
 
-// Wait for logs to arrive in the inventory.
-const gotLogs = await page
-  .waitForFunction(
-    () => window.__aeloria.player.inventory.slots.filter((s) => s && s.id === 'logs').length >= 2, // starter kit has 1; +1 chopped
-    null,
-    { timeout: 60000 },
-  )
-  .then(() => true)
-  .catch(() => false);
+// Wait for logs to arrive, re-clicking the tree if a goblin interrupts us
+// (aggro cancels gathering, like OSRS — a player would just click again).
+let gotLogs = false;
+for (let i = 0; i < 20 && !gotLogs; i++) {
+  await page.evaluate((t) => {
+    const p = window.__aeloria.player;
+    if (p.gatherTarget === null && p.targetId === null) {
+      window.__aeloria.gather(t.x, t.y);
+    }
+  }, treeTile);
+  gotLogs = await page
+    .waitForFunction(
+      () => window.__aeloria.player.inventory.slots.filter((s) => s && s.id === 'logs').length >= 2, // starter kit has 1; +1 chopped
+      null,
+      { timeout: 5000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+}
 
 // The tree should now be depleted (stump) — check the sim node.
 const treeDepleted = await page.evaluate(
@@ -55,30 +65,33 @@ for (let i = 0; i < 5; i++) await page.mouse.wheel(0, -120);
 await page.waitForTimeout(300);
 await page.screenshot({ path: 'scripts/shots/gather-stump.png' });
 
-// Now mine the nearest rock.
-await page.evaluate(() => {
-  const { world, player } = window.__aeloria;
-  let best = null;
-  let bestD = Infinity;
-  for (const n of world.resourceNodes.values()) {
-    if (n.kind !== 'rock' || n.regrowTimer > 0) continue;
-    const d = Math.abs(n.tile.x - player.position.x) + Math.abs(n.tile.y - player.position.y);
-    if (d < bestD) {
-      bestD = d;
-      best = n.tile;
+// Now mine the nearest rock, with the same re-click-on-interrupt patience.
+let gotOre = false;
+for (let i = 0; i < 25 && !gotOre; i++) {
+  await page.evaluate(() => {
+    const { world, player } = window.__aeloria;
+    if (player.gatherTarget !== null || player.targetId !== null) return;
+    let best = null;
+    let bestD = Infinity;
+    for (const n of world.resourceNodes.values()) {
+      if (n.kind !== 'rock' || n.regrowTimer > 0) continue;
+      const d = Math.abs(n.tile.x - player.position.x) + Math.abs(n.tile.y - player.position.y);
+      if (d < bestD) {
+        bestD = d;
+        best = n.tile;
+      }
     }
-  }
-  window.__aeloria.gather(best.x, best.y);
-});
-
-const gotOre = await page
-  .waitForFunction(
-    () => window.__aeloria.player.inventory.slots.some((s) => s && s.id === 'copper_ore'),
-    null,
-    { timeout: 90000 },
-  )
-  .then(() => true)
-  .catch(() => false);
+    if (best) window.__aeloria.gather(best.x, best.y);
+  });
+  gotOre = await page
+    .waitForFunction(
+      () => window.__aeloria.player.inventory.slots.some((s) => s && s.id === 'copper_ore'),
+      null,
+      { timeout: 5000 },
+    )
+    .then(() => true)
+    .catch(() => false);
+}
 await page.screenshot({ path: 'scripts/shots/gather-mining.png' });
 
 const state = await page.evaluate(() => {
