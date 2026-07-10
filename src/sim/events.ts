@@ -14,4 +14,5 @@ export type GameEvent =
   | { type: 'hit'; entityId: number; damage: number }
   | { type: 'swing'; kind: 'chop' | 'mine' }
   | { type: 'pickup' }
+  | { type: 'ate'; itemName: string }
   | { type: 'message'; text: string };

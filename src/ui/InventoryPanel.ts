@@ -55,6 +55,8 @@ export class InventoryPanel {
   constructor(
     private readonly inventory: Inventory,
     private readonly skills: Skills,
+    /** Right-click on a filled backpack slot: (index, item, cursor). */
+    private readonly onItemMenu?: (index: number, item: Item, x: number, y: number) => void,
   ) {
     this.root.id = 'inventory-panel';
     this.root.appendChild(this.buildTabBar());
@@ -167,6 +169,14 @@ export class InventoryPanel {
     el.className = extra ? `slot ${extra}` : 'slot';
 
     el.addEventListener('click', () => this.quickAction(ref));
+
+    if (ref.area === 'inventory') {
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        const item = this.inventory.slots[ref.index];
+        if (item) this.onItemMenu?.(ref.index, item, e.clientX, e.clientY);
+      });
+    }
 
     el.addEventListener('dragstart', (e) => {
       this.dragFrom = ref;

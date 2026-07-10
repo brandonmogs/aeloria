@@ -43,6 +43,8 @@ export interface Item {
   readonly attackBonus?: number;
   readonly strengthBonus?: number;
   readonly defenseBonus?: number;
+  /** Hitpoints restored when eaten; presence marks the item as food. */
+  readonly heals?: number;
 }
 
 /** A reference to one slot, in the backpack or on the paper doll. */

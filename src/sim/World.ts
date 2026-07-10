@@ -149,6 +149,14 @@ export class World {
           entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
           this.eventQueue.push({ type: 'message', text: RESOURCE_DEFS[node.kind].startMsg });
         }
+      } else if (cmd.type === 'useItem' && entity instanceof Player) {
+        this.useItem(entity, cmd.slot);
+      } else if (cmd.type === 'dropItem' && entity instanceof Player) {
+        const item = entity.inventory.slots[cmd.slot];
+        if (item) {
+          entity.inventory.slots[cmd.slot] = null;
+          this.dropItem(item, entity.position);
+        }
       }
     }
   }
@@ -298,6 +306,27 @@ export class World {
         victim.previousPosition = this.playerSpawn;
       }
     }
+  }
+
+  /** Use a backpack item on itself — for now, that means eating food. */
+  private useItem(player: Player, slot: number): void {
+    const item = player.inventory.slots[slot];
+    if (!item) return;
+    if (item.heals === undefined) {
+      this.eventQueue.push({ type: 'message', text: 'Nothing interesting happens.' });
+      return;
+    }
+    if (player.hitpoints >= player.maxHitpoints) {
+      this.eventQueue.push({ type: 'message', text: "You don't need to eat that right now." });
+      return;
+    }
+    player.inventory.slots[slot] = null;
+    player.hitpoints = Math.min(player.maxHitpoints, player.hitpoints + item.heals);
+    this.eventQueue.push({ type: 'ate', itemName: item.name });
+    this.eventQueue.push({
+      type: 'message',
+      text: `You eat the ${item.name.toLowerCase()}. It heals some health.`,
+    });
   }
 
   /** Players standing on their pickup target collect it into the backpack. */

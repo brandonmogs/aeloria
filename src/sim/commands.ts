@@ -28,6 +28,16 @@ export type Command =
       type: 'gather';
       entityId: number;
       nodeId: number;
+    }
+  | {
+      type: 'useItem';
+      entityId: number;
+      slot: number;
+    }
+  | {
+      type: 'dropItem';
+      entityId: number;
+      slot: number;
     };
 
 export function moveCommand(entityId: number, target: Tile, run = false): Command {
@@ -44,4 +54,12 @@ export function pickupCommand(entityId: number, groundItemId: number): Command {
 
 export function gatherCommand(entityId: number, nodeId: number): Command {
   return { type: 'gather', entityId, nodeId };
+}
+
+export function useItemCommand(entityId: number, slot: number): Command {
+  return { type: 'useItem', entityId, slot };
+}
+
+export function dropItemCommand(entityId: number, slot: number): Command {
+  return { type: 'dropItem', entityId, slot };
 }

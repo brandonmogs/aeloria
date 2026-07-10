@@ -5,7 +5,15 @@ import { World } from './sim/World';
 import { Player } from './sim/Player';
 import { Npc } from './sim/Npc';
 import { Tile, tilesEqual } from './sim/coords';
-import { Command, moveCommand, attackCommand, pickupCommand, gatherCommand } from './sim/commands';
+import {
+  Command,
+  moveCommand,
+  attackCommand,
+  pickupCommand,
+  gatherCommand,
+  useItemCommand,
+  dropItemCommand,
+} from './sim/commands';
 import { GameLoop } from './engine/GameLoop';
 import { TICKS_PER_SECOND } from './engine/constants';
 import { Renderer } from './render/Renderer';
@@ -92,7 +100,28 @@ function runGame(): void {
   const groundView = new GroundItemView(renderer.scene, world);
   const hud = new Hud();
   const compass = new Compass(renderer.camera);
-  const panel = new InventoryPanel(player.inventory, player.skills);
+  const panel = new InventoryPanel(player.inventory, player.skills, (index, item, x, y) => {
+    const options: MenuOption[] = [];
+    if (item.heals !== undefined) {
+      options.push({
+        verb: 'Eat',
+        target: item.name,
+        onSelect: () => commandQueue.push(useItemCommand(player.id, index)),
+      });
+    }
+    options.push({
+      verb: 'Drop',
+      target: item.name,
+      onSelect: () => commandQueue.push(dropItemCommand(player.id, index)),
+    });
+    options.push({
+      verb: 'Examine',
+      target: item.name,
+      onSelect: () => log.add(EXAMINE_ITEM[item.id] ?? 'A useful item.'),
+    });
+    options.push({ verb: 'Cancel' });
+    menu.open(x, y, options);
+  });
   const log = new MessageLog();
   const xpDrops = new XpDrops();
   const menu = new ContextMenu();
@@ -222,6 +251,9 @@ function runGame(): void {
           break;
         case 'pickup':
           sfx.pickup();
+          break;
+        case 'ate':
+          sfx.eat();
           break;
         case 'message':
           log.add(ev.text);
@@ -383,7 +415,7 @@ function giveStarterKit(player: Player): void {
   inv.slots[7] = { id: 'gold_ring', name: 'Gold Ring', icon: '💍', equip: 'ring' };
   inv.slots[8] = { id: 'coins', name: '100 Coins', icon: '🪙' };
   inv.slots[9] = { id: 'logs', name: 'Logs', icon: '🪵' };
-  inv.slots[10] = { id: 'bread', name: 'Bread', icon: '🍞' };
+  inv.slots[10] = { id: 'bread', name: 'Bread', icon: '🍞', heals: 5 };
 
   inv.equipment.cape = { id: 'max_cape', name: 'Max Cape', icon: '🧥', equip: 'cape' };
 
@@ -421,6 +453,7 @@ const EXAMINE_ITEM: Record<string, string> = {
   coins: 'Lovely money!',
   logs: 'A number of wooden logs.',
   copper_ore: 'This ore contains copper.',
+  bread: 'Nice crusty bread.',
 };
 
 /** The living NPC standing on a tile, if any — used to turn a click into an attack. */

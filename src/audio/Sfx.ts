@@ -67,6 +67,12 @@ export class Sfx {
     this.tone({ freq: 660, to: 1020, dur: 0.09, type: 'sine', gain: 0.4 });
   }
 
+  /** Two quick gulps — eating. */
+  eat(): void {
+    this.tone({ freq: 340, to: 210, dur: 0.09, type: 'sine', gain: 0.4 });
+    this.tone({ freq: 300, to: 180, dur: 0.1, type: 'sine', gain: 0.35, delay: 0.12 });
+  }
+
   /** A little rising fanfare for a level-up. */
   levelUp(): void {
     const notes = [523.25, 659.25, 783.99, 1046.5];

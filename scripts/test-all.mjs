@@ -13,6 +13,7 @@ const TESTS = [
   'menu-test',
   'sfx-test',
   'hud-test',
+  'item-test',
 ];
 
 const server = await createServer({ server: { port: 5199 } });
