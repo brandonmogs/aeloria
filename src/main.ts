@@ -22,7 +22,9 @@ import { MiniMap } from './ui/MiniMap';
 import { InventoryPanel } from './ui/InventoryPanel';
 import { MessageLog } from './ui/MessageLog';
 import { XpDrops } from './ui/XpDrops';
+import { ContextMenu, MenuOption } from './ui/ContextMenu';
 import { SKILL_META } from './ui/skillMeta';
+import { combatLevel } from './sim/combat';
 import { tileToWorld } from './render/coords3d';
 import { buildStartingWorld } from './world/startingWorld';
 import { hasWebGL, showFatal, installErrorHandlers } from './diagnostics';
@@ -92,6 +94,7 @@ function runGame(): void {
   const panel = new InventoryPanel(player.inventory, player.skills);
   const log = new MessageLog();
   const xpDrops = new XpDrops();
+  const menu = new ContextMenu();
   log.add('Welcome to Aeloria.');
 
   // Start the camera already framing the player instead of flying in from origin.
@@ -101,23 +104,77 @@ function runGame(): void {
   // Clicks become commands that are drained into the sim on the next tick. This
   // queue is the stand-in for "messages sent to the server".
   const commandQueue: Command[] = [];
-  const input = new InputController(canvas, renderer.camera, (target) => {
-    // Clicking a living NPC attacks it; a ground item walks over and takes it;
-    // bare ground walks there.
+  const input = new InputController(
+    canvas,
+    renderer.camera,
+    (target) => {
+      // Left click = the default action: attack NPC > take item > gather >
+      // walk. (The same priority order the context menu lists.)
+      if (menu.isOpen) return;
+      const npc = npcAt(world, target);
+      const ground = world.groundItemAt(target);
+      const node = world.resourceNodeAt(target);
+      if (npc) {
+        commandQueue.push(attackCommand(player.id, npc.id));
+      } else if (ground) {
+        commandQueue.push(pickupCommand(player.id, ground.id));
+      } else if (node && node.regrowTimer <= 0) {
+        commandQueue.push(gatherCommand(player.id, node.id));
+      } else {
+        commandQueue.push(moveCommand(player.id, target));
+        tileView.showClickMarker(target);
+      }
+    },
+    (clientX, clientY, target) => {
+      menu.open(clientX, clientY, menuOptionsFor(target));
+    },
+  );
+
+  /** Everything you could do on a tile, in OSRS priority order. */
+  function menuOptionsFor(target: Tile): MenuOption[] {
+    const options: MenuOption[] = [];
     const npc = npcAt(world, target);
     const ground = world.groundItemAt(target);
     const node = world.resourceNodeAt(target);
+
     if (npc) {
-      commandQueue.push(attackCommand(player.id, npc.id));
-    } else if (ground) {
-      commandQueue.push(pickupCommand(player.id, ground.id));
-    } else if (node && node.regrowTimer <= 0) {
-      commandQueue.push(gatherCommand(player.id, node.id));
-    } else {
-      commandQueue.push(moveCommand(player.id, target));
-      tileView.showClickMarker(target);
+      const level = combatLevel(npc.attack, npc.strength, npc.defense, npc.maxHitpoints);
+      options.push({
+        verb: 'Attack',
+        target: `${npc.name} (level-${level})`,
+        onSelect: () => commandQueue.push(attackCommand(player.id, npc.id)),
+      });
     }
-  });
+    if (ground) {
+      options.push({
+        verb: 'Take',
+        target: ground.item.name,
+        onSelect: () => commandQueue.push(pickupCommand(player.id, ground.id)),
+      });
+    }
+    if (node && node.regrowTimer <= 0) {
+      options.push({
+        verb: node.kind === 'tree' ? 'Chop down' : 'Mine',
+        target: node.kind === 'tree' ? 'Tree' : 'Rock',
+        onSelect: () => commandQueue.push(gatherCommand(player.id, node.id)),
+      });
+    }
+
+    options.push({
+      verb: 'Walk here',
+      onSelect: () => {
+        commandQueue.push(moveCommand(player.id, target));
+        tileView.showClickMarker(target);
+      },
+    });
+
+    for (const [name, text] of examinables(npc, ground, node)) {
+      options.push({ verb: 'Examine', target: name, onSelect: () => log.add(text) });
+    }
+
+    options.push({ verb: 'Cancel' });
+    return options;
+  }
 
   // --- Game loop -----------------------------------------------------------
   // Turn sim announcements into UI: XP drops, level-up banners, log lines.
@@ -191,6 +248,7 @@ function runGame(): void {
       return null;
     },
     moveTo: (x: number, y: number) => commandQueue.push(moveCommand(player.id, { x, y })),
+    hoverTile: () => input.hoverTile,
     gather: (x: number, y: number) => {
       const node = world.resourceNodeAt({ x, y });
       if (node) commandQueue.push(gatherCommand(player.id, node.id));
@@ -305,6 +363,38 @@ function giveStarterKit(player: Player): void {
   // Until the skills system exists, grant the cape directly so it renders.
   player.maxCape = true;
 }
+
+/** Flavor text for whatever is examinable on a tile. */
+function examinables(
+  npc: Npc | null,
+  ground: { item: { name: string; id: string } } | null,
+  node: { kind: 'tree' | 'rock'; regrowTimer: number } | null,
+): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  if (npc) out.push([npc.name, EXAMINE_NPC[npc.kind] ?? 'A creature.']);
+  if (ground) out.push([ground.item.name, EXAMINE_ITEM[ground.item.id] ?? 'A useful item.']);
+  if (node && node.regrowTimer <= 0) {
+    out.push(
+      node.kind === 'tree'
+        ? ['Tree', 'A leafy tree, good for logs.']
+        : ['Rock', 'A rocky outcrop with a seam of copper.'],
+    );
+  }
+  return out;
+}
+
+const EXAMINE_NPC: Record<string, string> = {
+  goblin: 'An ugly green creature.',
+  rat: 'Overgrown vermin.',
+  guard: 'He looks bored, but capable.',
+};
+
+const EXAMINE_ITEM: Record<string, string> = {
+  bones: 'Bad to the bone.',
+  coins: 'Lovely money!',
+  logs: 'A number of wooden logs.',
+  copper_ore: 'This ore contains copper.',
+};
 
 /** The living NPC standing on a tile, if any — used to turn a click into an attack. */
 function npcAt(world: World, tile: Tile): Npc | null {

@@ -3,7 +3,7 @@ import * as THREE from 'three';
 /**
  * The classic RuneScape camera: it orbits a focus point (the player) at a fixed
  * distance, angled down toward the ground. Yaw and pitch are user-controlled
- * (middle/right-drag or the arrow keys) and the scroll wheel zooms. The camera
+ * (middle-drag or the arrow keys) and the scroll wheel zooms. The camera
  * smoothly chases the player rather than snapping, which reads well against the
  * discrete tile movement underneath.
  */
@@ -77,8 +77,9 @@ export class OrbitCamera {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
     this.canvas.addEventListener('pointerdown', (e) => {
-      // Middle or right button rotates, matching RuneScape conventions.
-      if (e.button === 1 || e.button === 2) {
+      // Middle button rotates; right-click is reserved for the context menu.
+      if (e.button === 1) {
+        e.preventDefault(); // suppress browser autoscroll
         this.dragging = true;
         this.lastX = e.clientX;
         this.lastY = e.clientY;

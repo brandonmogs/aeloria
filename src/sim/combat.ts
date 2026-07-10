@@ -19,6 +19,15 @@ export interface CombatProfile {
   style: AttackStyle;
 }
 
+/**
+ * A simplified OSRS combat level: defence and hitpoints weigh in at a quarter
+ * each, attack and strength together at 0.325. Matches the classic numbers for
+ * low-level monsters (a goblin lands on 2).
+ */
+export function combatLevel(attack: number, strength: number, defense: number, hitpoints: number): number {
+  return Math.max(1, Math.floor(0.25 * (defense + hitpoints) + 0.325 * (attack + strength)));
+}
+
 /** The skill an attack trains, given its style (controlled/shared XP comes later). */
 export function styleSkill(style: AttackStyle): 'attack' | 'strength' | 'defense' {
   if (style === 'aggressive') return 'strength';

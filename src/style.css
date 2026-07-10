@@ -130,6 +130,44 @@ body {
   }
 }
 
+/* OSRS-style right-click menu. */
+#context-menu {
+  position: fixed;
+  min-width: 160px;
+  background: #5d5447;
+  border: 1px solid #0e0c08;
+  border-radius: 3px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  z-index: 20;
+  user-select: none;
+  font: 13px ui-monospace, Menlo, Consolas, monospace;
+  padding: 0 0 2px;
+}
+
+.ctx-title {
+  padding: 3px 8px 2px;
+  background: #0e0c08;
+  color: #5d5447;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  border-radius: 2px 2px 0 0;
+}
+
+.ctx-row {
+  padding: 3px 8px;
+  color: #ffffff;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ctx-row:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.ctx-target {
+  color: #f5d442;
+}
+
 /* Golden level-up banner, front and center for a couple of seconds. */
 .levelup-banner {
   position: fixed;

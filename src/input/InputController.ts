@@ -22,6 +22,7 @@ export class InputController {
     private readonly canvas: HTMLCanvasElement,
     private readonly camera: OrbitCamera,
     private readonly onMoveTo: (target: Tile) => void,
+    private readonly onContextMenu?: (clientX: number, clientY: number, tile: Tile) => void,
   ) {
     this.bind();
   }
@@ -31,9 +32,14 @@ export class InputController {
       this.hoverTile = this.tileAt(e.clientX, e.clientY);
     });
     this.canvas.addEventListener('pointerdown', (e) => {
-      if (e.button !== 0) return; // left click walks; other buttons rotate the camera
+      if (e.button !== 0) return; // left click acts; middle rotates; right menus
       const target = this.tileAt(e.clientX, e.clientY);
       if (target) this.onMoveTo(target);
+    });
+    this.canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const target = this.tileAt(e.clientX, e.clientY);
+      if (target) this.onContextMenu?.(e.clientX, e.clientY, target);
     });
   }
 
