@@ -2,6 +2,7 @@ import { TileMap } from '../sim/TileMap';
 import { World } from '../sim/World';
 import { Entity } from '../sim/Entity';
 import { Prop } from '../sim/Scenery';
+import { Tile, tile } from '../sim/coords';
 import { OrbitCamera } from '../render/OrbitCamera';
 
 /**
@@ -35,6 +36,7 @@ export class MiniMap {
     private readonly trackedId: number,
     private readonly camera: OrbitCamera,
     props: ReadonlyArray<Prop>,
+    onClickTile?: (target: Tile) => void,
   ) {
     const res = map.width * this.px;
     this.canvas.width = res;
@@ -44,6 +46,18 @@ export class MiniMap {
     this.ctx = this.canvas.getContext('2d')!;
 
     this.terrain = this.bakeTerrain(props);
+
+    // Click-to-walk, like OSRS: map the click back to a tile.
+    if (onClickTile) {
+      this.canvas.addEventListener('pointerdown', (e) => {
+        const rect = this.canvas.getBoundingClientRect();
+        const cx = ((e.clientX - rect.left) / rect.width) * this.canvas.width;
+        const cy = ((e.clientY - rect.top) / rect.height) * this.canvas.height;
+        const x = Math.floor(cx / this.px);
+        const y = this.flipY(Math.floor(cy / this.px));
+        if (this.map.inBounds(x, y)) onClickTile(tile(x, y));
+      });
+    }
   }
 
   /** Redraw the live layer (terrain blit + actors). Call once per frame. */

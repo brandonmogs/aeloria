@@ -21,6 +21,7 @@ import { Compass } from './ui/Compass';
 import { MiniMap } from './ui/MiniMap';
 import { InventoryPanel } from './ui/InventoryPanel';
 import { MessageLog } from './ui/MessageLog';
+import { Orbs } from './ui/Orbs';
 import { XpDrops } from './ui/XpDrops';
 import { ContextMenu, MenuOption } from './ui/ContextMenu';
 import { Sfx } from './audio/Sfx';
@@ -91,12 +92,15 @@ function runGame(): void {
   const groundView = new GroundItemView(renderer.scene, world);
   const hud = new Hud();
   const compass = new Compass(renderer.camera);
-  const minimap = new MiniMap(map, world, player.id, renderer.camera, props);
   const panel = new InventoryPanel(player.inventory, player.skills);
   const log = new MessageLog();
   const xpDrops = new XpDrops();
   const menu = new ContextMenu();
+  const orbs = new Orbs();
   const sfx = new Sfx();
+  const minimap = new MiniMap(map, world, player.id, renderer.camera, props, (target) => {
+    commandQueue.push(moveCommand(player.id, target, orbs.runEnabled));
+  });
   log.add('Welcome to Aeloria.');
 
   // Start the camera already framing the player instead of flying in from origin.
@@ -123,7 +127,7 @@ function runGame(): void {
       } else if (node && node.regrowTimer <= 0) {
         commandQueue.push(gatherCommand(player.id, node.id));
       } else {
-        commandQueue.push(moveCommand(player.id, target));
+        commandQueue.push(moveCommand(player.id, target, orbs.runEnabled));
         tileView.showClickMarker(target);
       }
     },
@@ -165,7 +169,7 @@ function runGame(): void {
     options.push({
       verb: 'Walk here',
       onSelect: () => {
-        commandQueue.push(moveCommand(player.id, target));
+        commandQueue.push(moveCommand(player.id, target, orbs.runEnabled));
         tileView.showClickMarker(target);
       },
     });
@@ -247,6 +251,7 @@ function runGame(): void {
       hud.update(world, player, dt);
       compass.update();
       minimap.update();
+      orbs.update(player.hitpoints, player.maxHitpoints);
     },
   });
   loop.start();

@@ -12,6 +12,17 @@ export class Hud {
   private elapsed = 0;
   private fps = 0;
 
+  constructor() {
+    // Debug info hides by default now that real UI exists; F3 brings it back.
+    this.el.style.display = 'none';
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'F3') {
+        e.preventDefault();
+        this.el.style.display = this.el.style.display === 'none' ? '' : 'none';
+      }
+    });
+  }
+
   update(world: World, tracked: Entity, dt: number): void {
     this.frames++;
     this.elapsed += dt;
@@ -20,6 +31,7 @@ export class Hud {
       this.frames = 0;
       this.elapsed = 0;
     }
+    if (this.el.style.display === 'none') return;
 
     this.el.textContent = [
       'AELORIA · vertical slice',
