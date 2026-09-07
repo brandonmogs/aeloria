@@ -1,5 +1,5 @@
 import { World } from '../sim/World';
-import { Entity } from '../sim/Entity';
+import { Player } from '../sim/Player';
 
 /**
  * A tiny debug overlay: current tick, the tracked entity's tile, whether it's
@@ -23,7 +23,7 @@ export class Hud {
     });
   }
 
-  update(world: World, tracked: Entity, dt: number): void {
+  update(world: World, tracked: Player, dt: number): void {
     this.frames++;
     this.elapsed += dt;
     if (this.elapsed >= 0.5) {
@@ -38,6 +38,9 @@ export class Hud {
       `tick     ${world.tickCount}`,
       `tile     (${tracked.position.x}, ${tracked.position.y})`,
       `hp       ${tracked.hitpoints}/${tracked.maxHitpoints}`,
+      `prayer   ${tracked.prayerPoints}/${tracked.maxPrayerPoints}`,
+      `energy   ${(tracked.energy / 100).toFixed(0)}%`,
+      `weight   ${tracked.inventory.totalWeightKg().toFixed(1)} kg`,
       `moving   ${tracked.isMoving ? `yes (${tracked.path.length} left)` : 'no'}`,
       `fps      ${this.fps}`,
     ].join('\n');

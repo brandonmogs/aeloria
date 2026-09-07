@@ -39,6 +39,7 @@ import { Orbs } from './ui/Orbs';
 import { XpDrops } from './ui/XpDrops';
 import { ContextMenu, MenuOption } from './ui/ContextMenu';
 import { Sfx } from './audio/Sfx';
+import { Music } from './audio/Music';
 import { SKILL_META } from './ui/skillMeta';
 import { tileToWorld } from './render/coords3d';
 import { buildStartingWorld } from './world/startingWorld';
@@ -122,6 +123,12 @@ function runGame(): void {
   const xpDrops = new XpDrops();
   const menu = new ContextMenu();
   const sfx = new Sfx();
+  const music = new Music();
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'm' || e.key === 'M') {
+      log.add(music.toggle() ? 'Music: on.' : 'Music: off.');
+    }
+  });
 
   const orbs = new Orbs((on) => {
     commandQueue.push({ type: 'setRun', entityId: player.id, on });
@@ -263,12 +270,16 @@ function runGame(): void {
       const object = world.interactableAt(target);
       if (npc) {
         commandQueue.push(attackCommand(player.id, npc.id));
+        tileView.showClickMarker(target, 'interact');
       } else if (ground) {
         commandQueue.push(pickupCommand(player.id, ground.id));
+        tileView.showClickMarker(target, 'interact');
       } else if (node && node.regrowTimer <= 0) {
         commandQueue.push(gatherCommand(player.id, node.id));
+        tileView.showClickMarker(target, 'interact');
       } else if (object) {
         commandQueue.push({ type: 'interact', entityId: player.id, kind: object.kind, target });
+        tileView.showClickMarker(target, 'interact');
       } else {
         commandQueue.push(moveCommand(player.id, target));
         tileView.showClickMarker(target);

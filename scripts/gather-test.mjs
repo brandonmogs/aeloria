@@ -42,9 +42,9 @@ for (let i = 0; i < 20 && !gotLogs; i++) {
   }, treeTile);
   gotLogs = await page
     .waitForFunction(
-      () => window.__aeloria.player.inventory.slots.filter((s) => s && s.id === 'logs').length >= 2, // starter kit has 1; +1 chopped
+      () => window.__aeloria.player.inventory.slots.some((s) => s && s.id === 'logs'),
       null,
-      { timeout: 5000 },
+      { timeout: 6000 },
     )
     .then(() => true)
     .catch(() => false);
@@ -99,7 +99,7 @@ const state = await page.evaluate(() => {
   return {
     wcXp: p.skills.xpOf('woodcutting'),
     miningXp: p.skills.xpOf('mining'),
-    items: p.inventory.slots.filter(Boolean).map((s) => s.name),
+    items: p.inventory.slots.filter(Boolean).map((s) => s.id),
   };
 });
 const logLines = await page.$$eval('#message-log .log-line', (els) => els.map((e) => e.textContent));

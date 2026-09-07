@@ -14,6 +14,10 @@ const TESTS = [
   'sfx-test',
   'hud-test',
   'item-test',
+  'style-prayer-test',
+  'skilling-test',
+  'bank-test',
+  'death-test',
 ];
 
 const server = await createServer({ server: { port: 5199 } });

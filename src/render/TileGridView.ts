@@ -28,8 +28,14 @@ export class TileGridView {
     scene.add(this.marker);
   }
 
-  /** Pop the click marker at a tile; it fades over roughly one tick. */
-  showClickMarker(t: Tile): void {
+  /**
+   * Pop the click marker at a tile; it fades over roughly one tick. Yellow for
+   * a plain walk, red for an interaction — the OSRS X colours.
+   */
+  showClickMarker(t: Tile, kind: 'walk' | 'interact' = 'walk'): void {
+    (this.marker.material as THREE.MeshBasicMaterial).color.setHex(
+      kind === 'walk' ? 0xffd34d : 0xe84a3a,
+    );
     this.marker.position.set(t.x, 0.02, t.y);
     this.marker.visible = true;
     this.markerLife = 1;

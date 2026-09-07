@@ -57,7 +57,7 @@ const groundClear = await page
   .catch(() => false);
 
 const inv = await page.evaluate(() =>
-  window.__aeloria.player.inventory.slots.filter(Boolean).map((s) => s.name),
+  window.__aeloria.player.inventory.slots.filter(Boolean).map((s) => `${s.id} x${s.qty}`),
 );
 const logLines = await page.$$eval('#message-log .log-line', (els) =>
   els.map((e) => e.textContent),
