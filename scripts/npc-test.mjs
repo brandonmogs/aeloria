@@ -39,8 +39,12 @@ const wandered = await page.evaluate((prev) => {
   return moved;
 }, before);
 
-// Aggression: walk the player next to the goblin camp and see if one attacks.
-await page.evaluate(() => window.__aeloria.moveTo(21, 25));
+// Aggression: walk the player up to the goblin camp and see if one attacks.
+await page.evaluate(() => {
+  const { world } = window.__aeloria;
+  const goblin = [...world.entities.values()].find((e) => e.kind === 'goblin');
+  window.__aeloria.moveTo(goblin.spawnTile.x + 1, goblin.spawnTile.y);
+});
 const aggroed = await page
   .waitForFunction(
     () => {

@@ -479,13 +479,21 @@ function runGame(): void {
     itemDef,
     push: (cmd: Command) => commandQueue.push(cmd),
     attack: (npcName: string) => {
+      // Whatever is already on us wins (single-way combat lets us fight only
+      // that one), otherwise the nearest living NPC of that name.
+      let best: Npc | null = null;
+      let bestDist = Infinity;
       for (const e of world.entities.values()) {
-        if (e instanceof Npc && e.isAlive && e.name === npcName) {
-          commandQueue.push(attackCommand(player.id, e.id));
-          return e.id;
+        if (!(e instanceof Npc) || !e.isAlive || e.name !== npcName) continue;
+        const dist = e.targetId === player.id ? -1 : chebyshev(e.position, player.position);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = e;
         }
       }
-      return null;
+      if (!best) return null;
+      commandQueue.push(attackCommand(player.id, best.id));
+      return best.id;
     },
     moveTo: (x: number, y: number) => commandQueue.push(moveCommand(player.id, { x, y })),
     hoverTile: () => input.hoverTile,
@@ -514,8 +522,10 @@ function runGame(): void {
 function populateNpcs(world: World, map: TileMap): void {
   const respawn = Math.round(15 * TICKS_PER_SECOND);
 
-  // A camp of goblins on the grass south of the moat. Aggressive, like the
-  // low-level pests they are — but only toward adventurers near their level.
+  // A camp of goblins on the grass south-east of the approach. Aggressive,
+  // like the low-level pests they are — but only toward adventurers near their
+  // level — and sited so their wander-plus-aggro reach never covers the spawn
+  // tile: a fresh (re)spawn is safe, like Lumbridge's goblins across the river.
   const goblin = {
     name: 'Goblin',
     kind: 'goblin' as const,
@@ -534,7 +544,7 @@ function populateNpcs(world: World, map: TileMap): void {
       { itemId: 'bronze_med_helm', chance: 1 / 12 },
     ],
   };
-  for (const tile of [{ x: 22, y: 26 }, { x: 20, y: 24 }, { x: 24, y: 23 }, { x: 30, y: 27 }]) {
+  for (const tile of [{ x: 30, y: 21 }, { x: 28, y: 19 }, { x: 32, y: 22 }, { x: 27, y: 17 }]) {
     if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, goblin);
   }
 

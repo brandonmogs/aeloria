@@ -23,21 +23,27 @@ await page.evaluate((id) => {
   window.__aeloria.push({ type: 'setAutoRetaliate', entityId: id, on: false });
   window.__aeloria.push({ type: 'setRun', entityId: id, on: true });
 }, pid);
-await page.evaluate(() => window.__aeloria.attack('Goblin'));
-
-const styleXp = await page
-  .waitForFunction(
-    () => window.__aeloria.player.skills.xpOf('strength') > 0,
-    null,
-    { timeout: 60000 },
-  )
-  .then(() =>
-    page.evaluate(() => ({
-      strength: window.__aeloria.player.skills.xpOf('strength'),
-      attack: window.__aeloria.player.skills.xpOf('attack'),
-    })),
-  )
-  .catch(() => null);
+// Unarmed level-1 swings only draw blood about a quarter of the time, so keep
+// picking goblins (the nearest, or whichever is already on us) until one lands.
+let styleXp = null;
+for (let i = 0; i < 12 && !styleXp; i++) {
+  await page.evaluate(() => {
+    if (window.__aeloria.player.targetId === null) window.__aeloria.attack('Goblin');
+  });
+  styleXp = await page
+    .waitForFunction(
+      () => window.__aeloria.player.skills.xpOf('strength') > 0,
+      null,
+      { timeout: 10000 },
+    )
+    .then(() =>
+      page.evaluate(() => ({
+        strength: window.__aeloria.player.skills.xpOf('strength'),
+        attack: window.__aeloria.player.skills.xpOf('attack'),
+      })),
+    )
+    .catch(() => null);
+}
 
 // Bury a bone for Prayer XP.
 await page.evaluate((id) => {

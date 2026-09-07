@@ -30,7 +30,8 @@ modern WebGL (Three.js) instead of a 2007 Java engine.
   effective levels, prayer multipliers), four attack styles per weapon with
   style-routed XP (accurate/aggressive/defensive/controlled), weapon attack
   speeds, auto-retaliate toggle, swing / flinch / death animations, hitsplats,
-  and the full combat-level formula.
+  the full combat-level formula, and single-way combat (one opponent at a
+  time, with the classic "I'm already under attack" refusal).
 - **Skills** — twelve trainable skills on the authentic XP curve: melee combat
   plus Woodcutting, Mining, Fishing, Firemaking, Cooking, and Prayer.
 - **Skilling loops** — chop trees (4-tick rolls, axe tiers), mine rocks
@@ -48,7 +49,7 @@ modern WebGL (Three.js) instead of a 2007 Java engine.
   the orb un-toggles itself at 0%.
 - **NPCs** — goblin camp, giant rats, and castle guards with wiki-adjacent
   stats; aggression follows the OSRS rules (only players ≤ 2× the NPC's combat
-  level, ~10-minute tolerance), idle NPCs wander, and everything leashes home.
+  level + 1, ~10-minute tolerance, never someone already in a fight), idle NPCs wander, and everything leashes home.
 - **Loot & death** — drop tables with coin ranges and rare gear onto the death
   tile; items despawn after two minutes. Dying drops everything but your three
   most valuable items and respawns you at the castle approach.

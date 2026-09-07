@@ -32,6 +32,14 @@ export class Entity {
   attackCooldown = 0;
 
   /**
+   * Tick of this entity's last exchange of blows (dealt or taken) and who it
+   * was with. Single-way combat reads these: for a few ticks after a hit an
+   * entity is locked to that one opponent and nobody else may attack it.
+   */
+  lastCombatTick = Number.NEGATIVE_INFINITY;
+  lastCombatPartnerId: number | null = null;
+
+  /**
    * Damage amounts applied to this entity since the renderer last looked, so it
    * can pop a hitsplat. Render-only: the sim pushes, the view drains.
    */

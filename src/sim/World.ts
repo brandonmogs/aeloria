@@ -38,6 +38,13 @@ export interface Interactable {
 const TOLERANCE_TICKS = 1000;
 
 /**
+ * Single-way combat, the OSRS default everywhere outside multi-combat zones:
+ * after an exchange of blows both sides stay locked to each other for this
+ * many ticks, and during that window nobody else can attack either of them.
+ */
+const SINGLE_COMBAT_TICKS = 8;
+
+/**
  * The authoritative game state and the one function that advances it:
  * {@link tick}. The world is a pure simulation — no Three.js, no DOM, no
  * wall-clock time. Given the same starting state and the same per-tick command
@@ -231,6 +238,10 @@ export class World {
         case 'attack': {
           const target = this.entities.get(cmd.targetId);
           if (target && target.isAlive && target.id !== entity.id) {
+            if (!this.canEngage(entity, target)) {
+              if (entity instanceof Player) this.refuseEngagement(entity, target);
+              break;
+            }
             clearIntents();
             entity.targetId = cmd.targetId;
           }
@@ -336,8 +347,9 @@ export class World {
    * NPC behaviour outside combat: leash back home when dragged too far, pick a
    * fight with nearby players when aggressive, otherwise idle-wander around the
    * spawn tile. Aggression follows the OSRS rules: an NPC only jumps players
-   * whose combat level is at most twice its own, and it becomes tolerant after
-   * a player lingers ~10 minutes. All rolls use the seeded rng.
+   * whose combat level is at most twice its own plus one, never one already
+   * locked in single-way combat with someone else, and it becomes tolerant
+   * after a player lingers ~10 minutes. All rolls use the seeded rng.
    */
   private updateNpcAi(): void {
     for (const entity of this.entities.values()) {
@@ -364,7 +376,8 @@ export class World {
             !picked &&
             dist <= entity.aggroRange &&
             entity.toleranceTimer < TOLERANCE_TICKS &&
-            this.combatLevelOf(other) <= 2 * entity.combatLevel
+            this.combatLevelOf(other) <= 2 * entity.combatLevel + 1 &&
+            this.canEngage(entity, other)
           ) {
             entity.targetId = other.id;
             picked = true;
@@ -407,6 +420,15 @@ export class World {
         continue;
       }
 
+      if (!this.canEngage(entity, target)) {
+        // Single-way combat: that fight belongs to someone else. Players hear
+        // the classic refusal; NPCs stand down and try again once it is free.
+        if (entity instanceof Player) this.refuseEngagement(entity, target);
+        entity.targetId = null;
+        entity.path.length = 0;
+        continue;
+      }
+
       if (orthogonallyAdjacent(entity.position, target.position)) {
         entity.path.length = 0; // in range — stand and fight
         if (entity.attackCooldown <= 0) {
@@ -420,7 +442,39 @@ export class World {
     }
   }
 
+  /** Who `entity` is currently locked to in single-way combat, if anyone. */
+  private combatPartnerOf(entity: Entity): number | null {
+    if (this.tickCount - entity.lastCombatTick >= SINGLE_COMBAT_TICKS) return null;
+    return entity.lastCombatPartnerId;
+  }
+
+  /**
+   * Single-way combat: `attacker` may fight `target` only while neither of
+   * them is locked to somebody else.
+   */
+  private canEngage(attacker: Entity, target: Entity): boolean {
+    const theirs = this.combatPartnerOf(target);
+    if (theirs !== null && theirs !== attacker.id) return false;
+    const ours = this.combatPartnerOf(attacker);
+    if (ours !== null && ours !== target.id) return false;
+    return true;
+  }
+
+  /** The OSRS refusal lines for an attack single-way combat blocks. */
+  private refuseEngagement(player: Player, target: Entity): void {
+    const ours = this.combatPartnerOf(player);
+    this.say(
+      ours !== null && ours !== target.id ? "I'm already under attack." : 'Someone else is fighting that.',
+    );
+  }
+
   private performAttack(attacker: Entity, defender: Entity): void {
+    // Both sides are now locked to each other for the single-way window.
+    attacker.lastCombatTick = this.tickCount;
+    attacker.lastCombatPartnerId = defender.id;
+    defender.lastCombatTick = this.tickCount;
+    defender.lastCombatPartnerId = attacker.id;
+
     let damage = rollDamage(this.profileOf(attacker), this.profileOf(defender), this.rng);
 
     // Protect from Melee fully blocks NPC melee, exactly like OSRS.
@@ -489,6 +543,8 @@ export class World {
     }
     victim.targetId = null;
     victim.path.length = 0;
+    victim.lastCombatTick = Number.NEGATIVE_INFINITY;
+    victim.lastCombatPartnerId = null;
 
     if (victim instanceof Npc) {
       victim.respawnTimer = victim.respawnTicks; // stays dead, then returns

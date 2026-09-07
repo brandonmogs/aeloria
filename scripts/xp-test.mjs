@@ -25,9 +25,10 @@ await page.evaluate(() => {
 
 await page.evaluate(() => window.__aeloria.attack('Goblin'));
 
-// Wait for the first XP drop to appear.
+// Wait for the first XP drop: a walk to the camp, then unarmed level-1 swings
+// that only draw blood about a quarter of the time.
 const sawDrop = await page
-  .waitForSelector('.xp-drop', { timeout: 30000 })
+  .waitForSelector('.xp-drop', { timeout: 60000 })
   .then(() => true)
   .catch(() => false);
 await page.screenshot({ path: 'scripts/shots/xp-drop.png' });
