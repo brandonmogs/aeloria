@@ -20,7 +20,7 @@ const TESTS = [
   'death-test',
 ];
 
-const server = await createServer({ server: { port: 5199 } });
+const server = await createServer({ server: { port: 5199, open: false } });
 await server.listen();
 const url = 'http://localhost:5199';
 console.log(`dev server up at ${url}\n`);

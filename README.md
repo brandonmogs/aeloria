@@ -66,7 +66,7 @@ modern WebGL (Three.js) instead of a 2007 Java engine.
 
 ```bash
 npm install
-npm run dev      # starts Vite and opens the game
+npm run dev      # starts Vite on http://localhost:2006 and opens the game
 ```
 
 Other scripts: `npm run build` (typecheck + bundle), `npm run typecheck`,

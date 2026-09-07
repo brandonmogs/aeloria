@@ -3,7 +3,7 @@
 // and active prayers drain points on the OSRS curve.
 import { chromium } from 'playwright';
 
-const url = process.argv[2] ?? 'http://localhost:5173';
+const url = process.argv[2] ?? 'http://localhost:2006';
 
 const browser = await chromium.launch({ channel: 'msedge', args: ['--use-angle=d3d11'] });
 const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });

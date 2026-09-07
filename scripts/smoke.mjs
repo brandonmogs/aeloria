@@ -2,7 +2,7 @@
 // and reports console errors + FPS. Usage: node scripts/smoke.mjs [url]
 import { chromium } from 'playwright';
 
-const url = process.argv[2] ?? 'http://localhost:5173';
+const url = process.argv[2] ?? 'http://localhost:2006';
 const shot = process.argv[3] ?? 'scripts/shots/smoke.png';
 
 const browser = await chromium.launch({
