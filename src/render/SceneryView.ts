@@ -115,9 +115,49 @@ export class SceneryView {
         return this.buildGate();
       case 'castle-keep':
         return this.buildKeep();
+      case 'bank-booth':
+        return this.buildBankBooth();
+      case 'altar':
+        return this.buildAltar();
       default:
         return null;
     }
+  }
+
+  /** A timber banking counter with a gilt rail — the castle's bank. */
+  private buildBankBooth(): THREE.Object3D {
+    const g = new THREE.Group();
+    const counter = new THREE.Mesh(this.geo.boothBase, this.mat.bark);
+    counter.position.y = 0.45;
+    g.add(this.shadowed(counter));
+    const top = new THREE.Mesh(this.geo.boothTop, this.mat.roof);
+    top.position.y = 0.95;
+    g.add(this.shadowed(top));
+    const rail = new THREE.Mesh(this.geo.boothRail, this.mat.gold);
+    rail.position.set(0, 1.28, 0);
+    g.add(rail);
+    for (const sx of [-0.34, 0.34]) {
+      const post = new THREE.Mesh(this.geo.boothPost, this.mat.bark);
+      post.position.set(sx, 1.1, 0);
+      g.add(this.shadowed(post));
+    }
+    return g;
+  }
+
+  /** A stone altar with a glowing gilt star — recharge Prayer here. */
+  private buildAltar(): THREE.Object3D {
+    const g = new THREE.Group();
+    const base = new THREE.Mesh(this.geo.altarBase, this.mat.stone);
+    base.position.y = 0.35;
+    g.add(this.shadowed(base));
+    const slab = new THREE.Mesh(this.geo.altarSlab, this.mat.stone);
+    slab.position.y = 0.78;
+    g.add(this.shadowed(slab));
+    const icon = new THREE.Mesh(this.geo.altarIcon, this.mat.gold);
+    icon.position.y = 1.15;
+    icon.rotation.x = Math.PI / 2;
+    g.add(icon);
+    return g;
   }
 
   // --- Trees: three instanced meshes for the whole forest -------------------
@@ -415,6 +455,13 @@ function makeGeometries() {
     keepSpire: new RoundedBoxGeometry(1.4, 2.8, 1.4, 5, 0.1),
     keepRoof: new THREE.ConeGeometry(1.2, 1.9, 24),
     flag: new THREE.BoxGeometry(0.5, 0.34, 0.04),
+    boothBase: new RoundedBoxGeometry(0.92, 0.9, 0.6, 4, 0.05),
+    boothTop: new RoundedBoxGeometry(1.0, 0.12, 0.7, 3, 0.04),
+    boothRail: new THREE.BoxGeometry(0.9, 0.05, 0.05),
+    boothPost: new THREE.CylinderGeometry(0.035, 0.035, 0.6, 8),
+    altarBase: new RoundedBoxGeometry(0.9, 0.7, 0.66, 4, 0.06),
+    altarSlab: new RoundedBoxGeometry(1.05, 0.16, 0.8, 3, 0.05),
+    altarIcon: new THREE.TorusGeometry(0.14, 0.045, 10, 24),
   };
 }
 

@@ -3,8 +3,7 @@
  * the classic RuneScape XP curve. Like {@link Inventory}, this is pure
  * simulation state — no UI — so it can move to an authoritative server later.
  *
- * Only the starting set is modelled for now (combat skills). More slot in by
- * extending {@link SkillId} and {@link SKILL_IDS}.
+ * More skills slot in by extending {@link SkillId} and {@link SKILL_IDS}.
  */
 export type SkillId =
   | 'attack'
@@ -12,9 +11,13 @@ export type SkillId =
   | 'defense'
   | 'hitpoints'
   | 'range'
+  | 'prayer'
   | 'magic'
   | 'woodcutting'
-  | 'mining';
+  | 'mining'
+  | 'fishing'
+  | 'cooking'
+  | 'firemaking';
 
 /** Display/storage order. */
 export const SKILL_IDS: readonly SkillId[] = [
@@ -23,9 +26,13 @@ export const SKILL_IDS: readonly SkillId[] = [
   'defense',
   'hitpoints',
   'range',
+  'prayer',
   'magic',
   'woodcutting',
   'mining',
+  'fishing',
+  'cooking',
+  'firemaking',
 ];
 
 export const MAX_LEVEL = 99;
@@ -62,9 +69,13 @@ export class Skills {
     defense: 0,
     hitpoints: xpForLevel(10),
     range: 0,
+    prayer: 0,
     magic: 0,
     woodcutting: 0,
     mining: 0,
+    fishing: 0,
+    cooking: 0,
+    firemaking: 0,
   };
 
   xpOf(id: SkillId): number {

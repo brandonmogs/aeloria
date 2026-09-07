@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { World } from '../sim/World';
+import { itemDef } from '../sim/items';
 
 /**
  * Renders items lying on the ground as small billboarded icons that bob gently
@@ -25,7 +26,7 @@ export class GroundItemView {
       if (!sprite) {
         sprite = new THREE.Sprite(
           new THREE.SpriteMaterial({
-            map: this.textureFor(ground.item.icon ?? '📦'),
+            map: this.textureFor(itemDef(ground.item.id).icon),
             transparent: true,
           }),
         );

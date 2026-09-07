@@ -87,6 +87,47 @@ export class Sfx {
     this.tone({ freq: 200, to: 70, dur: 0.4, type: 'sawtooth', gain: 0.3 });
   }
 
+  /** Soft earth being turned over — burying bones. */
+  bury(): void {
+    this.noise({ dur: 0.16, freq: 300, q: 0.7, gain: 0.4 });
+    this.tone({ freq: 120, to: 80, dur: 0.14, type: 'sine', gain: 0.3 });
+  }
+
+  /** A wet splash — the fishing net hitting water. */
+  splash(): void {
+    this.noise({ dur: 0.16, freq: 900, q: 0.6, gain: 0.35 });
+    this.tone({ freq: 520, to: 160, dur: 0.14, type: 'sine', gain: 0.22 });
+  }
+
+  /** Crackling kindling catching light. */
+  light(): void {
+    this.noise({ dur: 0.3, freq: 2400, q: 0.8, gain: 0.3 });
+    this.noise({ dur: 0.18, freq: 1100, q: 1.2, gain: 0.25, delay: 0.08 });
+  }
+
+  /** A short sizzle — food on the fire. */
+  cook(): void {
+    this.noise({ dur: 0.25, freq: 3200, q: 0.9, gain: 0.28 });
+  }
+
+  /** A bright chime up — activating a prayer. */
+  prayerOn(): void {
+    this.tone({ freq: 660, to: 990, dur: 0.16, type: 'triangle', gain: 0.3 });
+  }
+
+  /** The same chime, falling — a prayer switching off. */
+  prayerOff(): void {
+    this.tone({ freq: 660, to: 440, dur: 0.14, type: 'triangle', gain: 0.24 });
+  }
+
+  /** A warm swell — recharging at the altar. */
+  recharge(): void {
+    const notes = [392, 523.25, 659.25];
+    notes.forEach((freq, i) => {
+      this.tone({ freq, dur: 0.3, type: 'sine', gain: 0.25, delay: i * 0.07 });
+    });
+  }
+
   private tone(o: {
     freq: number;
     to?: number;

@@ -3,7 +3,8 @@ import { World } from '../sim/World';
 import { Entity } from '../sim/Entity';
 import { Player } from '../sim/Player';
 import { Npc } from '../sim/Npc';
-import { EquipSlot, EQUIP_SLOTS, Item } from '../sim/Inventory';
+import { EquipSlot, EQUIP_SLOTS } from '../sim/Inventory';
+import { ItemStack } from '../sim/items';
 import {
   buildHelmet,
   buildChest,
@@ -52,6 +53,8 @@ interface Avatar {
   lastHpFrac: number;
   /** Height above the avatar origin for the health bar / hitsplats. */
   barHeight: number;
+  /** Overhead prayer icon (Protect from Melee), created lazily for players. */
+  overhead?: THREE.Sprite;
 }
 
 /** A drifting damage number spawned when an entity is hit. */
@@ -154,8 +157,19 @@ export class EntityView {
         avatar.swingT = SWING_TIME;
         entity.swingQueue.length = 0;
       }
+      // Working a node (or a tinderbox/fire): keep the swing cycling even
+      // between the sim's spaced-out harvest rolls.
+      if (
+        entity instanceof Player &&
+        (entity.gatherTarget !== null || entity.action !== null) &&
+        !moving &&
+        avatar.swingT <= 0
+      ) {
+        avatar.swingT = SWING_TIME;
+      }
       this.animate(avatar, moving, dt);
       this.updateHealthBar(avatar, entity);
+      this.updateOverhead(avatar, entity);
       this.spawnSplats(avatar, entity);
     }
 
@@ -179,6 +193,21 @@ export class EntityView {
       avatar.hpTex.needsUpdate = true;
       avatar.lastHpFrac = frac;
     }
+  }
+
+  /** Show the OSRS-style overhead icon while Protect from Melee is active. */
+  private updateOverhead(avatar: Avatar, entity: Entity): void {
+    const active = entity instanceof Player && entity.activePrayers.has('protect_from_melee');
+    if (!active) {
+      if (avatar.overhead) avatar.overhead.visible = false;
+      return;
+    }
+    if (!avatar.overhead) {
+      avatar.overhead = makeOverheadSprite();
+      avatar.overhead.position.set(0, avatar.barHeight + 0.42, 0);
+      avatar.group.add(avatar.overhead);
+    }
+    avatar.overhead.visible = true;
   }
 
   /** Drain the sim's hit queue into floating damage numbers above the entity. */
@@ -301,7 +330,7 @@ export class EntityView {
   }
 
   /** Tear down the worn gear and rebuild it from the current equipment. */
-  private rebuildGear(avatar: Avatar, eq: Record<EquipSlot, Item | null>): void {
+  private rebuildGear(avatar: Avatar, eq: Record<EquipSlot, ItemStack | null>): void {
     for (const obj of avatar.gear) obj.parent?.remove(obj);
     avatar.gear = [];
     avatar.cape = undefined;
@@ -462,8 +491,36 @@ function buildHumanAvatar(palette: HumanPalette): Avatar {
 }
 
 /** Stable string of equipped item ids, so EntityView can spot a change cheaply. */
-function equipSignature(eq: Record<EquipSlot, Item | null>): string {
+function equipSignature(eq: Record<EquipSlot, ItemStack | null>): string {
   return EQUIP_SLOTS.map((s) => eq[s]?.id ?? '-').join('|');
+}
+
+/** The Protect from Melee overhead: crossed swords on a sky-blue disc. */
+function makeOverheadSprite(): THREE.Sprite {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d')!;
+  ctx.fillStyle = '#79c8e8';
+  ctx.beginPath();
+  ctx.arc(32, 32, 28, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#1d3a4a';
+  ctx.lineWidth = 3;
+  ctx.stroke();
+  ctx.font = '34px serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('⚔️', 32, 34);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  const sprite = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
+  );
+  sprite.scale.set(0.42, 0.42, 1);
+  sprite.renderOrder = 11;
+  return sprite;
 }
 
 const CAPE_TOP_WIDTH = 0.34;

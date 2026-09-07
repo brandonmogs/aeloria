@@ -27,6 +27,8 @@ export class MiniMap {
     'castle-tower': '#cfc8b8',
     'castle-gate': '#a89a82',
     'castle-keep': '#d4ccba',
+    'bank-booth': '#c79c4e',
+    altar: '#efe6c8',
     water: '#2f6f9e',
   };
 

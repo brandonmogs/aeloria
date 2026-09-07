@@ -4,7 +4,7 @@ import { TileMap } from './sim/TileMap';
 import { World } from './sim/World';
 import { Player } from './sim/Player';
 import { Npc } from './sim/Npc';
-import { Tile, tilesEqual } from './sim/coords';
+import { Tile, chebyshev, tilesEqual } from './sim/coords';
 import {
   Command,
   moveCommand,
@@ -13,6 +13,8 @@ import {
   gatherCommand,
   useItemCommand,
   dropItemCommand,
+  equipItemCommand,
+  unequipItemCommand,
 } from './sim/commands';
 import { GameLoop } from './engine/GameLoop';
 import { TICKS_PER_SECOND } from './engine/constants';
@@ -22,19 +24,22 @@ import { SceneryView } from './render/SceneryView';
 import { WaterView } from './render/WaterView';
 import { EntityView } from './render/EntityView';
 import { GroundItemView } from './render/GroundItemView';
+import { FireView } from './render/FireView';
+import { FishingSpotView } from './render/FishingSpotView';
 import { InputController } from './input/InputController';
 import { xpForLevel } from './sim/Skills';
+import { ItemStack, itemDef } from './sim/items';
 import { Hud } from './ui/Hud';
 import { Compass } from './ui/Compass';
 import { MiniMap } from './ui/MiniMap';
 import { InventoryPanel } from './ui/InventoryPanel';
+import { BankPanel } from './ui/BankPanel';
 import { MessageLog } from './ui/MessageLog';
 import { Orbs } from './ui/Orbs';
 import { XpDrops } from './ui/XpDrops';
 import { ContextMenu, MenuOption } from './ui/ContextMenu';
 import { Sfx } from './audio/Sfx';
 import { SKILL_META } from './ui/skillMeta';
-import { combatLevel } from './sim/combat';
 import { tileToWorld } from './render/coords3d';
 import { buildStartingWorld } from './world/startingWorld';
 import { hasWebGL, showFatal, installErrorHandlers } from './diagnostics';
@@ -75,20 +80,31 @@ function start(): void {
 function runGame(): void {
   // --- Simulation ----------------------------------------------------------
   const map = new TileMap(MAP_W, MAP_H);
-  const { props, spawn, moat } = buildStartingWorld(map);
+  const { props, spawn, moat, fishingSpotGroups } = buildStartingWorld(map);
 
   const world = new World(map);
   const player = world.spawnPlayer(spawn, 'You');
   giveStarterKit(player);
 
-  // Every tree and rock prop is also a gatherable resource node in the sim.
+  // Every tree and rock prop is also a gatherable resource node in the sim,
+  // and the courtyard furniture becomes usable world objects.
   for (const prop of props) {
     if (prop.kind === 'tree' || prop.kind === 'rock') {
       world.addResourceNode(prop.kind, prop.tile);
+    } else if (prop.kind === 'bank-booth') {
+      world.addInteractable('bank', prop.tile);
+    } else if (prop.kind === 'altar') {
+      world.addInteractable('altar', prop.tile);
     }
   }
+  for (const group of fishingSpotGroups) world.addFishingSpotGroup(group);
 
   populateNpcs(world, map);
+
+  // --- Input → command queue -----------------------------------------------
+  // Clicks become commands that are drained into the sim on the next tick. This
+  // queue is the stand-in for "messages sent to the server".
+  const commandQueue: Command[] = [];
 
   // --- Rendering -----------------------------------------------------------
   const canvas = document.getElementById('game') as HTMLCanvasElement;
@@ -98,65 +114,163 @@ function runGame(): void {
   const water = new WaterView(renderer.scene, moat, renderer.sunDirection);
   const entityView = new EntityView(renderer.scene, world);
   const groundView = new GroundItemView(renderer.scene, world);
+  const fireView = new FireView(renderer.scene, world);
+  const spotView = new FishingSpotView(renderer.scene, world);
   const hud = new Hud();
   const compass = new Compass(renderer.camera);
-  const panel = new InventoryPanel(player.inventory, player.skills, (index, item, x, y) => {
-    const options: MenuOption[] = [];
-    if (item.heals !== undefined) {
-      options.push({
-        verb: 'Eat',
-        target: item.name,
-        onSelect: () => commandQueue.push(useItemCommand(player.id, index)),
-      });
-    }
-    options.push({
-      verb: 'Drop',
-      target: item.name,
-      onSelect: () => commandQueue.push(dropItemCommand(player.id, index)),
-    });
-    options.push({
-      verb: 'Examine',
-      target: item.name,
-      onSelect: () => log.add(EXAMINE_ITEM[item.id] ?? 'A useful item.'),
-    });
-    options.push({ verb: 'Cancel' });
-    menu.open(x, y, options);
-  });
   const log = new MessageLog();
   const xpDrops = new XpDrops();
   const menu = new ContextMenu();
-  const orbs = new Orbs();
   const sfx = new Sfx();
+
+  const orbs = new Orbs((on) => {
+    commandQueue.push({ type: 'setRun', entityId: player.id, on });
+  });
+
+  const bankPanel = new BankPanel(player, {
+    onWithdraw: (itemId, qty) =>
+      commandQueue.push({ type: 'bankWithdraw', entityId: player.id, itemId, qty }),
+    onStackMenu: (itemId, x, y) => {
+      const def = itemDef(itemId);
+      const withdraw = (qty: number): MenuOption => ({
+        verb: qty < 0 ? 'Withdraw-All' : `Withdraw-${qty}`,
+        target: def.name,
+        onSelect: () =>
+          commandQueue.push({ type: 'bankWithdraw', entityId: player.id, itemId, qty }),
+      });
+      menu.open(x, y, [
+        withdraw(1),
+        withdraw(5),
+        withdraw(-1),
+        { verb: 'Examine', target: def.name, onSelect: () => log.add(def.examine) },
+        { verb: 'Cancel' },
+      ]);
+    },
+    onDepositAll: () => commandQueue.push({ type: 'bankDepositAll', entityId: player.id }),
+  });
+
+  const panel = new InventoryPanel(world, player, {
+    onItemMenu: (index, item, x, y) => menu.open(x, y, itemMenuOptions(index, item)),
+    onItemQuick: (index, item) => {
+      if (bankPanel.isOpen) {
+        commandQueue.push({ type: 'bankDeposit', entityId: player.id, slot: index, qty: 1 });
+        return;
+      }
+      const def = itemDef(item.id);
+      if (def.heals !== undefined || def.buryXp !== undefined) {
+        commandQueue.push(useItemCommand(player.id, index));
+      } else if (def.equip) {
+        commandQueue.push(equipItemCommand(player.id, index));
+      }
+    },
+    onEquip: (index) => commandQueue.push(equipItemCommand(player.id, index)),
+    onUnequip: (slot) => commandQueue.push(unequipItemCommand(player.id, slot)),
+    onSetStyle: (index) => commandQueue.push({ type: 'setStyle', entityId: player.id, index }),
+    onSetAutoRetaliate: (on) =>
+      commandQueue.push({ type: 'setAutoRetaliate', entityId: player.id, on }),
+    onTogglePrayer: (prayerId) =>
+      commandQueue.push({ type: 'togglePrayer', entityId: player.id, prayerId }),
+  });
+
   const minimap = new MiniMap(map, world, player.id, renderer.camera, props, (target) => {
-    commandQueue.push(moveCommand(player.id, target, orbs.runEnabled));
+    commandQueue.push(moveCommand(player.id, target));
+    tileView.showClickMarker(target);
   });
   log.add('Welcome to Aeloria.');
 
   // Start the camera already framing the player instead of flying in from origin.
   renderer.camera.focus.copy(tileToWorld(player.position));
 
-  // --- Input → command queue -----------------------------------------------
-  // Clicks become commands that are drained into the sim on the next tick. This
-  // queue is the stand-in for "messages sent to the server".
-  const commandQueue: Command[] = [];
+  /** Right-click options for a backpack item, OSRS verb-first. */
+  function itemMenuOptions(index: number, item: ItemStack): MenuOption[] {
+    const def = itemDef(item.id);
+    const options: MenuOption[] = [];
+
+    if (bankPanel.isOpen) {
+      const deposit = (qty: number): MenuOption => ({
+        verb: qty < 0 ? 'Deposit-All' : `Deposit-${qty}`,
+        target: def.name,
+        onSelect: () =>
+          commandQueue.push({ type: 'bankDeposit', entityId: player.id, slot: index, qty }),
+      });
+      return [
+        deposit(1),
+        deposit(5),
+        deposit(-1),
+        { verb: 'Examine', target: def.name, onSelect: () => log.add(def.examine) },
+        { verb: 'Cancel' },
+      ];
+    }
+
+    if (def.heals !== undefined) {
+      options.push({
+        verb: 'Eat',
+        target: def.name,
+        onSelect: () => commandQueue.push(useItemCommand(player.id, index)),
+      });
+    }
+    if (def.buryXp !== undefined) {
+      options.push({
+        verb: 'Bury',
+        target: def.name,
+        onSelect: () => commandQueue.push(useItemCommand(player.id, index)),
+      });
+    }
+    if (def.firemakingXp !== undefined) {
+      options.push({
+        verb: 'Light',
+        target: def.name,
+        onSelect: () => commandQueue.push({ type: 'lightFire', entityId: player.id, slot: index }),
+      });
+    }
+    if (def.equip) {
+      options.push({
+        verb: def.equip === 'weapon' ? 'Wield' : 'Wear',
+        target: def.name,
+        onSelect: () => commandQueue.push(equipItemCommand(player.id, index)),
+      });
+    }
+    options.push({
+      verb: 'Drop',
+      target: def.name,
+      onSelect: () => commandQueue.push(dropItemCommand(player.id, index)),
+    });
+    options.push({ verb: 'Examine', target: def.name, onSelect: () => log.add(def.examine) });
+    options.push({ verb: 'Cancel' });
+    return options;
+  }
+
+  /** OSRS tints an NPC's "(level-X)" by how it compares to yours. */
+  function levelColor(npcLevel: number): string {
+    const diff = npcLevel - world.combatLevelOf(player);
+    if (diff < -9) return '#00ff00';
+    if (diff < -3) return '#8fe83a';
+    if (diff <= 3) return '#ffff00';
+    if (diff <= 9) return '#ff9040';
+    return '#ff0000';
+  }
+
   const input = new InputController(
     canvas,
     renderer.camera,
     (target) => {
       // Left click = the default action: attack NPC > take item > gather >
-      // walk. (The same priority order the context menu lists.)
+      // use object > walk. (The same priority order the context menu lists.)
       if (menu.isOpen) return;
       const npc = npcAt(world, target);
       const ground = world.groundItemAt(target);
       const node = world.resourceNodeAt(target);
+      const object = world.interactableAt(target);
       if (npc) {
         commandQueue.push(attackCommand(player.id, npc.id));
       } else if (ground) {
         commandQueue.push(pickupCommand(player.id, ground.id));
       } else if (node && node.regrowTimer <= 0) {
         commandQueue.push(gatherCommand(player.id, node.id));
+      } else if (object) {
+        commandQueue.push({ type: 'interact', entityId: player.id, kind: object.kind, target });
       } else {
-        commandQueue.push(moveCommand(player.id, target, orbs.runEnabled));
+        commandQueue.push(moveCommand(player.id, target));
         tileView.showClickMarker(target);
       }
     },
@@ -171,39 +285,72 @@ function runGame(): void {
     const npc = npcAt(world, target);
     const ground = world.groundItemAt(target);
     const node = world.resourceNodeAt(target);
+    const fire = world.fireAt(target);
+    const object = world.interactableAt(target);
 
     if (npc) {
-      const level = combatLevel(npc.attack, npc.strength, npc.defense, npc.maxHitpoints);
+      const level = npc.combatLevel;
       options.push({
         verb: 'Attack',
         target: `${npc.name} (level-${level})`,
+        targetColor: levelColor(level),
         onSelect: () => commandQueue.push(attackCommand(player.id, npc.id)),
       });
     }
     if (ground) {
       options.push({
         verb: 'Take',
-        target: ground.item.name,
+        target: itemDef(ground.item.id).name,
         onSelect: () => commandQueue.push(pickupCommand(player.id, ground.id)),
       });
     }
     if (node && node.regrowTimer <= 0) {
+      const verbs: Record<string, [string, string]> = {
+        tree: ['Chop down', 'Tree'],
+        rock: ['Mine', 'Rock'],
+        fishing_spot: ['Net', 'Fishing spot'],
+      };
+      const [verb, name] = verbs[node.kind];
       options.push({
-        verb: node.kind === 'tree' ? 'Chop down' : 'Mine',
-        target: node.kind === 'tree' ? 'Tree' : 'Rock',
+        verb,
+        target: name,
         onSelect: () => commandQueue.push(gatherCommand(player.id, node.id)),
+      });
+    }
+    if (fire) {
+      // One Cook row per distinct raw food in the backpack.
+      const seen = new Set<string>();
+      for (const s of player.inventory.slots) {
+        if (!s || seen.has(s.id)) continue;
+        seen.add(s.id);
+        const def = itemDef(s.id);
+        if (!def.cooking) continue;
+        options.push({
+          verb: 'Cook',
+          target: def.name,
+          onSelect: () =>
+            commandQueue.push({ type: 'cook', entityId: player.id, fireId: fire.id, itemId: s.id }),
+        });
+      }
+    }
+    if (object) {
+      options.push({
+        verb: object.kind === 'bank' ? 'Bank' : 'Pray-at',
+        target: object.kind === 'bank' ? 'Bank booth' : 'Altar',
+        onSelect: () =>
+          commandQueue.push({ type: 'interact', entityId: player.id, kind: object.kind, target }),
       });
     }
 
     options.push({
       verb: 'Walk here',
       onSelect: () => {
-        commandQueue.push(moveCommand(player.id, target, orbs.runEnabled));
+        commandQueue.push(moveCommand(player.id, target));
         tileView.showClickMarker(target);
       },
     });
 
-    for (const [name, text] of examinables(npc, ground, node)) {
+    for (const [name, text] of examinables(npc, ground, node, fire, object)) {
       options.push({ verb: 'Examine', target: name, onSelect: () => log.add(text) });
     }
 
@@ -221,10 +368,13 @@ function runGame(): void {
           break;
         case 'levelup':
           if (ev.entityId === player.id) {
+            const label = SKILL_META[ev.skill].label;
+            const article = /^[aeiou]/i.test(label) ? 'an' : 'a';
             xpDrops.levelUp(ev.skill, ev.level);
             sfx.levelUp();
             log.add(
-              `Congratulations! Your ${SKILL_META[ev.skill].label} level is now ${ev.level}.`,
+              `Congratulations, you just advanced ${article} ${label} level. ` +
+                `Your ${label} level is now ${ev.level}.`,
               'levelup',
             );
           }
@@ -239,6 +389,7 @@ function runGame(): void {
           if (ev.entityId === player.id) {
             log.add('Oh dear, you are dead!', 'danger');
             sfx.death();
+            bankPanel.close();
           }
           break;
         case 'hit':
@@ -247,13 +398,20 @@ function runGame(): void {
           break;
         case 'swing':
           if (ev.kind === 'chop') sfx.chop();
-          else sfx.mine();
+          else if (ev.kind === 'mine') sfx.mine();
+          else sfx.splash();
           break;
         case 'pickup':
           sfx.pickup();
           break;
         case 'ate':
           sfx.eat();
+          break;
+        case 'sfx':
+          sfx[ev.name]();
+          break;
+        case 'openBank':
+          if (ev.entityId === player.id) bankPanel.open();
           break;
         case 'message':
           log.add(ev.text);
@@ -262,16 +420,29 @@ function runGame(): void {
     }
   };
 
+  /** The bank screen closes once you wander off, like OSRS. */
+  const closeBankIfFar = (): void => {
+    if (!bankPanel.isOpen) return;
+    const near = world.interactables.some(
+      (i) => i.kind === 'bank' && chebyshev(player.position, i.tile) <= 2,
+    );
+    if (!near) bankPanel.close();
+  };
+
   const loop = new GameLoop({
     onTick: () => {
       world.tick(commandQueue.splice(0));
       drainEvents();
-      panel.refresh(); // reflect XP/level changes from combat this tick
+      closeBankIfFar();
+      panel.refresh(); // reflect XP/level/inventory changes from this tick
+      bankPanel.refresh();
     },
     onRender: (alpha, dt) => {
       water.update(dt);
       entityView.sync(alpha, dt);
       groundView.sync(dt);
+      fireView.sync(dt);
+      spotView.sync(dt);
       scenery.sync(world);
 
       const followTarget = entityView.positionOf(player.id);
@@ -283,7 +454,7 @@ function runGame(): void {
       hud.update(world, player, dt);
       compass.update();
       minimap.update();
-      orbs.update(player.hitpoints, player.maxHitpoints);
+      orbs.update(player);
     },
   });
   loop.start();
@@ -294,6 +465,7 @@ function runGame(): void {
     world,
     player,
     xpForLevel,
+    itemDef,
     push: (cmd: Command) => commandQueue.push(cmd),
     attack: (npcName: string) => {
       for (const e of world.entities.values()) {
@@ -313,17 +485,26 @@ function runGame(): void {
       if (node) commandQueue.push(gatherCommand(player.id, node.id));
       return node?.id ?? null;
     },
+    give: (id: string, qty = 1) => player.inventory.add(id, qty),
+    fish: () => {
+      for (const node of world.resourceNodes.values()) {
+        if (node.kind === 'fishing_spot') {
+          commandQueue.push(gatherCommand(player.id, node.id));
+          return node.id;
+        }
+      }
+      return null;
+    },
+    bankIsOpen: () => bankPanel.isOpen,
   };
 }
 
-/** The starting cast: a goblin camp, sewer rats by the treeline, gate guards. */
+/** The starting cast: a goblin camp, giant rats by the treeline, gate guards. */
 function populateNpcs(world: World, map: TileMap): void {
-  const bones = { id: 'bones', name: 'Bones', icon: '🦴' };
-  const coins = { id: 'coins', name: 'Coins', icon: '🪙' };
   const respawn = Math.round(15 * TICKS_PER_SECOND);
 
   // A camp of goblins on the grass south of the moat. Aggressive, like the
-  // low-level pests they are.
+  // low-level pests they are — but only toward adventurers near their level.
   const goblin = {
     name: 'Goblin',
     kind: 'goblin' as const,
@@ -336,48 +517,60 @@ function populateNpcs(world: World, map: TileMap): void {
     aggroRange: 2,
     wanderRadius: 3,
     drops: [
-      { item: bones, chance: 1 },
-      { item: coins, chance: 0.5 },
+      { itemId: 'bones', chance: 1 },
+      { itemId: 'coins', chance: 0.5, min: 5, max: 24 },
+      { itemId: 'bronze_scimitar', chance: 1 / 16 },
+      { itemId: 'bronze_med_helm', chance: 1 / 12 },
     ],
   };
   for (const tile of [{ x: 22, y: 26 }, { x: 20, y: 24 }, { x: 24, y: 23 }, { x: 30, y: 27 }]) {
     if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, goblin);
   }
 
-  // Giant rats scurrying along the southern treeline. Weak but bitey.
+  // Giant rats scurrying along the southern treeline. Weak but bitey, and a
+  // steady source of meat for the cooking fire.
   const rat = {
     name: 'Giant rat',
     kind: 'rat' as const,
-    attack: 1,
-    strength: 1,
-    defense: 1,
-    maxHitpoints: 3,
+    attack: 2,
+    strength: 3,
+    defense: 2,
+    maxHitpoints: 5,
     attackSpeed: 4,
     respawnTicks: respawn,
     aggroRange: 2,
     wanderRadius: 4,
-    drops: [{ item: bones, chance: 1 }],
+    drops: [
+      { itemId: 'bones', chance: 1 },
+      { itemId: 'raw_rat_meat', chance: 1 },
+    ],
   };
   for (const tile of [{ x: 18, y: 12 }, { x: 27, y: 10 }, { x: 31, y: 13 }]) {
     if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, rat);
   }
 
   // Two guards flanking the bridge approach. Passive, but they hit back hard —
-  // a first "don't poke that yet" enemy.
+  // and their pockets hold the first real gear upgrades.
   const guard = {
     name: 'Guard',
     kind: 'guard' as const,
     attack: 15,
-    strength: 14,
-    defense: 12,
+    strength: 15,
+    defense: 15,
     maxHitpoints: 22,
     attackSpeed: 5,
     respawnTicks: respawn * 2,
     aggroRange: 0,
     wanderRadius: 2,
     drops: [
-      { item: bones, chance: 1 },
-      { item: coins, chance: 1 },
+      { itemId: 'bones', chance: 1 },
+      { itemId: 'coins', chance: 0.9, min: 4, max: 36 },
+      { itemId: 'iron_scimitar', chance: 0.08 },
+      { itemId: 'steel_scimitar', chance: 0.03 },
+      { itemId: 'iron_pickaxe', chance: 0.04 },
+      { itemId: 'steel_axe', chance: 0.04 },
+      { itemId: 'bread', chance: 0.1 },
+      { itemId: 'holy_symbol', chance: 0.02 },
     ],
   };
   for (const tile of [{ x: 22, y: 31 }, { x: 26, y: 31 }]) {
@@ -386,57 +579,46 @@ function populateNpcs(world: World, map: TileMap): void {
 }
 
 /**
- * Seeds the player with a few items so the inventory screen has something to
- * drag and equip, and grants the max cape so its animation is visible. This is
- * placeholder content — real drops and a skills-driven cape come later.
+ * A fresh adventurer's kit, straight off the boat: a bronze blade and the
+ * tools for every starting skill. Levels begin at 1 — the OSRS way.
  */
 function giveStarterKit(player: Player): void {
-  // A fresh adventurer, not a newborn: level 10 melee stats so early fights
-  // resolve in a handful of hits instead of a war of 1s.
-  player.skills.addXp('attack', xpForLevel(10));
-  player.skills.addXp('strength', xpForLevel(10));
-  player.skills.addXp('defense', xpForLevel(10));
-
   const inv = player.inventory;
-  inv.slots[0] = { id: 'bronze_helm', name: 'Bronze Helmet', icon: '⛑️', equip: 'helmet' };
-  inv.slots[1] = { id: 'iron_platebody', name: 'Iron Platebody', icon: '🦺', equip: 'chestplate' };
-  inv.slots[2] = { id: 'steel_platelegs', name: 'Steel Platelegs', icon: '👖', equip: 'legs' };
-  inv.slots[3] = { id: 'leather_boots', name: 'Leather Boots', icon: '🥾', equip: 'boots' };
-  inv.slots[4] = {
-    id: 'iron_sword',
-    name: 'Iron Sword',
-    icon: '🗡️',
-    equip: 'weapon',
-    attackBonus: 12,
-    strengthBonus: 14,
-  };
-  inv.slots[5] = { id: 'wooden_shield', name: 'Wooden Shield', icon: '🛡️', equip: 'shield' };
-  inv.slots[6] = { id: 'leather_gloves', name: 'Leather Gloves', icon: '🧤', equip: 'gloves' };
-  inv.slots[7] = { id: 'gold_ring', name: 'Gold Ring', icon: '💍', equip: 'ring' };
-  inv.slots[8] = { id: 'coins', name: '100 Coins', icon: '🪙' };
-  inv.slots[9] = { id: 'logs', name: 'Logs', icon: '🪵' };
-  inv.slots[10] = { id: 'bread', name: 'Bread', icon: '🍞', heals: 5 };
-
-  inv.equipment.cape = { id: 'max_cape', name: 'Max Cape', icon: '🧥', equip: 'cape' };
-
-  // Until the skills system exists, grant the cape directly so it renders.
-  player.maxCape = true;
+  inv.add('bronze_scimitar');
+  inv.add('wooden_shield');
+  inv.add('bronze_axe');
+  inv.add('bronze_pickaxe');
+  inv.add('tinderbox');
+  inv.add('small_fishing_net');
+  inv.add('bread');
+  inv.add('coins', 25);
 }
 
 /** Flavor text for whatever is examinable on a tile. */
 function examinables(
   npc: Npc | null,
-  ground: { item: { name: string; id: string } } | null,
-  node: { kind: 'tree' | 'rock'; regrowTimer: number } | null,
+  ground: { item: ItemStack } | null,
+  node: { kind: 'tree' | 'rock' | 'fishing_spot'; regrowTimer: number } | null,
+  fire: unknown | null,
+  object: { kind: 'bank' | 'altar' } | null,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   if (npc) out.push([npc.name, EXAMINE_NPC[npc.kind] ?? 'A creature.']);
-  if (ground) out.push([ground.item.name, EXAMINE_ITEM[ground.item.id] ?? 'A useful item.']);
+  if (ground) out.push([itemDef(ground.item.id).name, itemDef(ground.item.id).examine]);
   if (node && node.regrowTimer <= 0) {
+    const texts: Record<string, [string, string]> = {
+      tree: ['Tree', 'A leafy tree, good for logs.'],
+      rock: ['Rock', 'A rocky outcrop with a seam of copper.'],
+      fishing_spot: ['Fishing spot', 'Something is stirring beneath the surface.'],
+    };
+    out.push(texts[node.kind]);
+  }
+  if (fire) out.push(['Fire', 'A warm crackling fire, good for cooking.']);
+  if (object) {
     out.push(
-      node.kind === 'tree'
-        ? ['Tree', 'A leafy tree, good for logs.']
-        : ['Rock', 'A rocky outcrop with a seam of copper.'],
+      object.kind === 'bank'
+        ? ['Bank booth', 'Your valuables, kept safe for a modest smile.']
+        : ['Altar', 'An altar to the gods of Aeloria.'],
     );
   }
   return out;
@@ -446,14 +628,6 @@ const EXAMINE_NPC: Record<string, string> = {
   goblin: 'An ugly green creature.',
   rat: 'Overgrown vermin.',
   guard: 'He looks bored, but capable.',
-};
-
-const EXAMINE_ITEM: Record<string, string> = {
-  bones: 'Bad to the bone.',
-  coins: 'Lovely money!',
-  logs: 'A number of wooden logs.',
-  copper_ore: 'This ore contains copper.',
-  bread: 'Nice crusty bread.',
 };
 
 /** The living NPC standing on a tile, if any — used to turn a click into an attack. */

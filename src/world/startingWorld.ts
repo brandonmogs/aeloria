@@ -33,6 +33,11 @@ export interface StartingWorld {
   readonly spawn: Tile;
   /** Geometry for the water moat and its bridge. */
   readonly moat: MoatLayout;
+  /**
+   * Wandering fishing spots: each group is the set of moat tiles one spot hops
+   * between. Spots sit on the outermost water row so the bank below is in reach.
+   */
+  readonly fishingSpotGroups: Tile[][];
 }
 
 // Castle footprint (inclusive tile bounds). Odd width so it has a true centre
@@ -60,6 +65,12 @@ export function buildStartingWorld(map: TileMap): StartingWorld {
   buildForests(props, map);
   buildRockClusters(place);
 
+  // Courtyard furniture: two bank booths along the west wall and an altar to
+  // the east, so the castle earns its keep as a home base.
+  place('bank-booth', 20, 43);
+  place('bank-booth', 21, 43);
+  place('altar', 27, 43);
+
   return {
     props,
     spawn: SPAWN,
@@ -68,6 +79,20 @@ export function buildStartingWorld(map: TileMap): StartingWorld {
       inner: tileRectToWorld(MOAT_INNER),
       bridge: tileRectToWorld(BRIDGE),
     },
+    // Two spots on the moat's southern row: reachable from the grass one tile
+    // south, and far enough apart that chasing a moved spot is a real stroll.
+    fishingSpotGroups: [
+      [
+        { x: 17, y: 32 },
+        { x: 19, y: 32 },
+        { x: 21, y: 32 },
+      ],
+      [
+        { x: 27, y: 32 },
+        { x: 29, y: 32 },
+        { x: 31, y: 32 },
+      ],
+    ],
   };
 }
 

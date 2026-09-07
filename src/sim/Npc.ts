@@ -1,16 +1,18 @@
 import { Entity } from './Entity';
 import { Tile } from './coords';
-import { AttackStyle } from './combat';
-import { Item } from './Inventory';
+import { combatLevel } from './combat';
 
 /** What the renderer should draw this NPC as. */
 export type NpcKind = 'goblin' | 'rat' | 'guard';
 
 /** One entry in an NPC's drop table: the item and its per-kill drop chance. */
 export interface DropEntry {
-  item: Item;
+  itemId: string;
   /** 0..1; 1 is a guaranteed drop. */
   chance: number;
+  /** Quantity range (inclusive); defaults to exactly 1. */
+  min?: number;
+  max?: number;
 }
 
 export interface NpcConfig {
@@ -54,11 +56,16 @@ export class Npc extends Entity {
   /** Beyond this distance from spawn an NPC gives up the chase and walks home. */
   readonly leashRange: number;
   readonly spawnTile: Tile;
-  readonly style: AttackStyle = 'aggressive';
   readonly drops: DropEntry[];
 
   /** Set while dead; counts down to respawn. */
   respawnTimer = 0;
+
+  /**
+   * Ticks a player has lingered nearby. Past the OSRS tolerance window
+   * (~10 minutes) an aggressive NPC stops attacking unprovoked.
+   */
+  toleranceTimer = 0;
 
   constructor(id: number, position: Tile, config: NpcConfig) {
     super(id, position);
@@ -81,5 +88,10 @@ export class Npc extends Entity {
 
   get isDead(): boolean {
     return this.hitpoints <= 0;
+  }
+
+  /** The OSRS combat level shown in menus and used by the aggro rule. */
+  get combatLevel(): number {
+    return combatLevel(this.attack, this.strength, this.defense, this.maxHitpoints);
   }
 }

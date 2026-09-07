@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { Item } from '../sim/Inventory';
+import { ItemStack } from '../sim/items';
 
 /**
  * Builds the visible equipment worn on the avatar. Each function returns an
@@ -16,13 +16,16 @@ function gearColor(id: string): number {
   if (id.includes('bronze')) return 0x9c6b3f;
   if (id.includes('iron')) return 0x70737a;
   if (id.includes('steel')) return 0xacb1b8;
-  if (id.includes('gold')) return 0xe8c66a;
+  if (id.includes('mithril')) return 0x4a5a9c;
+  if (id.includes('adamant')) return 0x3f7d52;
+  if (id.includes('rune')) return 0x41a6b8;
+  if (id.includes('gold') || id.includes('holy')) return 0xe8c66a;
   if (id.includes('leather')) return 0x6b4a2f;
   if (id.includes('wood')) return 0x7a5230;
   return 0x8a8f99;
 }
 
-function gearMaterial(item: Item): THREE.MeshStandardMaterial {
+function gearMaterial(item: ItemStack): THREE.MeshStandardMaterial {
   const matte = /leather|wood|cloth/.test(item.id);
   return new THREE.MeshStandardMaterial({
     color: gearColor(item.id),
@@ -33,7 +36,7 @@ function gearMaterial(item: Item): THREE.MeshStandardMaterial {
 }
 
 /** A domed helm over the head with a simple nose guard. Attaches to the group. */
-export function buildHelmet(item: Item): THREE.Object3D {
+export function buildHelmet(item: ItemStack): THREE.Object3D {
   const g = new THREE.Group();
   const m = gearMaterial(item);
   const dome = new THREE.Mesh(
@@ -50,7 +53,7 @@ export function buildHelmet(item: Item): THREE.Object3D {
 }
 
 /** A breastplate over the torso plus rounded pauldrons. Attaches to the group. */
-export function buildChest(item: Item): THREE.Object3D {
+export function buildChest(item: ItemStack): THREE.Object3D {
   const g = new THREE.Group();
   const m = gearMaterial(item);
   const profile = [
@@ -75,14 +78,14 @@ export function buildChest(item: Item): THREE.Object3D {
 }
 
 /** A thigh guard. Attaches to a leg pivot (built once per leg). */
-export function buildLegGuard(item: Item): THREE.Object3D {
+export function buildLegGuard(item: ItemStack): THREE.Object3D {
   const m = new THREE.Mesh(new THREE.CylinderGeometry(0.108, 0.1, 0.34, 12), gearMaterial(item));
   m.position.y = -0.2;
   return m;
 }
 
 /** A chunky boot at the foot. Attaches to a leg pivot. */
-export function buildBoot(item: Item): THREE.Object3D {
+export function buildBoot(item: ItemStack): THREE.Object3D {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.12, 14, 12), gearMaterial(item));
   m.position.set(0, -0.54, 0.03);
   m.scale.set(1.0, 0.78, 1.5); // squashed and lengthened into a foot
@@ -90,14 +93,14 @@ export function buildBoot(item: Item): THREE.Object3D {
 }
 
 /** A gauntlet over the hand. Attaches to an arm pivot. */
-export function buildGlove(item: Item): THREE.Object3D {
+export function buildGlove(item: ItemStack): THREE.Object3D {
   const m = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 12), gearMaterial(item));
   m.position.y = -0.5;
   return m;
 }
 
 /** A sword held point-up beside the body, on the body's right as seen facing north. */
-export function buildWeapon(item: Item): THREE.Object3D {
+export function buildWeapon(item: ItemStack): THREE.Object3D {
   const g = new THREE.Group();
   const steel = gearMaterial(item);
   const grip = new THREE.MeshStandardMaterial({ color: 0x3a2a1c, roughness: 0.85 });
@@ -125,7 +128,7 @@ export function buildWeapon(item: Item): THREE.Object3D {
 }
 
 /** A round shield facing outward, on the body's left as seen facing north. */
-export function buildShield(item: Item): THREE.Object3D {
+export function buildShield(item: ItemStack): THREE.Object3D {
   const g = new THREE.Group();
   const m = gearMaterial(item);
   const boss = new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.6, metalness: 0.3 });

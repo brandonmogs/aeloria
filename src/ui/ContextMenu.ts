@@ -4,6 +4,8 @@ export interface MenuOption {
   verb: string;
   /** Optional target name, drawn in OSRS yellow ("Goblin (level-2)"). */
   target?: string;
+  /** Overrides the target's colour — OSRS tints NPC levels by threat. */
+  targetColor?: string;
   onSelect?: () => void;
 }
 
@@ -54,6 +56,7 @@ export class ContextMenu {
         const target = document.createElement('span');
         target.className = 'ctx-target';
         target.textContent = ` ${opt.target}`;
+        if (opt.targetColor) target.style.color = opt.targetColor;
         row.appendChild(target);
       }
       row.addEventListener('pointerdown', (e) => {

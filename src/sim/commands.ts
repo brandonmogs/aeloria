@@ -1,4 +1,5 @@
 import { Tile } from './coords';
+import { EquipSlot } from './Inventory';
 
 /**
  * Commands are the *intents* fed into the simulation each tick — "this entity
@@ -8,39 +9,32 @@ import { Tile } from './coords';
  * an authoritative server, which validates and applies them in `World.tick`.
  */
 export type Command =
-  | {
-      type: 'move';
-      entityId: number;
-      target: Tile;
-      run?: boolean;
-    }
-  | {
-      type: 'attack';
-      entityId: number;
-      targetId: number;
-    }
-  | {
-      type: 'pickup';
-      entityId: number;
-      groundItemId: number;
-    }
-  | {
-      type: 'gather';
-      entityId: number;
-      nodeId: number;
-    }
-  | {
-      type: 'useItem';
-      entityId: number;
-      slot: number;
-    }
-  | {
-      type: 'dropItem';
-      entityId: number;
-      slot: number;
-    };
+  | { type: 'move'; entityId: number; target: Tile; run?: boolean }
+  | { type: 'attack'; entityId: number; targetId: number }
+  | { type: 'pickup'; entityId: number; groundItemId: number }
+  | { type: 'gather'; entityId: number; nodeId: number }
+  /** Use a backpack item on itself: eat food, bury bones. */
+  | { type: 'useItem'; entityId: number; slot: number }
+  | { type: 'dropItem'; entityId: number; slot: number }
+  | { type: 'equipItem'; entityId: number; slot: number }
+  | { type: 'unequipItem'; entityId: number; slot: EquipSlot }
+  /** Toggle the persistent run mode (the orb next to the minimap). */
+  | { type: 'setRun'; entityId: number; on: boolean }
+  /** Pick an attack style on the combat tab. */
+  | { type: 'setStyle'; entityId: number; index: number }
+  | { type: 'setAutoRetaliate'; entityId: number; on: boolean }
+  | { type: 'togglePrayer'; entityId: number; prayerId: string }
+  /** Strike a tinderbox against the logs in `slot`. */
+  | { type: 'lightFire'; entityId: number; slot: number }
+  /** Cook every `itemId` in the backpack on the given fire. */
+  | { type: 'cook'; entityId: number; fireId: number; itemId: string }
+  /** Walk to and use a world object (bank booth, altar). */
+  | { type: 'interact'; entityId: number; kind: 'bank' | 'altar'; target: Tile }
+  | { type: 'bankDeposit'; entityId: number; slot: number; qty: number }
+  | { type: 'bankWithdraw'; entityId: number; itemId: string; qty: number }
+  | { type: 'bankDepositAll'; entityId: number };
 
-export function moveCommand(entityId: number, target: Tile, run = false): Command {
+export function moveCommand(entityId: number, target: Tile, run?: boolean): Command {
   return { type: 'move', entityId, target, run };
 }
 
@@ -62,4 +56,12 @@ export function useItemCommand(entityId: number, slot: number): Command {
 
 export function dropItemCommand(entityId: number, slot: number): Command {
   return { type: 'dropItem', entityId, slot };
+}
+
+export function equipItemCommand(entityId: number, slot: number): Command {
+  return { type: 'equipItem', entityId, slot };
+}
+
+export function unequipItemCommand(entityId: number, slot: EquipSlot): Command {
+  return { type: 'unequipItem', entityId, slot };
 }

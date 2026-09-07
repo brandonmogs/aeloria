@@ -1,10 +1,10 @@
-import { Item } from './Inventory';
+import { ItemStack } from './items';
 import { Tile } from './coords';
 
-/** An item lying on the ground, waiting to be picked up (or to despawn). */
+/** An item stack lying on the ground, waiting to be picked up (or despawn). */
 export interface GroundItem {
   readonly id: number;
-  readonly item: Item;
+  readonly item: ItemStack;
   readonly tile: Tile;
   /** Tick at which this item vanishes from the world. */
   readonly despawnAtTick: number;

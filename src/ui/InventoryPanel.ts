@@ -1,8 +1,21 @@
-import { Inventory, EquipSlot, Item, SlotRef, INVENTORY_SIZE } from '../sim/Inventory';
-import { Skills, SkillId, SKILL_IDS } from '../sim/Skills';
+import { EquipSlot, SlotRef, INVENTORY_SIZE } from '../sim/Inventory';
+import { ItemStack, itemDef } from '../sim/items';
+import { SkillId, SKILL_IDS, xpForLevel, MAX_LEVEL } from '../sim/Skills';
 import { SKILL_META } from './skillMeta';
+import { WEAPON_STYLES } from '../sim/combat';
+import { PRAYERS } from '../sim/prayers';
+import { Player } from '../sim/Player';
+import { World } from '../sim/World';
 
-type Tab = 'inventory' | 'armour' | 'skills';
+type Tab = 'combat' | 'skills' | 'inventory' | 'armour' | 'prayer';
+
+const TAB_META: ReadonlyArray<[Tab, string, string]> = [
+  ['combat', '⚔️', 'Combat options'],
+  ['skills', '📊', 'Skills'],
+  ['inventory', '🎒', 'Inventory'],
+  ['armour', '🛡️', 'Worn equipment'],
+  ['prayer', '✨', 'Prayer'],
+];
 
 /** Where each equipment slot sits on the 3-column paper-doll layout. */
 interface EquipCell {
@@ -28,38 +41,63 @@ const EQUIP_LAYOUT: ReadonlyArray<EquipCell> = [
 interface SkillCell {
   level: HTMLElement;
   fill: HTMLElement;
+  cell: HTMLElement;
+}
+
+/** How the panel asks the game to do things — every mutation goes upward. */
+export interface PanelCallbacks {
+  /** Right-click on a filled backpack slot: (index, stack, cursor). */
+  onItemMenu?: (index: number, item: ItemStack, x: number, y: number) => void;
+  /** Left-click on a filled backpack slot (eat / bury / wield — main decides). */
+  onItemQuick?: (index: number, item: ItemStack) => void;
+  /** Drag a backpack item onto the paper doll (or its own equip slot). */
+  onEquip?: (index: number) => void;
+  /** Click or drag a worn piece back to the backpack. */
+  onUnequip?: (slot: EquipSlot) => void;
+  onSetStyle?: (index: number) => void;
+  onSetAutoRetaliate?: (on: boolean) => void;
+  onTogglePrayer?: (id: string) => void;
 }
 
 /**
- * The side panel on the middle-right: a tabbed inventory / equipment / skills
- * screen driven by the player's {@link Inventory} and {@link Skills}.
- *
- * Inventory and equipment slots are interactive: drag an item onto any slot to
- * move/equip it (the model validates the move), or click an item to quick-equip
- * a backpack item / strip a worn one. The skills tab shows each skill's level
- * and progress to the next. All edits go through the model; the UI just calls
- * {@link refresh} afterwards to repaint.
+ * The tabbed side panel on the middle-right — the OSRS interface strip:
+ * combat options, skills, backpack, worn equipment, and the prayer book, all
+ * driven by the player's sim state. The panel never mutates the model
+ * directly; every action funnels through {@link PanelCallbacks} into the
+ * command queue, and the panel repaints from state on {@link refresh}.
  */
 export class InventoryPanel {
   private readonly root = document.createElement('div');
+  private readonly combatPane = document.createElement('div');
   private readonly invGrid = document.createElement('div');
+  private readonly equipPane = document.createElement('div');
   private readonly equipGrid = document.createElement('div');
+  private readonly equipStats = document.createElement('div');
   private readonly skillsGrid = document.createElement('div');
+  private readonly prayerPane = document.createElement('div');
   private readonly tabs = new Map<Tab, HTMLButtonElement>();
   private readonly equipSlots = new Map<EquipSlot, HTMLElement>();
   private readonly invSlots: HTMLElement[] = [];
   private readonly skillCells = new Map<SkillId, SkillCell>();
+  private readonly prayerCells = new Map<string, HTMLElement>();
+  private prayerPoints!: HTMLElement;
   private skillsTotal!: HTMLElement;
+  private combatWeapon!: HTMLElement;
+  private combatLevel!: HTMLElement;
+  private styleRow!: HTMLElement;
+  private retaliateBtn!: HTMLElement;
+  private styleSig = '';
   private dragFrom: SlotRef | null = null;
 
   constructor(
-    private readonly inventory: Inventory,
-    private readonly skills: Skills,
-    /** Right-click on a filled backpack slot: (index, item, cursor). */
-    private readonly onItemMenu?: (index: number, item: Item, x: number, y: number) => void,
+    private readonly world: World,
+    private readonly player: Player,
+    private readonly cb: PanelCallbacks = {},
   ) {
     this.root.id = 'inventory-panel';
     this.root.appendChild(this.buildTabBar());
+
+    this.buildCombatTab();
 
     this.invGrid.className = 'inv-grid';
     for (let i = 0; i < INVENTORY_SIZE; i++) {
@@ -68,6 +106,7 @@ export class InventoryPanel {
       this.invGrid.appendChild(slot);
     }
 
+    this.equipPane.className = 'equip-pane';
     this.equipGrid.className = 'equip-grid';
     for (const cell of EQUIP_LAYOUT) {
       const slot = this.makeSlot({ area: 'equipment', slot: cell.slot }, 'equip');
@@ -77,52 +116,84 @@ export class InventoryPanel {
       this.equipSlots.set(cell.slot, slot);
       this.equipGrid.appendChild(slot);
     }
+    this.equipStats.className = 'equip-stats';
+    this.equipPane.append(this.equipGrid, this.equipStats);
 
     this.buildSkillsTab();
+    this.buildPrayerTab();
 
+    this.root.appendChild(this.combatPane);
     this.root.appendChild(this.invGrid);
-    this.root.appendChild(this.equipGrid);
+    this.root.appendChild(this.equipPane);
     this.root.appendChild(this.skillsGrid);
+    this.root.appendChild(this.prayerPane);
     document.body.appendChild(this.root);
 
     this.select('inventory');
     this.refresh();
   }
 
-  /** Repaint everything from the model. Call after the inventory/skills change. */
+  /** Repaint everything from the model. Call after the sim ticks. */
   refresh(): void {
-    this.inventory.slots.forEach((item, i) => fillSlot(this.invSlots[i], item));
+    const inv = this.player.inventory;
+    inv.slots.forEach((item, i) => fillSlot(this.invSlots[i], item));
     for (const [slot, el] of this.equipSlots) {
-      fillSlot(el, this.inventory.equipment[slot]);
+      fillSlot(el, inv.equipment[slot]);
     }
     this.renderSkills();
+    this.renderCombat();
+    this.renderPrayer();
+    this.renderEquipStats();
   }
 
-  private renderSkills(): void {
-    for (const [id, cell] of this.skillCells) {
-      cell.level.textContent = String(this.skills.levelOf(id));
-      cell.fill.style.width = `${Math.round(this.skills.progressOf(id) * 100)}%`;
-    }
-    this.skillsTotal.textContent = `Total level: ${this.skills.totalLevel()}`;
+  // --- Combat tab -----------------------------------------------------------
+
+  private buildCombatTab(): void {
+    this.combatPane.className = 'combat-pane';
+    this.combatWeapon = document.createElement('div');
+    this.combatWeapon.className = 'combat-weapon';
+    this.combatLevel = document.createElement('div');
+    this.combatLevel.className = 'combat-level';
+    this.styleRow = document.createElement('div');
+    this.styleRow.className = 'style-grid';
+    this.retaliateBtn = document.createElement('button');
+    this.retaliateBtn.className = 'retaliate-btn';
+    this.retaliateBtn.addEventListener('click', () => {
+      this.cb.onSetAutoRetaliate?.(!this.player.autoRetaliate);
+    });
+    this.combatPane.append(this.combatWeapon, this.combatLevel, this.styleRow, this.retaliateBtn);
   }
 
-  private buildTabBar(): HTMLElement {
-    const bar = document.createElement('div');
-    bar.className = 'inv-tabs';
-    for (const [tab, label] of [
-      ['inventory', 'Inventory'],
-      ['armour', 'Armour'],
-      ['skills', 'Skills'],
-    ] as ReadonlyArray<[Tab, string]>) {
-      const btn = document.createElement('button');
-      btn.className = 'inv-tab';
-      btn.textContent = label;
-      btn.addEventListener('click', () => this.select(tab));
-      this.tabs.set(tab, btn);
-      bar.appendChild(btn);
+  private renderCombat(): void {
+    const weapon = this.player.inventory.equipment.weapon;
+    const weaponName = weapon ? itemDef(weapon.id).name : 'Unarmed';
+    const type = this.world.weaponTypeOf(this.player);
+    this.combatWeapon.textContent = weaponName;
+    this.combatLevel.textContent = `Combat Lvl: ${this.world.combatLevelOf(this.player)}`;
+
+    // Rebuild the style buttons only when the weapon category changes.
+    const styles = WEAPON_STYLES[type];
+    if (this.styleSig !== type) {
+      this.styleSig = type;
+      this.styleRow.textContent = '';
+      styles.forEach((style, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'style-btn';
+        btn.innerHTML = `<span class="style-name">${style.name}</span><span class="style-kind">${style.style}</span>`;
+        btn.addEventListener('click', () => this.cb.onSetStyle?.(i));
+        this.styleRow.appendChild(btn);
+      });
     }
-    return bar;
+    const active = Math.min(this.player.styleIndex, styles.length - 1);
+    Array.from(this.styleRow.children).forEach((el, i) => {
+      el.classList.toggle('active', i === active);
+    });
+
+    this.retaliateBtn.textContent = `Auto retaliate: ${this.player.autoRetaliate ? 'On' : 'Off'}`;
+    this.retaliateBtn.classList.toggle('active', this.player.autoRetaliate);
   }
+
+  // --- Skills tab -----------------------------------------------------------
 
   private buildSkillsTab(): void {
     this.skillsGrid.className = 'skills-grid';
@@ -148,7 +219,7 @@ export class InventoryPanel {
 
       cell.append(icon, level, bar);
       this.skillsGrid.appendChild(cell);
-      this.skillCells.set(id, { level, fill });
+      this.skillCells.set(id, { level, fill, cell });
     }
 
     this.skillsTotal = document.createElement('div');
@@ -156,11 +227,89 @@ export class InventoryPanel {
     this.skillsGrid.appendChild(this.skillsTotal);
   }
 
+  private renderSkills(): void {
+    const skills = this.player.skills;
+    for (const [id, cell] of this.skillCells) {
+      const level = skills.levelOf(id);
+      cell.level.textContent = String(level);
+      cell.fill.style.width = `${Math.round(skills.progressOf(id) * 100)}%`;
+      const xp = Math.floor(skills.xpOf(id));
+      cell.cell.title =
+        level >= MAX_LEVEL
+          ? `${SKILL_META[id].label}: ${xp.toLocaleString()} xp (maxed)`
+          : `${SKILL_META[id].label}: ${xp.toLocaleString()} xp — ` +
+            `${(xpForLevel(level + 1) - xp).toLocaleString()} to level ${level + 1}`;
+    }
+    this.skillsTotal.textContent = `Total level: ${skills.totalLevel()}`;
+  }
+
+  // --- Prayer tab -----------------------------------------------------------
+
+  private buildPrayerTab(): void {
+    this.prayerPane.className = 'prayer-pane';
+    this.prayerPoints = document.createElement('div');
+    this.prayerPoints.className = 'prayer-points';
+    this.prayerPane.appendChild(this.prayerPoints);
+
+    const grid = document.createElement('div');
+    grid.className = 'prayer-grid';
+    for (const prayer of PRAYERS) {
+      const cell = document.createElement('button');
+      cell.className = 'prayer-cell';
+      cell.innerHTML =
+        `<span class="prayer-icon">${prayer.icon}</span>` +
+        `<span class="prayer-name">${prayer.name}</span>` +
+        `<span class="prayer-req">Lvl ${prayer.level}</span>`;
+      cell.addEventListener('click', () => this.cb.onTogglePrayer?.(prayer.id));
+      this.prayerCells.set(prayer.id, cell);
+      grid.appendChild(cell);
+    }
+    this.prayerPane.appendChild(grid);
+  }
+
+  private renderPrayer(): void {
+    this.prayerPoints.textContent = `Prayer points: ${this.player.prayerPoints}/${this.player.maxPrayerPoints}`;
+    const level = this.player.skills.levelOf('prayer');
+    for (const prayer of PRAYERS) {
+      const cell = this.prayerCells.get(prayer.id)!;
+      cell.classList.toggle('active', this.player.activePrayers.has(prayer.id));
+      cell.classList.toggle('locked', level < prayer.level);
+    }
+  }
+
+  // --- Equipment stats ------------------------------------------------------
+
+  private renderEquipStats(): void {
+    const bonus = this.player.inventory.equipmentBonuses();
+    const weight = this.player.inventory.totalWeightKg();
+    this.equipStats.innerHTML =
+      `<div>Attack ${fmtBonus(bonus.attack)} · Strength ${fmtBonus(bonus.strength)}</div>` +
+      `<div>Defence ${fmtBonus(bonus.defense)} · Prayer ${fmtBonus(bonus.prayer)}</div>` +
+      `<div class="equip-weight">Weight: ${weight.toFixed(1)} kg</div>`;
+  }
+
+  private buildTabBar(): HTMLElement {
+    const bar = document.createElement('div');
+    bar.className = 'inv-tabs';
+    for (const [tab, icon, tip] of TAB_META) {
+      const btn = document.createElement('button');
+      btn.className = 'inv-tab';
+      btn.textContent = icon;
+      btn.title = tip;
+      btn.addEventListener('click', () => this.select(tab));
+      this.tabs.set(tab, btn);
+      bar.appendChild(btn);
+    }
+    return bar;
+  }
+
   private select(tab: Tab): void {
     for (const [name, btn] of this.tabs) btn.classList.toggle('active', name === tab);
+    this.combatPane.style.display = tab === 'combat' ? 'block' : 'none';
     this.invGrid.style.display = tab === 'inventory' ? 'grid' : 'none';
-    this.equipGrid.style.display = tab === 'armour' ? 'grid' : 'none';
+    this.equipPane.style.display = tab === 'armour' ? 'block' : 'none';
     this.skillsGrid.style.display = tab === 'skills' ? 'grid' : 'none';
+    this.prayerPane.style.display = tab === 'prayer' ? 'block' : 'none';
   }
 
   /** Create a slot element wired for click + drag-and-drop against `ref`. */
@@ -173,8 +322,8 @@ export class InventoryPanel {
     if (ref.area === 'inventory') {
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
-        const item = this.inventory.slots[ref.index];
-        if (item) this.onItemMenu?.(ref.index, item, e.clientX, e.clientY);
+        const item = this.player.inventory.slots[ref.index];
+        if (item) this.cb.onItemMenu?.(ref.index, item, e.clientX, e.clientY);
       });
     }
 
@@ -195,29 +344,61 @@ export class InventoryPanel {
     el.addEventListener('drop', (e) => {
       e.preventDefault();
       el.classList.remove('drop-hover');
-      if (this.dragFrom && this.inventory.move(this.dragFrom, ref)) this.refresh();
+      this.handleDrop(ref);
     });
 
     return el;
   }
 
-  /** A bare click: equip a backpack item, or strip a worn one back to the bag. */
+  private handleDrop(to: SlotRef): void {
+    const from = this.dragFrom;
+    if (!from) return;
+    if (from.area === 'inventory' && to.area === 'inventory') {
+      // Rearranging the backpack is presentation-only; do it locally.
+      if (this.player.inventory.move(from, to)) this.refresh();
+    } else if (from.area === 'inventory' && to.area === 'equipment') {
+      this.cb.onEquip?.(from.index);
+    } else if (from.area === 'equipment' && to.area === 'inventory') {
+      this.cb.onUnequip?.(from.slot);
+    }
+  }
+
+  /** A bare click: act on a backpack item, or strip a worn piece off. */
   private quickAction(ref: SlotRef): void {
-    const changed =
-      ref.area === 'inventory'
-        ? this.inventory.equip(ref.index)
-        : this.inventory.unequip(ref.slot);
-    if (changed) this.refresh();
+    if (ref.area === 'inventory') {
+      const item = this.player.inventory.slots[ref.index];
+      if (item) this.cb.onItemQuick?.(ref.index, item);
+    } else {
+      this.cb.onUnequip?.(ref.slot);
+    }
   }
 }
 
-/** Show an item's icon/name, or fall back to the slot's placeholder label. */
-function fillSlot(el: HTMLElement, item: Item | null): void {
+function fmtBonus(n: number): string {
+  return n >= 0 ? `+${n}` : String(n);
+}
+
+/** OSRS-style stack count: plain to 99,999, then 100K, then 10M. */
+function fmtQty(qty: number): string {
+  if (qty >= 10_000_000) return `${Math.floor(qty / 1_000_000)}M`;
+  if (qty >= 100_000) return `${Math.floor(qty / 1000)}K`;
+  return String(qty);
+}
+
+/** Show an item's icon (and stack size), or the slot's placeholder label. */
+function fillSlot(el: HTMLElement, item: ItemStack | null): void {
   el.classList.toggle('filled', item !== null);
   el.draggable = item !== null;
   if (item) {
-    el.textContent = item.icon ?? item.name.slice(0, 2);
-    el.title = item.name;
+    const def = itemDef(item.id);
+    el.textContent = def.icon;
+    el.title = def.name;
+    if (item.qty > 1) {
+      const badge = document.createElement('span');
+      badge.className = 'slot-qty';
+      badge.textContent = fmtQty(item.qty);
+      el.appendChild(badge);
+    }
   } else {
     el.textContent = el.dataset.placeholder ?? '';
     el.title = '';

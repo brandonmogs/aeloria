@@ -46,20 +46,32 @@ body {
   user-select: none;
 }
 
-/* Game message log — a quiet scrollback above the controls hint. */
+/* The chatbox — an OSRS-style message panel above the controls hint. */
 #message-log {
   position: fixed;
   bottom: 34px;
   left: 12px;
-  width: 340px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  pointer-events: none;
+  width: 400px;
+  padding: 6px 4px 6px 10px;
+  background: rgba(14, 12, 8, 0.78);
+  border: 1px solid rgba(93, 84, 71, 0.9);
+  border-radius: 6px;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
   user-select: none;
   font-size: 12px;
   line-height: 1.45;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+  backdrop-filter: blur(3px);
+}
+
+.log-lines {
+  max-height: 118px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(93, 84, 71, 0.9) transparent;
+  padding-right: 6px;
 }
 
 .log-line {
@@ -294,12 +306,11 @@ body {
   box-shadow: 0 0 10px rgba(242, 208, 107, 0.45);
 }
 
-/* Tabbed inventory / equipment panel, anchored to the middle-right. */
+/* Tabbed side panel, anchored to the bottom-right like the OSRS interface. */
 #inventory-panel {
   position: fixed;
-  top: 50%;
+  bottom: 12px;
   right: 12px;
-  transform: translateY(-50%);
   width: 224px;
   padding: 8px;
   background: rgba(10, 14, 20, 0.74);
@@ -320,9 +331,9 @@ body {
 
 .inv-tab {
   flex: 1;
-  padding: 7px 0;
-  font: 600 12px ui-monospace, Menlo, Consolas, monospace;
-  letter-spacing: 0.04em;
+  padding: 6px 0;
+  font-size: 16px;
+  line-height: 1;
   color: #9fb4d8;
   background: rgba(40, 52, 70, 0.6);
   border: 1px solid rgba(120, 150, 200, 0.2);
@@ -357,6 +368,7 @@ body {
 }
 
 .slot {
+  position: relative;
   aspect-ratio: 1;
   width: 100%;
   display: flex;
@@ -454,4 +466,264 @@ body {
   text-align: center;
   font: 600 12px ui-monospace, Menlo, Consolas, monospace;
   color: #cfe0ff;
+}
+
+/* Stack counts, OSRS-style: a small yellow number in the slot corner. */
+.slot-qty {
+  position: absolute;
+  top: 1px;
+  left: 3px;
+  font: 700 10px ui-monospace, Menlo, Consolas, monospace;
+  color: #f5d442;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+  pointer-events: none;
+}
+
+/* Combat tab: weapon header, style grid, auto-retaliate toggle. */
+.combat-pane {
+  display: none;
+}
+
+.combat-weapon {
+  text-align: center;
+  font: 700 14px ui-monospace, Menlo, Consolas, monospace;
+  color: #f4ead0;
+  padding: 4px 0 2px;
+}
+
+.combat-level {
+  text-align: center;
+  font: 600 11px ui-monospace, Menlo, Consolas, monospace;
+  color: #9fb4d8;
+  margin-bottom: 8px;
+}
+
+.style-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.style-btn {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 0 6px;
+  background: rgba(20, 26, 36, 0.75);
+  border: 1px solid rgba(120, 150, 200, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.style-btn:hover {
+  border-color: rgba(232, 200, 115, 0.7);
+}
+
+.style-btn.active {
+  background: rgba(87, 74, 30, 0.85);
+  border-color: rgba(232, 200, 115, 0.85);
+  box-shadow: 0 0 8px rgba(242, 208, 107, 0.25) inset;
+}
+
+.style-name {
+  font: 700 12px ui-monospace, Menlo, Consolas, monospace;
+  color: #f4ead0;
+}
+
+.style-kind {
+  font: 600 9px ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: 0.05em;
+  color: #9fb4d8;
+  text-transform: capitalize;
+}
+
+.retaliate-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 7px 0;
+  font: 600 11px ui-monospace, Menlo, Consolas, monospace;
+  color: #9fb4d8;
+  background: rgba(20, 26, 36, 0.75);
+  border: 1px solid rgba(120, 150, 200, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.retaliate-btn.active {
+  color: #f4ead0;
+  border-color: rgba(232, 200, 115, 0.55);
+}
+
+/* Prayer tab. */
+.prayer-pane {
+  display: none;
+}
+
+.prayer-points {
+  text-align: center;
+  font: 700 12px ui-monospace, Menlo, Consolas, monospace;
+  color: #9fd8e8;
+  padding: 4px 0 8px;
+}
+
+.prayer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 6px;
+}
+
+.prayer-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 7px 2px 5px;
+  background: rgba(20, 26, 36, 0.75);
+  border: 1px solid rgba(120, 150, 200, 0.18);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.prayer-cell:hover {
+  border-color: rgba(232, 200, 115, 0.7);
+}
+
+.prayer-cell.active {
+  background: rgba(63, 115, 130, 0.5);
+  border-color: rgba(159, 216, 232, 0.85);
+  box-shadow: 0 0 10px rgba(159, 216, 232, 0.3) inset;
+}
+
+.prayer-cell.locked {
+  opacity: 0.42;
+}
+
+.prayer-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.prayer-name {
+  font: 600 9px ui-monospace, Menlo, Consolas, monospace;
+  color: #f4ead0;
+  text-align: center;
+}
+
+.prayer-req {
+  font: 600 8px ui-monospace, Menlo, Consolas, monospace;
+  color: #9fb4d8;
+}
+
+/* Equipment tab: bonuses under the paper doll. */
+.equip-pane {
+  display: none;
+}
+
+.equip-stats {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(120, 150, 200, 0.18);
+  text-align: center;
+  font: 600 11px ui-monospace, Menlo, Consolas, monospace;
+  color: #9fb4d8;
+  line-height: 1.7;
+}
+
+.equip-weight {
+  color: #cfe0ff;
+}
+
+/* Run orb percentage readout. */
+.orb-run {
+  flex-direction: column;
+  gap: 0;
+}
+
+.orb-run-num {
+  font: 700 9px ui-monospace, Menlo, Consolas, monospace;
+  color: #f2d06b;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  pointer-events: none;
+}
+
+/* The Bank of Aeloria. */
+#bank-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 460px;
+  max-height: 70vh;
+  display: none;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  background: rgba(14, 12, 8, 0.92);
+  border: 2px solid rgba(190, 160, 90, 0.65);
+  border-radius: 10px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.65);
+  z-index: 15;
+  user-select: none;
+}
+
+.bank-title {
+  text-align: center;
+  font: 700 16px ui-monospace, Menlo, Consolas, monospace;
+  letter-spacing: 0.05em;
+  color: #f2d06b;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+
+.bank-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 1fr);
+  gap: 6px;
+  overflow-y: auto;
+  padding: 2px;
+  min-height: 60px;
+}
+
+.bank-slot {
+  font-size: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.bank-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 18px 0;
+  font: 600 12px ui-monospace, Menlo, Consolas, monospace;
+  color: #9fb4d8;
+}
+
+.bank-footer {
+  display: flex;
+  gap: 8px;
+}
+
+.bank-btn {
+  flex: 1;
+  padding: 8px 0;
+  font: 600 12px ui-monospace, Menlo, Consolas, monospace;
+  color: #1a1408;
+  background: linear-gradient(180deg, #e8c873, #c79c4e);
+  border: 1px solid rgba(232, 200, 115, 0.8);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.bank-btn:hover {
+  filter: brightness(1.08);
+}
+
+.bank-close {
+  flex: 0 0 90px;
+  color: #cfe0ff;
+  background: rgba(40, 52, 70, 0.8);
+  border-color: rgba(120, 150, 200, 0.4);
 }
