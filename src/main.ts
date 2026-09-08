@@ -20,6 +20,9 @@ import {
 import { Fire } from './sim/Fire';
 import { DialogueView } from './sim/dialogue';
 import { shopBuyPrice, shopSellPrice } from './sim/shops';
+import { RESOURCE_DEFS, ResourceNode, variantOf } from './sim/gathering';
+import { SMELTING } from './sim/smithing';
+import { Interactable } from './sim/World';
 import { GameLoop } from './engine/GameLoop';
 import { Renderer } from './render/Renderer';
 import { Terrain } from './render/Terrain';
@@ -40,6 +43,8 @@ import { InventoryPanel } from './ui/InventoryPanel';
 import { SidePanel } from './ui/SidePanel';
 import { SkillGuidePanel } from './ui/SkillGuidePanel';
 import { QuestPanel } from './ui/QuestPanel';
+import { MagicTab } from './ui/MagicTab';
+import { SmithingPanel } from './ui/SmithingPanel';
 import { DialogueBox } from './ui/DialogueBox';
 import { ShopPanel } from './ui/ShopPanel';
 import { WorldMap } from './ui/WorldMap';
@@ -102,11 +107,15 @@ function runGame(): void {
   // and the courtyard furniture becomes usable world objects.
   for (const prop of props) {
     if (prop.kind === 'tree' || prop.kind === 'rock') {
-      world.addResourceNode(prop.kind, prop.tile);
+      world.addResourceNode(prop.kind, prop.tile, prop.variant ?? (prop.kind === 'tree' ? 'regular' : 'copper'));
     } else if (prop.kind === 'bank-booth') {
       world.addInteractable('bank', prop.tile);
     } else if (prop.kind === 'altar') {
       world.addInteractable('altar', prop.tile);
+    } else if (prop.kind === 'furnace') {
+      world.addInteractable('furnace', prop.tile);
+    } else if (prop.kind === 'anvil') {
+      world.addInteractable('anvil', prop.tile);
     } else if (prop.kind === 'range') {
       world.addRange(prop.tile);
     }
@@ -252,7 +261,21 @@ function runGame(): void {
   sidePanel.register('settings', buildSettingsPane(musicCb));
   sidePanel.register('music', buildMusicPane(musicCb));
   sidePanel.register('logout', buildLogoutPane());
-  sidePanel.register('magic', buildPlaceholderPane('Magic', 'You have not learned any spells yet.'));
+  const magicTab = new MagicTab(player, sidePanel, () => {
+    log.add('You need runes to cast that, and magic combat has not reached Aeloria yet.');
+  });
+  const smithingPanel = new SmithingPanel(player, {
+    onSmith: (item, count) => commandQueue.push({ type: 'smith', entityId: player.id, item, count }),
+    onRecipeMenu: (recipe, x, y) => {
+      const def = itemDef(recipe.item);
+      const make = (count: number): MenuOption => ({
+        verb: count < 0 ? 'Make All' : `Make ${count}`,
+        target: def.name,
+        onSelect: () => commandQueue.push({ type: 'smith', entityId: player.id, item: recipe.item, count }),
+      });
+      menu.open(x, y, [make(1), make(5), make(-1), { verb: 'Examine', target: def.name, onSelect: () => log.add(def.examine) }, { verb: 'Cancel' }]);
+    },
+  });
   sidePanel.register('clan', buildPlaceholderPane('Clan Chat', 'Aeloria is single-player for now.'));
   sidePanel.register('friends', buildPlaceholderPane('Friends List', 'Aeloria is single-player for now.'));
   sidePanel.register('account', buildPlaceholderPane('Account Management', 'Nothing to manage yet.'));
@@ -356,7 +379,7 @@ function runGame(): void {
         onSelect: () => commandQueue.push(useItemCommand(player.id, index)),
       });
     }
-    if (def.firemakingXp !== undefined) {
+    if (def.firemaking) {
       options.push({
         verb: 'Light',
         target: def.name,
@@ -417,6 +440,13 @@ function runGame(): void {
       } else if (object) {
         commandQueue.push({ type: 'interact', entityId: player.id, kind: object.kind, target });
         tileView.showClickMarker(target, 'interact');
+      } else if (world.fireAt(target)?.kind === 'range') {
+        // Left-clicking the range cooks the first raw food in the backpack.
+        const fire = world.fireAt(target)!;
+        const raw = player.inventory.slots.find((s) => s && itemDef(s.id).cooking);
+        if (raw) commandQueue.push({ type: 'cook', entityId: player.id, fireId: fire.id, itemId: raw.id });
+        else log.add('You have nothing to cook.');
+        tileView.showClickMarker(target, 'interact');
       } else {
         commandQueue.push(moveCommand(player.id, target));
         tileView.showClickMarker(target);
@@ -469,17 +499,25 @@ function runGame(): void {
       });
     }
     if (node && node.regrowTimer <= 0) {
-      const verbs: Record<string, [string, string]> = {
-        tree: ['Chop down', 'Tree'],
-        rock: ['Mine', 'Rock'],
-        fishing_spot: ['Net', 'Fishing spot'],
-      };
-      const [verb, name] = verbs[node.kind];
-      options.push({
-        verb,
-        target: name,
-        onSelect: () => commandQueue.push(gatherCommand(player.id, node.id)),
-      });
+      if (node.kind === 'fishing_spot') {
+        options.push({
+          verb: 'Net',
+          target: 'Fishing spot',
+          onSelect: () => commandQueue.push(gatherCommand(player.id, node.id, 'net')),
+        });
+        options.push({
+          verb: 'Bait',
+          target: 'Fishing spot',
+          onSelect: () => commandQueue.push(gatherCommand(player.id, node.id, 'bait')),
+        });
+      } else {
+        const variant = variantOf(node);
+        options.push({
+          verb: node.kind === 'tree' ? 'Chop down' : 'Mine',
+          target: variant.name,
+          onSelect: () => commandQueue.push(gatherCommand(player.id, node.id)),
+        });
+      }
     }
     if (fire) {
       // One Cook row per distinct raw food in the backpack.
@@ -498,9 +536,27 @@ function runGame(): void {
       }
     }
     if (object) {
+      if (object.kind === 'furnace') {
+        // One "Smelt" row per bar the backpack's ores could make.
+        for (const recipe of SMELTING) {
+          if (!recipe.ores.every(([ore, n]) => player.inventory.countOf(ore) >= n)) continue;
+          options.push({
+            verb: 'Smelt',
+            target: itemDef(recipe.bar).name,
+            onSelect: () => commandQueue.push({ type: 'smelt', entityId: player.id, bar: recipe.bar, count: -1, target }),
+          });
+        }
+      }
+      const verbs: Record<Interactable['kind'], [string, string]> = {
+        bank: ['Bank', 'Bank booth'],
+        altar: ['Pray-at', 'Altar'],
+        furnace: ['Smelt', 'Furnace'],
+        anvil: ['Smith', 'Anvil'],
+      };
+      const [verb, name] = verbs[object.kind];
       options.push({
-        verb: object.kind === 'bank' ? 'Bank' : 'Pray-at',
-        target: object.kind === 'bank' ? 'Bank booth' : 'Altar',
+        verb,
+        target: name,
         onSelect: () =>
           commandQueue.push({ type: 'interact', entityId: player.id, kind: object.kind, target }),
       });
@@ -596,6 +652,9 @@ function runGame(): void {
           else shopPanel.close();
           break;
         }
+        case 'openSmithing':
+          if (ev.entityId === player.id) smithingPanel.open(ev.bar);
+          break;
         case 'message':
           log.add(ev.text);
           break;
@@ -621,7 +680,13 @@ function runGame(): void {
       bankPanel.refresh();
       shopPanel.refresh();
       questPanel.refresh();
+      magicTab.refresh();
+      smithingPanel.refresh();
       skillGuide.refresh((skill) => player.skills.levelOf(skill));
+      // The anvil screen closes once you wander off, like the bank.
+      if (smithingPanel.isOpen && !world.interactables.some((i) => i.kind === 'anvil' && chebyshev(player.position, i.tile) <= 1)) {
+        smithingPanel.close();
+      }
     },
     onRender: (alpha, dt) => {
       water.update(dt);
@@ -694,6 +759,8 @@ function runGame(): void {
     dialogueView: () => lastDialogueView,
     lastMinimapTarget: () => minimap.lastTarget,
     shopIsOpen: () => shopPanel.isOpen,
+    smithingIsOpen: () => smithingPanel.isOpen,
+    interactables: () => world.interactables,
     gather: (x: number, y: number) => {
       const node = world.resourceNodeAt({ x, y });
       if (node) commandQueue.push(gatherCommand(player.id, node.id));
@@ -733,20 +800,18 @@ function giveStarterKit(player: Player): void {
 function examinables(
   npc: Npc | null,
   ground: { item: ItemStack } | null,
-  node: { kind: 'tree' | 'rock' | 'fishing_spot'; regrowTimer: number } | null,
+  node: ResourceNode | null,
   fire: Fire | null,
-  object: { kind: 'bank' | 'altar' } | null,
+  object: Interactable | null,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
   if (npc) out.push([npc.name, npc.examine]);
   if (ground) out.push([itemDef(ground.item.id).name, itemDef(ground.item.id).examine]);
   if (node && node.regrowTimer <= 0) {
-    const texts: Record<string, [string, string]> = {
-      tree: ['Tree', 'A leafy tree, good for logs.'],
-      rock: ['Rock', 'A rocky outcrop with a seam of copper.'],
-      fishing_spot: ['Fishing spot', 'Something is stirring beneath the surface.'],
-    };
-    out.push(texts[node.kind]);
+    const variant = variantOf(node);
+    out.push([variant.name, variant.examine]);
+  } else if (node) {
+    out.push(node.kind === 'tree' ? ['Tree stump', 'A tree stump. Something has been chopping here.'] : ['Rocks', 'Nothing left to mine here for the moment.']);
   }
   if (fire) {
     out.push(
@@ -756,11 +821,13 @@ function examinables(
     );
   }
   if (object) {
-    out.push(
-      object.kind === 'bank'
-        ? ['Bank booth', 'Your valuables, kept safe for a modest smile.']
-        : ['Altar', 'An altar to the gods of Aeloria.'],
-    );
+    const texts: Record<Interactable['kind'], [string, string]> = {
+      bank: ['Bank booth', 'Your valuables, kept safe for a modest smile.'],
+      altar: ['Altar', 'An altar to the gods of Aeloria.'],
+      furnace: ['Furnace', 'A furnace hot enough to melt ore into bars.'],
+      anvil: ['Anvil', `An anvil for hammering bars into ${RESOURCE_DEFS.rock.variants.iron ? 'gear' : 'gear'}.`],
+    };
+    out.push(texts[object.kind]);
   }
   return out;
 }

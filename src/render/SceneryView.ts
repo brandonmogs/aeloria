@@ -133,8 +133,9 @@ export class SceneryView {
     }
   }
 
-  /** Which silhouette a tree gets: willows by the water, the odd oak, else regular. */
+  /** Which silhouette a tree gets: the world builder's variant, else by seed and water. */
   treeStyleOf(prop: Prop): keyof typeof TREE_STYLES {
+    if (prop.variant === 'oak' || prop.variant === 'willow' || prop.variant === 'regular') return prop.variant;
     const { x, y } = prop.tile;
     for (let dy = -2; dy <= 2; dy++) {
       for (let dx = -2; dx <= 2; dx++) {
@@ -195,9 +196,34 @@ export class SceneryView {
         return this.buildAltar();
       case 'range':
         return this.buildRange();
+      case 'furnace':
+        return this.buildFurnace();
+      case 'anvil':
+        return this.buildAnvil();
       default:
         return null;
     }
+  }
+
+  /** A squat stone furnace with a glowing mouth and a chimney. */
+  private buildFurnace(): THREE.Object3D {
+    const g = new THREE.Group();
+    g.add(place(taperedBox(1.0, 1.4, 0.9, 0.8), this.mat.stone, 0, 0.7, 0));
+    g.add(place(box(0.4, 0.34, 0.08), this.mat.ember, 0, 0.5, 0.44)); // the glowing mouth
+    g.add(place(box(0.3, 0.9, 0.3), this.mat.stone, 0.2, 1.75, -0.15)); // chimney
+    return g;
+  }
+
+  /** An anvil on a stump: a horn, a flat face, and a heavy base. */
+  private buildAnvil(): THREE.Object3D {
+    const g = new THREE.Group();
+    g.add(place(new THREE.CylinderGeometry(0.28, 0.32, 0.45, 6), this.mat.wood, 0, 0.22, 0));
+    g.add(place(box(0.34, 0.22, 0.3), this.mat.iron, 0, 0.55, 0));
+    g.add(place(box(0.62, 0.16, 0.34), this.mat.iron, 0, 0.74, 0));
+    const horn = place(taperedBox(0.2, 0.14, 0.24, 0.2, 0.7), this.mat.iron, 0.42, 0.72, 0);
+    horn.rotation.z = -Math.PI / 2;
+    g.add(horn);
+    return g;
   }
 
   /** The castle kitchen's iron range: a hob on a stone base with a fire door. */
@@ -336,9 +362,10 @@ export class SceneryView {
         scl.set(size, size * (0.75 + s * 0.35), size);
         euler.set(s * 3, s * 6, s * 2);
         quat.setFromEuler(euler);
-        // Grey stone with a copper-brown vein on the odd boulder.
+        // Grey stone, veined with the ore it holds: copper-brown, tin-silver, iron-rust.
         const color = new THREE.Color(0x8a857b).offsetHSL(0, 0, (seedAt(seed, i + 12) - 0.5) * 0.12);
-        if (seedAt(seed, i + 15) < 0.4) color.lerp(new THREE.Color(0xb3703c), 0.45);
+        const vein = rock.variant === 'tin' ? 0xc9ccd4 : rock.variant === 'iron' ? 0x8a4a2a : 0xb3703c;
+        if (seedAt(seed, i + 15) < 0.5) color.lerp(new THREE.Color(vein), 0.5);
         boulders.push({
           variant,
           matrix: new THREE.Matrix4().compose(pos, quat, scl),
@@ -568,6 +595,7 @@ function makeMaterials() {
     wood: flat(0x5c3f24),
     woodLight: flat(0x8a6a3e),
     iron: flat(0x555a63),
+    ember: new THREE.MeshBasicMaterial({ color: 0xff7a1a }),
     gold: flat(0xd8b24a),
     flag: flat(0xb83232, { side: THREE.DoubleSide }),
   };

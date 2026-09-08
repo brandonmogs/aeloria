@@ -30,6 +30,10 @@ export const SHOPS: readonly ShopDef[] = [
     stock: [
       ['tinderbox', 2],
       ['small_fishing_net', 2],
+      ['fishing_rod', 2],
+      ['fishing_bait', 100],
+      ['hammer', 5],
+      ['knife', 5],
       ['bronze_axe', 2],
       ['bronze_pickaxe', 2],
       ['bread', 5],

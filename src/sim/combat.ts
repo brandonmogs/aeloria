@@ -1,4 +1,5 @@
 import { SkillId } from './Skills';
+import { Bonuses } from './items';
 
 /**
  * Old School RuneScape melee combat maths, kept as pure functions over a
@@ -11,48 +12,56 @@ import { SkillId } from './Skills';
 
 export type AttackStyle = 'accurate' | 'aggressive' | 'defensive' | 'controlled';
 
+/** Which of the defender's three melee defence bonuses an attack tests. */
+export type AttackType = 'stab' | 'slash' | 'crush';
+
 /** The attack-style sets weapons expose, mirroring OSRS combat-tab layouts. */
-export type WeaponType = 'unarmed' | 'scimitar' | 'axe' | 'pickaxe';
+export type WeaponType =
+  | 'unarmed'
+  | 'dagger'
+  | 'sword'
+  | 'scimitar'
+  | 'longsword'
+  | 'mace'
+  | 'warhammer'
+  | 'battleaxe'
+  | '2h'
+  | 'axe'
+  | 'pickaxe';
 
 export interface StyleOption {
   /** Button label ("Chop", "Slash", "Punch"...). */
   readonly name: string;
   readonly style: AttackStyle;
+  readonly type: AttackType;
 }
 
+const opt = (name: string, style: AttackStyle, type: AttackType): StyleOption => ({ name, style, type });
+
+/** The combat-options layouts, weapon category by weapon category (OSRS Wiki, Combat Options). */
 export const WEAPON_STYLES: Record<WeaponType, readonly StyleOption[]> = {
-  unarmed: [
-    { name: 'Punch', style: 'accurate' },
-    { name: 'Kick', style: 'aggressive' },
-    { name: 'Block', style: 'defensive' },
-  ],
-  scimitar: [
-    { name: 'Chop', style: 'accurate' },
-    { name: 'Slash', style: 'aggressive' },
-    { name: 'Lunge', style: 'controlled' },
-    { name: 'Block', style: 'defensive' },
-  ],
-  axe: [
-    { name: 'Chop', style: 'accurate' },
-    { name: 'Hack', style: 'aggressive' },
-    { name: 'Block', style: 'defensive' },
-  ],
-  pickaxe: [
-    { name: 'Spike', style: 'accurate' },
-    { name: 'Impale', style: 'aggressive' },
-    { name: 'Block', style: 'defensive' },
-  ],
+  unarmed: [opt('Punch', 'accurate', 'crush'), opt('Kick', 'aggressive', 'crush'), opt('Block', 'defensive', 'crush')],
+  dagger: [opt('Stab', 'accurate', 'stab'), opt('Lunge', 'aggressive', 'stab'), opt('Slash', 'aggressive', 'slash'), opt('Block', 'defensive', 'stab')],
+  sword: [opt('Stab', 'accurate', 'stab'), opt('Lunge', 'aggressive', 'stab'), opt('Slash', 'aggressive', 'slash'), opt('Block', 'defensive', 'stab')],
+  scimitar: [opt('Chop', 'accurate', 'slash'), opt('Slash', 'aggressive', 'slash'), opt('Lunge', 'controlled', 'stab'), opt('Block', 'defensive', 'slash')],
+  longsword: [opt('Chop', 'accurate', 'slash'), opt('Slash', 'aggressive', 'slash'), opt('Lunge', 'controlled', 'stab'), opt('Block', 'defensive', 'slash')],
+  mace: [opt('Pound', 'accurate', 'crush'), opt('Pummel', 'aggressive', 'crush'), opt('Spike', 'controlled', 'stab'), opt('Block', 'defensive', 'crush')],
+  warhammer: [opt('Pound', 'accurate', 'crush'), opt('Pummel', 'aggressive', 'crush'), opt('Block', 'defensive', 'crush')],
+  battleaxe: [opt('Chop', 'accurate', 'slash'), opt('Hack', 'aggressive', 'slash'), opt('Smash', 'aggressive', 'crush'), opt('Block', 'defensive', 'slash')],
+  '2h': [opt('Chop', 'accurate', 'slash'), opt('Slash', 'aggressive', 'slash'), opt('Smash', 'aggressive', 'crush'), opt('Block', 'defensive', 'slash')],
+  axe: [opt('Chop', 'accurate', 'slash'), opt('Hack', 'aggressive', 'slash'), opt('Smash', 'aggressive', 'crush'), opt('Block', 'defensive', 'slash')],
+  pickaxe: [opt('Spike', 'accurate', 'stab'), opt('Impale', 'aggressive', 'stab'), opt('Smash', 'aggressive', 'crush'), opt('Block', 'defensive', 'stab')],
 };
 
 export interface CombatProfile {
   attack: number;
   strength: number;
   defense: number;
-  /** Equipment bonuses (summed across worn gear). */
-  attackBonus: number;
-  strengthBonus: number;
-  defenseBonus: number;
+  /** Full equipment (or monster) bonus table. */
+  bonuses: Bonuses;
   style: AttackStyle;
+  /** The melee attack type this profile attacks with. */
+  attackType: AttackType;
   /**
    * Prayer multipliers on the base levels (1.0 = no prayer). Applied before
    * the style bonus and the +8, exactly as OSRS computes effective levels.
@@ -105,23 +114,27 @@ function effective(level: number, prayerMult: number | undefined, bonus: number)
 /** Highest damage a single hit can roll. */
 export function maxHit(p: CombatProfile): number {
   const eff = effective(p.strength, p.prayerStrength, styleBonus(p.style, 'aggressive'));
-  return Math.floor(0.5 + (eff * (p.strengthBonus + 64)) / 640);
+  return Math.floor(0.5 + (eff * (p.bonuses.str + 64)) / 640);
 }
 
+/** The attacker's roll uses its own bonus for the type it attacks with. */
 function attackRoll(p: CombatProfile): number {
   const eff = effective(p.attack, p.prayerAttack, styleBonus(p.style, 'accurate'));
-  return eff * (p.attackBonus + 64);
+  const bonus = p.attackType === 'stab' ? p.bonuses.astab : p.attackType === 'slash' ? p.bonuses.aslash : p.bonuses.acrush;
+  return eff * (bonus + 64);
 }
 
-function defenseRoll(p: CombatProfile): number {
+/** The defender's roll uses its defence bonus against the attacker's type. */
+function defenseRoll(p: CombatProfile, against: AttackType): number {
   const eff = effective(p.defense, p.prayerDefense, styleBonus(p.style, 'defensive'));
-  return eff * (p.defenseBonus + 64);
+  const bonus = against === 'stab' ? p.bonuses.dstab : against === 'slash' ? p.bonuses.dslash : p.bonuses.dcrush;
+  return eff * (bonus + 64);
 }
 
 /** Probability in [0, 1] that an attack lands against a defender. */
 export function hitChance(attacker: CombatProfile, defender: CombatProfile): number {
   const a = attackRoll(attacker);
-  const d = defenseRoll(defender);
+  const d = defenseRoll(defender, attacker.attackType);
   return a > d ? 1 - (d + 2) / (2 * (a + 1)) : a / (2 * (d + 1));
 }
 

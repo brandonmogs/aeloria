@@ -6,9 +6,10 @@ import { Npc, NpcConfig } from './Npc';
 import { Command } from './commands';
 import { Tile, chebyshev, tilesEqual } from './coords';
 import { EquipSlot } from './Inventory';
-import { ItemStack, itemDef, stackOf } from './items';
+import { ItemStack, ZERO_BONUSES, itemDef, stackOf } from './items';
 import {
   CombatProfile,
+  StyleOption,
   WEAPON_STYLES,
   WeaponType,
   combatLevel,
@@ -31,18 +32,27 @@ import {
   shopSellPrice,
 } from './shops';
 import {
+  FishingMethod,
   ResourceKind,
   ResourceNode,
   RESOURCE_DEFS,
   interpolateChance,
+  variantOf,
 } from './gathering';
+import { SMELTING, SMITHING } from './smithing';
 import { WALK_SPEED, RUN_SPEED } from '../engine/constants';
 
-/** A usable world object the player can walk to: a bank booth or an altar. */
+/** A usable world object the player can walk to: a bank booth, altar, furnace, or anvil. */
 export interface Interactable {
-  readonly kind: 'bank' | 'altar';
+  readonly kind: 'bank' | 'altar' | 'anvil' | 'furnace';
   readonly tile: Tile;
 }
+
+/** Bar types in the order a smith would rather work them. */
+const BARS_BEST_FIRST = ['steel_bar', 'iron_bar', 'bronze_bar'];
+/** Ticks per bar at the furnace and per item at the anvil. */
+const SMELT_TICKS = 4;
+const SMITH_TICKS = 5;
 
 /** NPCs stop attacking unprovoked after ~10 minutes of you hanging around. */
 const TOLERANCE_TICKS = 1000;
@@ -146,8 +156,8 @@ export class World {
   // --- World-building registrations ---------------------------------------
 
   /** Register a gatherable node (the world builder calls this for trees/rocks). */
-  addResourceNode(kind: ResourceKind, tile: Tile): ResourceNode {
-    const node: ResourceNode = { id: this.nextNodeId++, kind, tile, regrowTimer: 0 };
+  addResourceNode(kind: ResourceKind, tile: Tile, variant = 'regular'): ResourceNode {
+    const node: ResourceNode = { id: this.nextNodeId++, kind, variant, tile, regrowTimer: 0 };
     this.resourceNodes.set(node.id, node);
     return node;
   }
@@ -157,6 +167,7 @@ export class World {
     const node: ResourceNode = {
       id: this.nextNodeId++,
       kind: 'fishing_spot',
+      variant: 'net',
       tile: candidates[0],
       regrowTimer: 0,
       candidates,
@@ -166,7 +177,7 @@ export class World {
     return node;
   }
 
-  addInteractable(kind: 'bank' | 'altar', tile: Tile): void {
+  addInteractable(kind: Interactable['kind'], tile: Tile): void {
     this.interactables.push({ kind, tile });
   }
 
@@ -238,6 +249,12 @@ export class World {
     return (weapon && itemDef(weapon.id).weaponType) || 'unarmed';
   }
 
+  /** The best bar type the player carries, for the anvil screen. */
+  bestBarOf(player: Player): string | null {
+    for (const bar of BARS_BEST_FIRST) if (player.inventory.countOf(bar) > 0) return bar;
+    return null;
+  }
+
   // --- Command intake ------------------------------------------------------
 
   private applyCommands(commands: Command[]): void {
@@ -296,12 +313,20 @@ export class World {
           if (!(entity instanceof Player)) break;
           const node = this.resourceNodes.get(cmd.nodeId);
           if (node && node.regrowTimer <= 0) {
+            const method: FishingMethod = cmd.method ?? 'net';
+            const variant = variantOf(node, method);
+            const def = RESOURCE_DEFS[node.kind];
+            if (entity.skills.levelOf(def.skill) < variant.level) {
+              this.say(levelNeededMessage(node.kind, variant.level));
+              break;
+            }
             clearIntents();
             entity.gatherTarget = node.id;
+            entity.gatherMethod = method;
             entity.gatherCooldown = this.gatherCadence(entity, node.kind);
             const dest = this.adjacentDestination(entity.position, node.tile);
             entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
-            this.say(RESOURCE_DEFS[node.kind].startMsg);
+            this.say(startMessage(node.kind, method));
           }
           break;
         }
@@ -357,6 +382,27 @@ export class World {
           entity.objectTarget = { kind: cmd.kind, tile: cmd.target };
           const dest = this.adjacentDestination(entity.position, cmd.target);
           entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
+          break;
+        }
+        case 'smelt': {
+          if (!(entity instanceof Player)) break;
+          clearIntents();
+          entity.objectTarget = { kind: 'furnace', tile: cmd.target, smelt: { bar: cmd.bar, count: cmd.count } };
+          const dest = this.adjacentDestination(entity.position, cmd.target);
+          entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
+          break;
+        }
+        case 'smith': {
+          if (!(entity instanceof Player)) break;
+          const anvil = this.interactables.find(
+            (i) => i.kind === 'anvil' && chebyshev(i.tile, entity.position) <= 1,
+          );
+          if (!anvil) {
+            this.say("You need to be standing at an anvil to do that.");
+            break;
+          }
+          clearIntents();
+          this.startSmithing(entity, cmd.item, cmd.count, anvil.tile);
           break;
         }
         case 'bankDeposit':
@@ -808,7 +854,7 @@ export class World {
     // to each of attack/strength/defence on controlled), plus 1.33 × damage
     // to Hitpoints.
     if (attacker instanceof Player && damage > 0) {
-      const style = this.styleOf(attacker);
+      const style = this.styleOf(attacker).style;
       const skills = styleSkills(style);
       const per = style === 'controlled' ? (damage * 4) / 3 : damage * 4;
       for (const skill of skills) this.grantXp(attacker, skill, per);
@@ -896,11 +942,12 @@ export class World {
 
   /**
    * The OSRS "items kept on death" rule: the three most valuable single items
-   * are protected (a stack counts one unit at a time); everything else drops
-   * where you fell.
+   * are protected (four with Protect Item; a stack counts one unit at a time);
+   * everything else drops where you fell.
    */
   private dropItemsOnDeath(victim: Player): void {
     const inv = victim.inventory;
+    const keepCount = [...victim.activePrayers].some((id) => prayerDef(id).protectItem) ? 4 : 3;
     const carried: ItemStack[] = [];
     for (let i = 0; i < inv.slots.length; i++) {
       const s = inv.slots[i];
@@ -914,8 +961,8 @@ export class World {
     }
     if (carried.length === 0) return;
 
-    // Protect the three most valuable units.
-    for (let keep = 0; keep < 3; keep++) {
+    // Protect the most valuable units.
+    for (let keep = 0; keep < keepCount; keep++) {
       let best: ItemStack | null = null;
       for (const s of carried) {
         if (s.qty <= 0) continue;
@@ -929,7 +976,7 @@ export class World {
     for (const s of carried) {
       if (s.qty > 0) this.dropItem(stackOf(s.id, s.qty), victim.position);
     }
-    this.say('You keep your three most valuable items; the rest is left where you fell.');
+    this.say(`You keep your ${keepCount === 4 ? 'four' : 'three'} most valuable items; the rest is left where you fell.`);
   }
 
   // --- Inventory actions ---------------------------------------------------
@@ -970,12 +1017,25 @@ export class World {
     if (!item) return;
     const def = itemDef(item.id);
     if (!def.equip) return;
-    const req = def.equipReq;
-    if (req && player.skills.levelOf(req.skill) < req.level) {
-      const skillName = req.skill.charAt(0).toUpperCase() + req.skill.slice(1);
-      const verb = def.equip === 'weapon' ? 'wield' : 'wear';
-      this.say(`You need ${req.skill === 'attack' ? 'an' : 'a'} ${skillName} level of ${req.level} to ${verb} this.`);
-      return;
+    for (const req of def.equipReq ?? []) {
+      if (player.skills.levelOf(req.skill) < req.level) {
+        const skillName = req.skill === 'defense' ? 'Defence' : req.skill.charAt(0).toUpperCase() + req.skill.slice(1);
+        const verb = def.equip === 'weapon' ? 'wield' : 'wear';
+        this.say(`You need ${req.skill === 'attack' ? 'an' : 'a'} ${skillName} level of ${req.level} to ${verb} this.`);
+        return;
+      }
+    }
+    // Two-handed weapons need the shield hand free, and a shield needs a
+    // one-handed weapon; the displaced piece goes back to the backpack.
+    const eq = player.inventory.equipment;
+    const displaced: EquipSlot | null =
+      def.twoHanded && eq.shield ? 'shield' : def.equip === 'shield' && eq.weapon && itemDef(eq.weapon.id).twoHanded ? 'weapon' : null;
+    if (displaced) {
+      if (player.inventory.freeSlots() < 2) {
+        this.say("You don't have enough inventory space.");
+        return;
+      }
+      player.inventory.unequip(displaced);
     }
     if (player.inventory.equip(slot)) {
       // Weapon categories carry different style lists; keep the index valid.
@@ -1045,10 +1105,18 @@ export class World {
 
       entity.path.length = 0; // in position — stand and work
       const def = RESOURCE_DEFS[node.kind];
+      const variant = variantOf(node, entity.gatherMethod);
+      const level = entity.skills.levelOf(def.skill);
 
-      const toolTier = this.toolTier(entity, def.tool);
+      if (level < variant.level) {
+        this.say(levelNeededMessage(node.kind, variant.level));
+        entity.gatherTarget = null;
+        continue;
+      }
+
+      const toolTier = this.toolTier(entity, def.tool, entity.gatherMethod);
       if (def.tool && toolTier <= 0) {
-        this.say(def.noToolMsg);
+        this.say(node.kind === 'fishing_spot' && entity.gatherMethod === 'bait' ? 'You need a fishing rod and some fishing bait to fish here.' : def.noToolMsg);
         entity.gatherTarget = null;
         continue;
       }
@@ -1071,17 +1139,19 @@ export class World {
         kind: node.kind === 'tree' ? 'chop' : node.kind === 'rock' ? 'mine' : 'fish',
       });
 
-      const level = entity.skills.levelOf(def.skill);
       // Better axes raise the success line; better picks swing more often.
       const toolMult = def.tool === 'axe' ? 1 + 0.15 * (toolTier - 1) : 1;
-      for (const y of def.yields) {
+      for (const y of variant.yields) {
         if (level < y.level) continue;
         if (this.rng() >= interpolateChance(y.low, y.high, level) * toolMult) continue;
+        if (node.kind === 'fishing_spot' && entity.gatherMethod === 'bait') {
+          entity.inventory.removeById('fishing_bait', 1);
+        }
         entity.inventory.add(y.itemId, 1);
         this.grantXp(entity, def.skill, y.xp);
         this.say(successMessage(y.itemId));
-        if (def.regrowTicks > 0) {
-          node.regrowTimer = def.regrowTicks;
+        if (variant.regrowTicks > 0 && this.rng() < variant.depleteChance) {
+          node.regrowTimer = variant.regrowTicks;
           entity.gatherTarget = null;
         }
         break;
@@ -1098,20 +1168,96 @@ export class World {
     return def.cadence;
   }
 
-  /** Best tier of the required tool the player carries or wields (0 = none). */
-  private toolTier(player: Player, tool: 'axe' | 'pick' | 'net' | null): number {
+  /**
+   * Best tier of the required tool the player carries or wields and has the
+   * level to use (0 = none). Nets and rods are tier 1 when present.
+   */
+  private toolTier(player: Player, tool: 'axe' | 'pick' | 'net' | null, method: FishingMethod = 'net'): number {
     if (!tool) return 1;
-    if (tool === 'net') return player.inventory.has('small_fishing_net') ? 1 : 0;
+    if (tool === 'net') {
+      if (method === 'bait') {
+        return player.inventory.has('fishing_rod') && player.inventory.countOf('fishing_bait') > 0 ? 1 : 0;
+      }
+      return player.inventory.has('small_fishing_net') ? 1 : 0;
+    }
+    const skill = tool === 'axe' ? player.skills.levelOf('woodcutting') : player.skills.levelOf('mining');
     let best = 0;
     const consider = (id: string | undefined): void => {
       if (!id) return;
       const def = itemDef(id);
       const tier = tool === 'axe' ? def.axeTier : def.pickTier;
-      if (tier && tier > best) best = tier;
+      if (tier && tier > best && (def.toolLevel ?? 1) <= skill) best = tier;
     };
     for (const s of player.inventory.slots) consider(s?.id);
     consider(player.inventory.equipment.weapon?.id);
     return best;
+  }
+
+  // --- Smithing -----------------------------------------------------------------
+
+  private startSmelting(player: Player, bar: string, count: number, tile: Tile): void {
+    const recipe = SMELTING.find((r) => r.bar === bar);
+    if (!recipe) return;
+    if (player.skills.levelOf('smithing') < recipe.level) {
+      this.say(`You need a Smithing level of ${recipe.level} to smelt ${itemDef(bar).name.toLowerCase()}s.`);
+      return;
+    }
+    if (!recipe.ores.every(([ore, n]) => player.inventory.countOf(ore) >= n)) {
+      this.say(`You don't have the ores to make a ${itemDef(bar).name.toLowerCase()}.`);
+      return;
+    }
+    player.action = { type: 'smelt', bar, remaining: count < 0 ? 999 : count, cooldown: 1, tile };
+  }
+
+  private startSmithing(player: Player, item: string, count: number, tile: Tile): void {
+    const bar = Object.keys(SMITHING).find((b) => SMITHING[b].some((r) => r.item === item));
+    const recipe = bar ? SMITHING[bar].find((r) => r.item === item) : undefined;
+    if (!bar || !recipe) return;
+    if (!player.inventory.has('hammer')) {
+      this.say('You need a hammer to work the metal on this anvil.');
+      return;
+    }
+    if (player.skills.levelOf('smithing') < recipe.level) {
+      this.say(`You need a Smithing level of ${recipe.level} to make a ${itemDef(item).name.toLowerCase()}.`);
+      return;
+    }
+    if (player.inventory.countOf(bar) < recipe.bars) {
+      this.say(`You need ${recipe.bars} ${itemDef(bar).name.toLowerCase()}${recipe.bars === 1 ? '' : 's'} to make a ${itemDef(item).name.toLowerCase()}.`);
+      return;
+    }
+    player.action = { type: 'smith', item, remaining: count < 0 ? 999 : count, cooldown: 1, tile };
+  }
+
+  /** One furnace cycle: consume the ores, maybe fail (iron), award the bar. */
+  private smeltOnce(player: Player, bar: string): boolean {
+    const recipe = SMELTING.find((r) => r.bar === bar);
+    if (!recipe || !recipe.ores.every(([ore, n]) => player.inventory.countOf(ore) >= n)) return false;
+    for (const [ore, n] of recipe.ores) player.inventory.removeById(ore, n);
+    player.swingQueue.push(-1);
+    if (recipe.failChance && this.rng() < recipe.failChance) {
+      this.say('The ore is too impure and you fail to refine it.');
+      return true;
+    }
+    player.inventory.add(bar, 1);
+    this.grantXp(player, 'smithing', recipe.xp);
+    this.say(`You retrieve a bar of ${itemDef(bar).name.replace(/ bar$/i, '').toLowerCase()}.`);
+    this.eventQueue.push({ type: 'sfx', name: 'light' });
+    return true;
+  }
+
+  /** One anvil cycle: consume the bars, award the item. */
+  private smithOnce(player: Player, item: string): boolean {
+    const bar = Object.keys(SMITHING).find((b) => SMITHING[b].some((r) => r.item === item));
+    const recipe = bar ? SMITHING[bar].find((r) => r.item === item) : undefined;
+    if (!bar || !recipe || player.inventory.countOf(bar) < recipe.bars || !player.inventory.has('hammer')) return false;
+    player.inventory.removeById(bar, recipe.bars);
+    player.inventory.add(item, 1);
+    player.swingQueue.push(-1);
+    this.grantXp(player, 'smithing', recipe.xp);
+    const metal = itemDef(bar).name.replace(/ bar$/i, '').toLowerCase();
+    this.say(`You hammer the ${metal} and make a ${itemDef(item).name.toLowerCase()}.`);
+    this.eventQueue.push({ type: 'swing', kind: 'mine' });
+    return true;
   }
 
   // --- Firemaking & cooking -------------------------------------------------
@@ -1120,12 +1266,16 @@ export class World {
     const item = player.inventory.slots[slot];
     if (!item) return;
     const def = itemDef(item.id);
-    if (def.firemakingXp === undefined) {
+    if (!def.firemaking) {
       this.say('Nothing interesting happens.');
       return;
     }
     if (!player.inventory.has('tinderbox')) {
       this.say('You need a tinderbox to light a fire.');
+      return;
+    }
+    if (player.skills.levelOf('firemaking') < def.firemaking.level) {
+      this.say(`You need a Firemaking level of ${def.firemaking.level} to light these logs.`);
       return;
     }
     if (this.fireAt(player.position)) {
@@ -1152,6 +1302,10 @@ export class World {
       this.say(`You don't have any ${def.name.toLowerCase()} to cook.`);
       return;
     }
+    if (player.skills.levelOf('cooking') < def.cooking.level) {
+      this.say(`You need a Cooking level of ${def.cooking.level} to cook ${def.name.toLowerCase()}.`);
+      return;
+    }
     // The castle range is the Cook's until you've done him a favour.
     if (fire.kind === 'range' && (player.quests.get('cooks_rats') ?? 0) < 2) {
       this.say('The Cook shoos you away from his range. Perhaps if you helped him first...');
@@ -1171,10 +1325,25 @@ export class World {
       if (!(entity instanceof Player) || !entity.action) continue;
       const action = entity.action;
 
+      if (action.type === 'smelt' || action.type === 'smith') {
+        if (chebyshev(entity.position, action.tile) > 1) {
+          entity.action = null;
+          continue;
+        }
+        entity.path.length = 0;
+        action.cooldown--;
+        if (action.cooldown > 0) continue;
+        action.cooldown = action.type === 'smelt' ? SMELT_TICKS : SMITH_TICKS;
+        const worked = action.type === 'smelt' ? this.smeltOnce(entity, action.bar) : this.smithOnce(entity, action.item);
+        action.remaining--;
+        if (!worked || action.remaining <= 0) entity.action = null;
+        continue;
+      }
+
       if (action.type === 'light') {
         const item = entity.inventory.slots[action.slot];
         const def = item ? itemDef(item.id) : null;
-        if (!def?.firemakingXp || !tilesEqual(entity.position, action.tile)) {
+        if (!def?.firemaking || !tilesEqual(entity.position, action.tile)) {
           entity.action = null;
           continue;
         }
@@ -1192,7 +1361,7 @@ export class World {
           expiresAtTick: this.tickCount + 100 + Math.floor(this.rng() * 200),
         };
         this.fires.set(fire.id, fire);
-        this.grantXp(entity, 'firemaking', def.firemakingXp);
+        this.grantXp(entity, 'firemaking', def.firemaking.xp);
         this.say('The fire catches and the logs begin to burn.');
         this.eventQueue.push({ type: 'sfx', name: 'light' });
         entity.action = null;
@@ -1283,6 +1452,18 @@ export class World {
         entity.objectTarget = null;
         if (target.kind === 'bank') {
           this.eventQueue.push({ type: 'openBank', entityId: entity.id });
+        } else if (target.kind === 'furnace') {
+          // An explicit "Smelt X", or the left-click default: the best bar the ores allow.
+          const pick = target.smelt ?? this.defaultSmelt(entity);
+          if (pick) this.startSmelting(entity, pick.bar, pick.count, target.tile);
+          else this.say("You don't have any ores to smelt.");
+        } else if (target.kind === 'anvil') {
+          if (!entity.inventory.has('hammer')) this.say('You need a hammer to work the metal on this anvil.');
+          else {
+            const bar = this.bestBarOf(entity);
+            if (bar) this.eventQueue.push({ type: 'openSmithing', entityId: entity.id, bar });
+            else this.say('You have no bars to smith.');
+          }
         } else if (entity.prayerPoints < entity.maxPrayerPoints) {
           entity.prayerPoints = entity.maxPrayerPoints;
           entity.prayerDrainCounter = 0;
@@ -1297,6 +1478,18 @@ export class World {
         if (entity.path.length === 0) entity.objectTarget = null; // unreachable
       }
     }
+  }
+
+  /** The highest bar the player's ores and level allow, smelting as many as possible. */
+  private defaultSmelt(player: Player): { bar: string; count: number } | null {
+    const level = player.skills.levelOf('smithing');
+    for (const recipe of [...SMELTING].reverse()) {
+      if (level < recipe.level) continue;
+      if (recipe.ores.every(([ore, n]) => player.inventory.countOf(ore) >= n)) {
+        return { bar: recipe.bar, count: -1 };
+      }
+    }
+    return null;
   }
 
   private nearBank(player: Player): boolean {
@@ -1350,13 +1543,17 @@ export class World {
       this.say(`You need a Prayer level of ${def.level} to use ${def.name}.`);
       return;
     }
+    if (def.defenceLevel && player.skills.levelOf('defense') < def.defenceLevel) {
+      this.say(`You need a Defence level of ${def.defenceLevel} to use ${def.name}.`);
+      return;
+    }
     if (player.prayerPoints <= 0) {
       this.say('You have run out of prayer points; you can recharge at an altar.');
       return;
     }
-    // Prayers in the same group (defence / strength / attack) replace each other.
+    // Prayers sharing a group (defence / strength / attack / overhead…) replace each other.
     for (const other of PRAYERS) {
-      if (other.group === def.group) player.activePrayers.delete(other.id);
+      if (other.groups.some((g) => def.groups.includes(g))) player.activePrayers.delete(other.id);
     }
     player.activePrayers.add(prayerId);
     this.eventQueue.push({ type: 'sfx', name: 'prayerOn' });
@@ -1374,7 +1571,7 @@ export class World {
       for (const id of entity.activePrayers) drain += prayerDef(id).drainEffect;
       entity.prayerDrainCounter += drain;
 
-      const resistance = 2 * entity.inventory.equipmentBonuses().prayer + 60;
+      const resistance = 2 * Math.max(0, entity.inventory.equipmentBonuses().prayer) + 60;
       while (entity.prayerDrainCounter >= resistance && entity.prayerPoints > 0) {
         entity.prayerDrainCounter -= resistance;
         entity.prayerPoints--;
@@ -1457,13 +1654,13 @@ export class World {
     }
   }
 
-  /** Passive recovery, OSRS-style: players regain 1 HP per 100 ticks (~1min). */
+  /** Passive recovery, OSRS-style: 1 HP per 100 ticks (~1 min), twice as fast under Rapid Heal. */
   private updateRegen(): void {
-    if (this.tickCount % 100 !== 0 || this.tickCount === 0) return;
+    if (this.tickCount === 0) return;
     for (const entity of this.entities.values()) {
-      if (entity instanceof Player && entity.isAlive && entity.hitpoints < entity.maxHitpoints) {
-        entity.hitpoints++;
-      }
+      if (!(entity instanceof Player) || !entity.isAlive || entity.hitpoints >= entity.maxHitpoints) continue;
+      const rapid = [...entity.activePrayers].some((id) => prayerDef(id).rapidHeal);
+      if (this.tickCount % (rapid ? 50 : 100) === 0) entity.hitpoints++;
     }
   }
 
@@ -1493,55 +1690,52 @@ export class World {
 
   // --- Combat profiles ------------------------------------------------------
 
-  /** The style the player's current weapon + selected index resolve to. */
-  private styleOf(player: Player) {
+  /** The combat option the player's current weapon + selected index resolve to. */
+  private styleOf(player: Player): StyleOption {
     const styles = WEAPON_STYLES[this.weaponTypeOf(player)];
-    return styles[Math.min(player.styleIndex, styles.length - 1)].style;
+    return styles[Math.min(player.styleIndex, styles.length - 1)];
   }
 
   /** Build the combat profile for an entity from its levels and worn gear. */
   private profileOf(entity: Entity): CombatProfile {
     if (entity instanceof Player) {
-      const bonus = entity.inventory.equipmentBonuses();
+      const option = this.styleOf(entity);
       const profile: CombatProfile = {
         attack: entity.skills.levelOf('attack'),
         strength: entity.skills.levelOf('strength'),
         defense: entity.skills.levelOf('defense'),
-        attackBonus: bonus.attack,
-        strengthBonus: bonus.strength,
-        defenseBonus: bonus.defense,
-        style: this.styleOf(entity),
+        bonuses: entity.inventory.equipmentBonuses(),
+        style: option.style,
+        attackType: option.type,
       };
       for (const id of entity.activePrayers) {
-        const boost = prayerDef(id).boost;
-        if (!boost) continue;
-        if (boost.skill === 'attack') profile.prayerAttack = boost.mult;
-        if (boost.skill === 'strength') profile.prayerStrength = boost.mult;
-        if (boost.skill === 'defense') profile.prayerDefense = boost.mult;
+        const boosts = prayerDef(id).boosts;
+        if (!boosts) continue;
+        if (boosts.attack) profile.prayerAttack = boosts.attack;
+        if (boosts.strength) profile.prayerStrength = boosts.strength;
+        if (boosts.defense) profile.prayerDefense = boosts.defense;
       }
       return profile;
     }
     if (entity instanceof Npc) {
       // NPCs fight at effective level + 9, the documented OSRS monster maths
-      // (+8 like everyone, +1 as if on controlled).
+      // (+8 like everyone, +1 as if on controlled), with the wiki's bonuses.
       return {
         attack: entity.attack,
         strength: entity.strength,
         defense: entity.defense,
-        attackBonus: 0,
-        strengthBonus: 0,
-        defenseBonus: 0,
+        bonuses: { ...ZERO_BONUSES, ...entity.bonuses },
         style: 'controlled',
+        attackType: entity.attackType,
       };
     }
     return {
       attack: 1,
       strength: 1,
       defense: 1,
-      attackBonus: 0,
-      strengthBonus: 0,
-      defenseBonus: 0,
+      bonuses: ZERO_BONUSES,
       style: 'accurate',
+      attackType: 'crush',
     };
   }
 
@@ -1580,20 +1774,25 @@ export class World {
   }
 }
 
-/** Success messages for gathered items. */
+/** Success messages for gathered items, in the game's phrasing. */
 function successMessage(itemId: string): string {
-  switch (itemId) {
-    case 'logs':
-      return 'You get some logs.';
-    case 'copper_ore':
-      return 'You manage to mine some copper ore.';
-    case 'raw_shrimps':
-      return 'You catch some shrimps.';
-    case 'raw_anchovies':
-      return 'You catch some anchovies.';
-    default:
-      return `You get some ${itemDef(itemId).name.toLowerCase()}.`;
-  }
+  const name = itemDef(itemId).name.toLowerCase();
+  if (itemId.endsWith('_logs') || itemId === 'logs') return `You get some ${name}.`;
+  if (itemId.endsWith('_ore')) return `You manage to mine some ${name}.`;
+  if (itemId.startsWith('raw_')) return `You catch ${name.startsWith('raw ') ? name.slice(4) : name}.`.replace('catch ', 'catch some ').replace('some a ', 'a ');
+  return `You get some ${name}.`;
+}
+
+function startMessage(kind: ResourceKind, method: FishingMethod): string {
+  if (kind === 'tree') return 'You swing your axe at the tree.';
+  if (kind === 'rock') return 'You swing your pick at the rock.';
+  return method === 'bait' ? 'You cast out your line...' : 'You cast out your net...';
+}
+
+function levelNeededMessage(kind: ResourceKind, level: number): string {
+  if (kind === 'tree') return `You need a Woodcutting level of ${level} to chop this tree.`;
+  if (kind === 'rock') return `You need a Mining level of ${level} to mine this rock.`;
+  return `You need a Fishing level of ${level} to fish here.`;
 }
 
 /**

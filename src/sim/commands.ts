@@ -12,7 +12,8 @@ export type Command =
   | { type: 'move'; entityId: number; target: Tile; run?: boolean }
   | { type: 'attack'; entityId: number; targetId: number }
   | { type: 'pickup'; entityId: number; groundItemId: number }
-  | { type: 'gather'; entityId: number; nodeId: number }
+  /** Work a tree, rock, or fishing spot (`method` picks net vs bait at a spot). */
+  | { type: 'gather'; entityId: number; nodeId: number; method?: 'net' | 'bait' }
   /** Use a backpack item on itself: eat food, bury bones. */
   | { type: 'useItem'; entityId: number; slot: number }
   | { type: 'dropItem'; entityId: number; slot: number }
@@ -28,8 +29,12 @@ export type Command =
   | { type: 'lightFire'; entityId: number; slot: number }
   /** Cook every `itemId` in the backpack on the given fire (or range). */
   | { type: 'cook'; entityId: number; fireId: number; itemId: string }
-  /** Walk to and use a world object (bank booth, altar). */
-  | { type: 'interact'; entityId: number; kind: 'bank' | 'altar'; target: Tile }
+  /** Walk to and use a world object (bank booth, altar, anvil). */
+  | { type: 'interact'; entityId: number; kind: 'bank' | 'altar' | 'anvil' | 'furnace'; target: Tile }
+  /** Walk to the furnace at `target` and smelt `count` bars of `bar`. */
+  | { type: 'smelt'; entityId: number; bar: string; count: number; target: Tile }
+  /** Hammer `count` of `item` on the anvil the player stands beside. */
+  | { type: 'smith'; entityId: number; item: string; count: number }
   | { type: 'bankDeposit'; entityId: number; slot: number; qty: number }
   | { type: 'bankWithdraw'; entityId: number; itemId: string; qty: number }
   | { type: 'bankDepositAll'; entityId: number }
@@ -57,8 +62,8 @@ export function pickupCommand(entityId: number, groundItemId: number): Command {
   return { type: 'pickup', entityId, groundItemId };
 }
 
-export function gatherCommand(entityId: number, nodeId: number): Command {
-  return { type: 'gather', entityId, nodeId };
+export function gatherCommand(entityId: number, nodeId: number, method?: 'net' | 'bait'): Command {
+  return { type: 'gather', entityId, nodeId, method };
 }
 
 export function useItemCommand(entityId: number, slot: number): Command {

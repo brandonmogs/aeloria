@@ -104,14 +104,17 @@ export function buildStartingWorld(map: TileMap): StartingWorld {
   buildCastle(place);
   buildMoat(props, map); // before the forests, so trees never sprout in the water
   buildForests(props, map);
-  buildRockClusters(place);
+  buildRockClusters(map, props);
 
-  // Courtyard furniture: two bank booths along the west wall and an altar to
-  // the east, so the castle earns its keep as a home base.
+  // Courtyard furniture: two bank booths along the west wall, an altar to the
+  // east, the kitchen range, and a furnace and anvil by the east wall, so the
+  // castle earns its keep as a home base.
   place('bank-booth', 20, 43);
   place('bank-booth', 21, 43);
   place('altar', 27, 43);
   place('range', 28, 37); // the castle kitchen, where the Cook works
+  place('furnace', 29, 40);
+  place('anvil', 29, 42);
 
   const bridgeTiles: Tile[] = [];
   for (let y = BRIDGE.y0; y <= BRIDGE.y1; y++) {
@@ -237,7 +240,25 @@ function pathDistance(x: number, y: number): number {
   return best;
 }
 
-/** Two woods flanking the approach, kept clear of the roads and the gate corridor. */
+/** Whether a tile sits within two tiles of the moat: willow country. */
+function nearWater(x: number, y: number): boolean {
+  for (let dy = -2; dy <= 2; dy++) {
+    for (let dx = -2; dx <= 2; dx++) {
+      const tx = x + dx;
+      const ty = y + dy;
+      const inOuter = tx >= MOAT_OUTER.x0 && tx <= MOAT_OUTER.x1 && ty >= MOAT_OUTER.y0 && ty <= MOAT_OUTER.y1;
+      const inInner = tx >= MOAT_INNER.x0 && tx <= MOAT_INNER.x1 && ty >= MOAT_INNER.y0 && ty <= MOAT_INNER.y1;
+      if (inOuter && !inInner) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Two woods flanking the approach, kept clear of the roads and the gate
+ * corridor. Most trees are regular; one in seven is an oak (Woodcutting 15),
+ * and anything growing by the moat is a willow (30).
+ */
 function buildForests(props: Prop[], map: TileMap): void {
   const woods = [
     { x0: 4, x1: 16, y0: 14, y1: 40, density: 0.24 },
@@ -254,18 +275,28 @@ function buildForests(props: Prop[], map: TileMap): void {
         if (pathDistance(x, y) < 1.5) continue;
         if (tileSeed(x, y) >= w.density) continue;
         map.setBlocked(x, y);
-        props.push({ kind: 'tree', tile: { x, y }, seed: tileSeed(x * 7, y * 7) });
+        const seed = tileSeed(x * 7, y * 7);
+        const variant = nearWater(x, y) ? 'willow' : seed < 0.14 ? 'oak' : 'regular';
+        props.push({ kind: 'tree', tile: { x, y }, seed, variant });
       }
     }
   }
 }
 
-/** A few boulder clusters to serve as the first mining spots. */
-function buildRockClusters(place: (k: PropKind, x: number, y: number, block?: boolean) => void): void {
-  const rocks: ReadonlyArray<readonly [number, number]> = [
-    [12, 18], [13, 18], [12, 19], [14, 19],
-    [35, 24], [36, 24], [36, 25], [35, 26],
-    [20, 10], [21, 10], [20, 11],
+/**
+ * Three boulder clusters: copper and tin side by side in the west and east
+ * (everything a bronze bar needs), and iron (Mining 15) in the southern
+ * treeline.
+ */
+function buildRockClusters(map: TileMap, props: Prop[]): void {
+  const rocks: ReadonlyArray<readonly [number, number, string]> = [
+    [12, 18, 'copper'], [13, 18, 'tin'], [12, 19, 'tin'], [14, 19, 'copper'],
+    [35, 24, 'tin'], [36, 24, 'copper'], [36, 25, 'copper'], [35, 26, 'tin'],
+    [20, 10, 'iron'], [21, 10, 'iron'], [20, 11, 'iron'],
   ];
-  for (const [x, y] of rocks) place('rock', x, y);
+  for (const [x, y, variant] of rocks) {
+    if (!map.inBounds(x, y)) continue;
+    map.setBlocked(x, y);
+    props.push({ kind: 'rock', tile: { x, y }, seed: tileSeed(x, y), variant });
+  }
 }

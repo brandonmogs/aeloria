@@ -36,4 +36,6 @@ export type GameEvent =
   | { type: 'questComplete'; entityId: number; questId: string }
   /** Open (or, with null, close) the shop screen. */
   | { type: 'shop'; entityId: number; shopId: string | null }
+  /** The player reached an anvil with bars and a hammer: show the smithing screen. */
+  | { type: 'openSmithing'; entityId: number; bar: string }
   | { type: 'message'; text: string };

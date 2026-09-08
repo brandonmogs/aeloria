@@ -1,66 +1,77 @@
 # Aeloria
 
-An Old School RuneScape–inspired game built on the two things that make OSRS
-feel like OSRS — a **600ms game tick** and a **tile grid** — but rendered with
-modern WebGL (Three.js) instead of a 2007 Java engine.
+An Old School RuneScape–style game built on the two things that make OSRS
+feel like OSRS — a **600ms game tick** and a **tile grid** — with modern WebGL
+(Three.js) drawing a low-poly, flat-lit world in the spirit of the 2007 client.
+
+Every number that OSRS documents, Aeloria uses verbatim: the XP curve, the
+combat formulas, prayer drain, run energy, shop prices, burn levels, item
+bonuses. The sources are the [OSRS Wiki](https://oldschool.runescape.wiki)
+(CC BY-NC-SA) and the open-source server emulators (Lost City / 2004Scape,
+RSMod) for engine structure.
 
 ## Design pillars
 
 - **0.6s deterministic tick.** All game logic (movement, combat, skilling,
-  queued actions) resolves on a fixed 600ms tick. Rendering runs at full
-  framerate and interpolates between ticks, so motion is smooth while the
-  logic stays discrete and predictable.
-- **Tile-based world.** Entities occupy integer tiles. Pathfinding, collision,
-  and interactions all match OSRS conventions.
-- **Real OSRS maths.** Where OSRS documents a formula, we use it verbatim:
-  combat accuracy/max hits, the XP curve, run-energy drain, prayer drain
-  resistance, skilling success interpolation, NPC aggression rules. Sources:
-  the OSRS Wiki plus open-source server emulators (Lost City / 2004Scape,
-  RSMod) for engine structure.
-- **Better graphics.** HD 3D with soft shadows, water reflections, and the
-  classic rotatable, angled RuneScape camera.
+  dialogue, shops) resolves on a fixed 600ms tick. Rendering runs at OSRS's
+  50 fps and interpolates between ticks, so motion is smooth while the logic
+  stays discrete and predictable.
+- **Tile-based world.** Entities occupy integer tiles. Pathfinding,
+  collision, and interactions all match OSRS conventions.
+- **Real OSRS maths.** Where OSRS documents a formula, we use it: combat
+  accuracy and max hits (with stab/slash/crush bonuses), the XP table
+  (83 / 1,154 / 13,034,431), run-energy drain, prayer drain resistance,
+  skilling success interpolation, NPC aggression rules, general-store pricing.
+- **Wiki-sourced data.** Item stats and skill guides are *generated* from
+  the wiki (`scripts/build-items.mjs`, `scripts/build-skill-guides.mjs`) rather
+  than typed in — 174 items with exact bonuses, values, and weights, and 3,834
+  skill-guide entries across all 23 skills.
 - **Server-ready by construction.** The simulation (`src/sim`) is pure and
   deterministic — no Three.js, no DOM, no wall-clock. It advances only via
-  `world.tick(commands)`. The same code can run on an authoritative server
-  later with no rewrite.
+  `world.tick(commands)`, and everything the UI shows comes from an event
+  queue. The same code can run on an authoritative server later.
 
 ## What's in the game
 
-- **Combat** — OSRS-accurate melee math (accuracy/max-hit formulas, +8
-  effective levels, prayer multipliers), four attack styles per weapon with
-  style-routed XP (accurate/aggressive/defensive/controlled), weapon attack
-  speeds, auto-retaliate toggle, swing / flinch / death animations, hitsplats,
-  the full combat-level formula, and single-way combat (one opponent at a
-  time, with the classic "I'm already under attack" refusal).
-- **Skills** — twelve trainable skills on the authentic XP curve: melee combat
-  plus Woodcutting, Mining, Fishing, Firemaking, Cooking, and Prayer.
-- **Skilling loops** — chop trees (4-tick rolls, axe tiers), mine rocks
-  (pickaxe-speed cadence), net wandering fishing spots for shrimps and
-  anchovies, light fires with a tinderbox (the 65→513/256 curve; you step west,
-  fires burn down to ashes), and cook on those fires with level-based burn
-  chances that stop at 34, exactly like shrimp.
-- **Prayer** — bury bones, seven classic prayers with the real drain-effect /
-  drain-resistance formula, Protect from Melee with an overhead icon that
-  hard-blocks NPC melee, and an altar in the castle to recharge at.
-- **Items** — a config registry (OSRS obj-config style) with stackable coins,
-  item values and weights, equip level requirements, and the scimitar ladder
-  from bronze to rune.
-- **Run energy** — the wiki's drain formula (weight-scaled) and regen rates;
-  the orb un-toggles itself at 0%.
-- **NPCs** — goblin camp, giant rats, and castle guards with wiki-adjacent
-  stats; aggression follows the OSRS rules (only players ≤ 2× the NPC's combat
-  level + 1, ~10-minute tolerance, never someone already in a fight), idle NPCs wander, and everything leashes home.
-- **Loot & death** — drop tables with coin ranges and rare gear onto the death
-  tile; items despawn after two minutes. Dying drops everything but your three
-  most valuable items and respawns you at the castle approach.
-- **Bank** — booths in the castle courtyard open the Bank of Aeloria:
-  deposit-1/5/all, withdrawals, everything stored as stacks, and the screen
-  closes when you walk off.
-- **UI** — the OSRS interface strip: combat options, skills (with XP
-  tooltips), inventory, equipment (bonuses + weight), and prayer tabs;
-  right-click context menus with threat-tinted "(level-2)" labels; XP drops;
-  a chatbox; HP/prayer/run orbs; minimap with click-to-walk; compass.
-- **Sound** — every effect synthesized in WebAudio; no audio assets.
+- **Skills** — all 23 OSRS skills on the real XP curve with a 200M cap. The
+  stats tab is the OSRS one (current/base cells, total level, hover XP box),
+  and clicking a skill opens its **skill guide**: every unlock by level,
+  straight from the wiki's level-up tables.
+- **Combat** — OSRS melee maths with typed attack bonuses, four combat
+  options per weapon category (dagger, sword, scimitar, longsword, mace,
+  warhammer, battleaxe, 2h, axe, pickaxe), style-routed XP, weapon speeds,
+  two-handed rules, auto-retaliate, single-way combat, hitsplats, and the
+  full combat-level formula. Monsters carry their wiki stats and bonuses.
+- **Equipment** — bronze through rune weapon and armour sets, leather, the
+  amulet slot, and an Equipment Stats sheet listing every bonus.
+- **Skilling loops** — woodcutting (regular, oak, willow), mining (copper,
+  tin, iron), fishing (net for shrimps/anchovies; rod and bait for
+  sardine/herring), firemaking (65→513/256 curve; you step west), cooking on
+  fires and on the castle range (lower burn levels, unlocked by a quest), and
+  **smithing**: smelt at the furnace (iron's 50% failure included) and hammer
+  bars into gear at the anvil through the OSRS-style smithing screen.
+- **Quests** — a quest list in red / yellow / green under "Quest Points", a
+  first-person journal with finished steps struck through, and the completion
+  scroll. Four novice quests on the map: The Cook's Rat Problem, Goblin
+  Trouble, A Woodsman's Wager, Fisherman's Favour.
+- **NPC dialogue** — conversations in the chatbox, OSRS style (speaker name,
+  "Click here to continue", option lists), scripted as small node graphs that
+  branch on quest state.
+- **Shop** — a general store priced by the wiki's rules (130% / 40% / 3% per
+  unit, never below 10%), restocking a unit a minute; buy and sell 1/5/10.
+- **Prayer** — the full 29-prayer book with wiki drain rates; melee stat
+  prayers, Protect from Melee, Rapid Heal, and Protect Item do their jobs.
+- **Magic** — the standard spellbook laid out with levels, runes, and max
+  hits (casting arrives with magic combat).
+- **Bank, run energy, death** — booths in the courtyard; the wiki's energy
+  drain and regen; three (four with Protect Item) most valuable items kept.
+- **Map** — a rotating, player-centred minimap with NPC and item dots and
+  click-to-walk, and a world map with place names and a key.
+- **Interface** — the fourteen-tab stone side panel with F1–F7 shortcuts,
+  parchment chatbox with channel buttons, right-click menus with level-tinted
+  names, XP drops, orbs, compass.
+- **Sound** — every effect and the music synthesized in WebAudio; no audio
+  assets.
 
 ## Getting started
 
@@ -71,55 +82,47 @@ npm run dev      # starts Vite on http://localhost:2006 and opens the game
 
 Other scripts: `npm run build` (typecheck + bundle), `npm run typecheck`,
 `npm test` (boots a dev server and drives the game in headless Edge through
-fourteen end-to-end scenarios: combat, styles, prayer, loot, skilling loops,
-banking, death, menus, HUD, sound).
+eighteen end-to-end scenarios), `node scripts/build-items.mjs` and
+`node scripts/build-skill-guides.mjs` (refresh the wiki-derived data).
 
-**Controls** — left-click to act (attack / take / chop / mine / net / bank /
-walk) · right-click for the context menu · middle-drag or arrow keys to rotate
-· scroll to zoom · click the compass to face north · F3 for the debug overlay.
+**Controls** — left-click to act (attack / talk / take / chop / mine / net /
+bank / walk) · right-click for the context menu · middle-drag or arrow keys
+to rotate · scroll to zoom · click the compass to face north · F1–F7 switch
+tabs · Esc closes windows · M toggles music · F12 shows the debug overlay.
 
 ## Architecture
 
 ```
 src/
-├── engine/   GameLoop (fixed 600ms accumulator) + tuning constants
+├── engine/   GameLoop (fixed 600ms accumulator, 50 fps render cap) + constants
 ├── sim/      Pure deterministic game state: World, TileMap, Pathfinder,
 │             Entity, Player, Npc, Inventory, Skills, combat math, the item
-│             registry, prayers, resource nodes, fires, ground items,
-│             commands, and the UI event queue.
-├── render/   Three.js: Renderer (HDR + SSAO + bloom), OrbitCamera, views for
-│             tiles/entities/scenery/water/ground items/fires/fishing spots.
+│             registry (over wiki data), prayers, spells, smithing recipes,
+│             resource nodes, fires, quests, dialogue, shops, commands, and the
+│             UI event queue.
+├── render/   Three.js: Renderer, heightfield Terrain, OrbitCamera, models
+│             (low-poly rigs and gear), castle pieces, procedural textures,
+│             views for scenery/entities/water/items/fires/fishing spots.
 │             Reads sim state every frame; never mutates it.
 ├── input/    Mouse → tile → Command. The future network boundary.
-├── audio/    WebAudio-synthesized sound effects.
-├── ui/       DOM overlays: tabbed side panel (combat/skills/inventory/
-│             equipment/prayer), bank screen, minimap, orbs, context menu,
-│             chatbox, XP drops, compass, debug HUD.
-└── world/    Content: the starting map (castle, moat, forests, rocks,
-              fishing spots, bank booths, altar).
+├── audio/    WebAudio-synthesized sound effects and music.
+├── ui/       DOM overlays: the interface strip and its tabs, skill guide,
+│             quest journal, dialogue box, shop, bank, smithing, minimap,
+│             world map, orbs, context menu, chatbox, XP drops, compass.
+└── world/    Content: the starting map (castle, moat, woods, mines) and the
+              NPC roster with their dialogue scripts.
 ```
 
 The flow each frame: input produces **Commands** → the GameLoop drains them
 into `world.tick()` every 600ms → the render views read the new state and
-interpolate. The sim announces gameplay moments (XP, level-ups, hits, kills)
-on an **event queue** the UI drains — the same seam a server would push events
-through. Keeping `sim/` free of everything else is the whole game's
-load-bearing decision.
-
-Rendering is draw-call frugal: the castle is baked into one mesh per material
-and all trees/rocks are instanced, so the scene survives being drawn four
-times per frame (shadow map, water reflection, SSAO, main pass).
+interpolate. The sim announces gameplay moments (XP, level-ups, hits, dialogue
+nodes, quest completions) on an **event queue** the UI drains — the same seam
+a server would push events through. Keeping `sim/` free of everything else is
+the whole game's load-bearing decision.
 
 ## Roadmap
 
-Done: tick engine, pathfinding, click-to-move, OSRS camera, melee combat with
-attack styles and prayer, NPC AI (aggro rules/wander/leash), loot, death
-rules, twelve skills (woodcutting, mining, fishing, firemaking, cooking,
-prayer, melee), run energy, the item registry with stackables, banking,
-context menus, the OSRS interface strip, synthesized audio, draw-call
-optimization.
-
-Next up: smithing (furnace + anvil for that copper), a general store, NPC
-dialogue and a first quest, ranged + magic combat, more weapon classes
-(longswords, maces, 2h), a bigger world with regions, and then the
-authoritative server split.
+Ranged and magic combat (the spellbook and rune drops are already in place),
+more of the map (a village outside the walls, a second mine), crafting and
+fletching, a bigger quest with a real villain, and then the authoritative
+server split.

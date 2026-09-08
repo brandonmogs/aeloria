@@ -20,8 +20,9 @@ export function populateNpcs(world: World, map: TileMap): void {
   };
 
   // A camp of goblins on the grass east of the road. OSRS level-2 goblins:
-  // 5 hitpoints, every combat stat 1, and a bad attitude toward newcomers.
-  // Sited so their wander-plus-aggro reach never covers the spawn tile.
+  // 5 hitpoints, every combat stat 1, the wiki's (negative) bonuses, and a bad
+  // attitude toward newcomers. Sited so their wander-plus-aggro reach never
+  // covers the spawn tile. Drops follow the wiki's table out of 128.
   spawn(
     {
       name: 'Goblin',
@@ -31,15 +32,24 @@ export function populateNpcs(world: World, map: TileMap): void {
       defense: 1,
       maxHitpoints: 5,
       attackSpeed: 4,
+      attackType: 'crush',
+      bonuses: { acrush: -21, str: -15, dstab: -15, dslash: -15, dcrush: -15 },
       respawnTicks: respawn(21),
       aggroRange: 2,
       wanderRadius: 3,
       examine: 'An ugly green creature.',
       drops: [
         { itemId: 'bones', chance: 1 },
-        { itemId: 'coins', chance: 0.35, min: 5, max: 20 },
-        { itemId: 'bronze_scimitar', chance: 1 / 16 },
-        { itemId: 'bronze_med_helm', chance: 1 / 12 },
+        { itemId: 'coins', chance: 28 / 128, min: 5, max: 5 },
+        { itemId: 'coins', chance: 8 / 128, min: 9, max: 20 },
+        { itemId: 'hammer', chance: 15 / 128 },
+        { itemId: 'water_rune', chance: 6 / 128, min: 6, max: 6 },
+        { itemId: 'body_rune', chance: 5 / 128, min: 7, max: 7 },
+        { itemId: 'earth_rune', chance: 3 / 128, min: 4, max: 4 },
+        { itemId: 'goblin_mail', chance: 5 / 128 },
+        { itemId: 'bronze_sq_shield', chance: 3 / 128 },
+        { itemId: 'bronze_scimitar', chance: 2 / 128 },
+        { itemId: 'bronze_med_helm', chance: 2 / 128 },
       ],
     },
     [
@@ -62,6 +72,7 @@ export function populateNpcs(world: World, map: TileMap): void {
       defense: 2,
       maxHitpoints: 5,
       attackSpeed: 4,
+      attackType: 'crush',
       respawnTicks: respawn(18),
       aggroRange: 2,
       wanderRadius: 4,
@@ -91,17 +102,25 @@ export function populateNpcs(world: World, map: TileMap): void {
       defense: 14,
       maxHitpoints: 22,
       attackSpeed: 4,
+      attackType: 'slash',
+      bonuses: { aslash: 4, str: 5, dstab: 18, dslash: 25, dcrush: 19 },
       respawnTicks: respawn(30),
       aggroRange: 0,
       wanderRadius: 2,
       examine: 'He looks bored, but capable.',
       drops: [
         { itemId: 'bones', chance: 1 },
-        { itemId: 'coins', chance: 0.9, min: 1, max: 30 },
-        { itemId: 'iron_scimitar', chance: 0.08 },
-        { itemId: 'steel_scimitar', chance: 0.03 },
-        { itemId: 'iron_pickaxe', chance: 0.04 },
-        { itemId: 'steel_axe', chance: 0.04 },
+        { itemId: 'coins', chance: 0.7, min: 1, max: 30 },
+        { itemId: 'iron_dagger', chance: 6 / 128 },
+        { itemId: 'air_rune', chance: 2 / 128, min: 6, max: 6 },
+        { itemId: 'earth_rune', chance: 2 / 128, min: 3, max: 3 },
+        { itemId: 'fire_rune', chance: 2 / 128, min: 2, max: 2 },
+        { itemId: 'iron_ore', chance: 1 / 128 },
+        // Aeloria's own additions: the guards carry the castle armoury's spares.
+        { itemId: 'iron_scimitar', chance: 0.05 },
+        { itemId: 'steel_scimitar', chance: 0.02 },
+        { itemId: 'iron_pickaxe', chance: 0.03 },
+        { itemId: 'steel_axe', chance: 0.03 },
         { itemId: 'bread', chance: 0.1 },
         { itemId: 'holy_symbol', chance: 0.02 },
       ],

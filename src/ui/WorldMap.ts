@@ -24,6 +24,9 @@ export const MAP_COLORS: Record<string, string> = {
   'castle-keep': '#d4ccba',
   'bank-booth': '#c79c4e',
   altar: '#efe6c8',
+  range: '#6d5a4a',
+  furnace: '#a0784a',
+  anvil: '#6a6d75',
   water: '#3b6a9c',
   stone: '#8f8c82',
 };
@@ -82,7 +85,7 @@ export function bakeTerrain(
     }
   }
   for (const prop of props) {
-    const kind = prop.kind === 'tree' && prop.seed < 0.14 ? 'oak' : prop.kind;
+    const kind = prop.kind === 'tree' && prop.variant === 'oak' ? 'oak' : prop.kind;
     ctx.fillStyle = MAP_COLORS[kind] ?? MAP_COLORS.blocked;
     ctx.fillRect(prop.tile.x * px, flipY(prop.tile.y) * px, px, px);
   }
@@ -231,6 +234,8 @@ export class WorldMap {
       [MAP_COLORS['castle-wall'], 'Castle'],
       [MAP_COLORS['bank-booth'], 'Bank'],
       [MAP_COLORS.altar, 'Altar'],
+      [MAP_COLORS.furnace, 'Furnace'],
+      [MAP_COLORS.anvil, 'Anvil'],
     ];
     const title = document.createElement('div');
     title.className = 'world-map-key-title';

@@ -21,6 +21,7 @@ const TESTS = [
   'skills-test',
   'quest-test',
   'map-test',
+  'content-test',
 ];
 
 const server = await createServer({ server: { port: 5199, open: false } });

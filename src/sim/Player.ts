@@ -10,12 +10,16 @@ export const MAX_RUN_ENERGY = 10000;
 /** A multi-tick skilling activity the player is in the middle of. */
 export type PlayerAction =
   | { type: 'light'; slot: number; tile: Tile }
-  | { type: 'cook'; fireId: number; itemId: string; cooldown: number };
+  | { type: 'cook'; fireId: number; itemId: string; cooldown: number }
+  | { type: 'smelt'; bar: string; remaining: number; cooldown: number; tile: Tile }
+  | { type: 'smith'; item: string; remaining: number; cooldown: number; tile: Tile };
 
 /** Something in the world the player is walking over to open/use. */
 export interface ObjectTarget {
-  kind: 'bank' | 'altar';
+  kind: 'bank' | 'altar' | 'anvil' | 'furnace';
   tile: Tile;
+  /** For a furnace: what to smelt on arrival. */
+  smelt?: { bar: string; count: number };
 }
 
 /** An NPC the player is walking up to, and what for. */
@@ -45,6 +49,9 @@ export class Player extends Entity {
 
   /** Resource node this player is gathering (or walking toward), or null. */
   gatherTarget: number | null = null;
+
+  /** How the current fishing spot is being worked. */
+  gatherMethod: 'net' | 'bait' = 'net';
 
   /** Ticks until the next harvest roll while gathering. */
   gatherCooldown = 0;

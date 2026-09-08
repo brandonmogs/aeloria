@@ -1,6 +1,7 @@
 import { Entity } from './Entity';
 import { Tile } from './coords';
-import { combatLevel } from './combat';
+import { AttackType, combatLevel } from './combat';
+import type { Bonuses } from './items';
 import type { DialogueFn } from './dialogue';
 
 /** What the renderer should draw this NPC as. */
@@ -33,6 +34,10 @@ export interface NpcConfig {
   maxHitpoints: number;
   /** Ticks between attacks (4 ≈ a standard weapon). */
   attackSpeed: number;
+  /** The melee type it attacks with (the wiki's "attack style"). */
+  attackType?: AttackType;
+  /** The wiki's monster bonuses (attack, strength, stab/slash/crush defence). */
+  bonuses?: Partial<Bonuses>;
   /** Ticks to stay dead before respawning. */
   respawnTicks: number;
   /** Whether it strikes back when attacked. */
@@ -67,6 +72,8 @@ export class Npc extends Entity {
   readonly strength: number;
   readonly defense: number;
   readonly attackSpeed: number;
+  readonly attackType: AttackType;
+  readonly bonuses: Partial<Bonuses>;
   readonly respawnTicks: number;
   readonly aggressive: boolean;
   readonly aggroRange: number;
@@ -97,6 +104,8 @@ export class Npc extends Entity {
     this.strength = config.strength;
     this.defense = config.defense;
     this.attackSpeed = config.attackSpeed;
+    this.attackType = config.attackType ?? 'crush';
+    this.bonuses = config.bonuses ?? {};
     this.respawnTicks = config.respawnTicks;
     this.aggressive = config.aggressive ?? true;
     this.aggroRange = config.aggroRange ?? 0;

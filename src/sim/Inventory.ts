@@ -1,4 +1,4 @@
-import { ItemStack, itemDef, stackOf } from './items';
+import { Bonuses, ItemStack, ZERO_BONUSES, itemDef, stackOf } from './items';
 
 /**
  * A player's carried items and worn equipment. This is plain simulation state —
@@ -7,7 +7,7 @@ import { ItemStack, itemDef, stackOf } from './items';
  * {@link World} commands.
  *
  * Slots hold {@link ItemStack}s ({ id, qty }); all static item data lives in the
- * {@link itemDef} registry. Stackable items (coins, ashes) merge into a single
+ * {@link itemDef} registry. Stackable items (coins, runes) merge into a single
  * slot at any quantity, like OSRS.
  */
 
@@ -15,6 +15,7 @@ import { ItemStack, itemDef, stackOf } from './items';
 export type EquipSlot =
   | 'helmet'
   | 'cape'
+  | 'amulet'
   | 'chestplate'
   | 'legs'
   | 'boots'
@@ -26,6 +27,7 @@ export type EquipSlot =
 export const EQUIP_SLOTS: readonly EquipSlot[] = [
   'helmet',
   'cape',
+  'amulet',
   'chestplate',
   'legs',
   'boots',
@@ -51,6 +53,7 @@ export class Inventory {
   readonly equipment: Record<EquipSlot, ItemStack | null> = {
     helmet: null,
     cape: null,
+    amulet: null,
     chestplate: null,
     legs: null,
     boots: null,
@@ -63,6 +66,11 @@ export class Inventory {
   /** Index of the first empty backpack slot, or -1 if the bag is full. */
   firstFreeSlot(): number {
     return this.slots.findIndex((s) => s === null);
+  }
+
+  /** Number of empty backpack slots. */
+  freeSlots(): number {
+    return this.slots.filter((s) => s === null).length;
   }
 
   /**
@@ -134,30 +142,25 @@ export class Inventory {
     return kg;
   }
 
-  /** Summed combat bonuses across worn gear. */
-  equipmentBonuses(): { attack: number; strength: number; defense: number; prayer: number } {
-    let attack = 0;
-    let strength = 0;
-    let defense = 0;
-    let prayer = 0;
+  /** Summed equipment bonuses across worn gear — the OSRS equipment screen. */
+  equipmentBonuses(): Bonuses {
+    const total = { ...ZERO_BONUSES };
     for (const slot of EQUIP_SLOTS) {
       const s = this.equipment[slot];
       if (!s) continue;
-      const def = itemDef(s.id);
-      attack += def.attackBonus ?? 0;
-      strength += def.strengthBonus ?? 0;
-      defense += def.defenseBonus ?? 0;
-      prayer += def.prayerBonus ?? 0;
+      const b = itemDef(s.id).bonuses;
+      if (!b) continue;
+      for (const key of Object.keys(total) as (keyof Bonuses)[]) total[key] += b[key];
     }
-    return { attack, strength, defense, prayer };
+    return total;
   }
 
   /**
    * Move an item from one slot to another, validating the rules: any backpack
    * slot accepts any item (a swap, or a merge for matching stackables), but an
    * equipment slot only accepts items that fit it. Returns whether anything
-   * changed, so the UI knows when to repaint. Level requirements are enforced
-   * by the World before it calls this.
+   * changed, so the UI knows when to repaint. Level requirements and the
+   * two-handed rule are enforced by the World before it calls this.
    */
   move(from: SlotRef, to: SlotRef): boolean {
     if (sameRef(from, to)) return false;

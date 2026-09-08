@@ -18,6 +18,8 @@ export type PropKind =
   | 'bank-booth'
   | 'altar'
   | 'range'
+  | 'furnace'
+  | 'anvil'
   | 'water';
 
 /** A single placed piece of scenery. */
@@ -26,6 +28,8 @@ export interface Prop {
   readonly tile: Tile;
   /** Stable 0..1 value for per-prop visual variety (rotation, scale, tint). */
   readonly seed: number;
+  /** Gameplay variant for trees and rocks ("oak", "willow", "copper", "tin", "iron"). */
+  readonly variant?: string;
 }
 
 /**

@@ -19,6 +19,7 @@ interface EquipCell {
 const EQUIP_LAYOUT: ReadonlyArray<EquipCell> = [
   { slot: 'helmet', label: 'Head', col: 2, row: 1 },
   { slot: 'cape', label: 'Cape', col: 1, row: 2 },
+  { slot: 'amulet', label: 'Neck', col: 2, row: 2 },
   { slot: 'weapon', label: 'Weapon', col: 1, row: 3 },
   { slot: 'chestplate', label: 'Body', col: 2, row: 3 },
   { slot: 'shield', label: 'Shield', col: 3, row: 3 },
@@ -310,6 +311,7 @@ export class InventoryPanel {
 
   // --- Prayer tab -----------------------------------------------------------
 
+  /** The prayer book as OSRS lays it out: a five-column grid of icons with a hover box. */
   private buildPrayerTab(): void {
     this.prayerPane.className = 'prayer-pane';
     this.prayerPoints = document.createElement('div');
@@ -321,11 +323,19 @@ export class InventoryPanel {
     for (const prayer of PRAYERS) {
       const cell = document.createElement('button');
       cell.className = 'prayer-cell';
-      cell.innerHTML =
-        `<span class="prayer-icon">${prayer.icon}</span>` +
-        `<span class="prayer-name">${prayer.name}</span>` +
-        `<span class="prayer-req">Lvl ${prayer.level}</span>`;
+      cell.textContent = prayer.icon;
       cell.addEventListener('click', () => this.cb.onTogglePrayer?.(prayer.id));
+      cell.addEventListener('pointerenter', (e) => {
+        this.tooltip.innerHTML =
+          `<div>${prayer.name} <span>(Level ${prayer.level}${prayer.defenceLevel ? `, ${prayer.defenceLevel} Defence` : ''})</span></div>` +
+          `<div>${prayer.description}</div>`;
+        this.tooltip.hidden = false;
+        this.moveSkillTip(e.clientX, e.clientY);
+      });
+      cell.addEventListener('pointermove', (e) => this.moveSkillTip(e.clientX, e.clientY));
+      cell.addEventListener('pointerleave', () => {
+        this.tooltip.hidden = true;
+      });
       this.prayerCells.set(prayer.id, cell);
       grid.appendChild(cell);
     }
@@ -335,22 +345,29 @@ export class InventoryPanel {
   private renderPrayer(): void {
     this.prayerPoints.textContent = `Prayer points: ${this.player.prayerPoints}/${this.player.maxPrayerPoints}`;
     const level = this.player.skills.levelOf('prayer');
+    const defence = this.player.skills.levelOf('defense');
     for (const prayer of PRAYERS) {
       const cell = this.prayerCells.get(prayer.id)!;
       cell.classList.toggle('active', this.player.activePrayers.has(prayer.id));
-      cell.classList.toggle('locked', level < prayer.level);
+      cell.classList.toggle('locked', level < prayer.level || (prayer.defenceLevel ?? 0) > defence);
     }
   }
 
   // --- Equipment stats ------------------------------------------------------
 
+  /** The OSRS "Equipment Stats" sheet: attack and defence bonuses by type, then the rest. */
   private renderEquipStats(): void {
-    const bonus = this.player.inventory.equipmentBonuses();
+    const b = this.player.inventory.equipmentBonuses();
     const weight = this.player.inventory.totalWeightKg();
+    const row = (label: string, v: number): string => `<span class="es-row">${label}: <b>${fmtBonus(v)}</b></span>`;
     this.equipStats.innerHTML =
-      `<div>Attack ${fmtBonus(bonus.attack)} · Strength ${fmtBonus(bonus.strength)}</div>` +
-      `<div>Defence ${fmtBonus(bonus.defense)} · Prayer ${fmtBonus(bonus.prayer)}</div>` +
-      `<div class="equip-weight">Weight: ${weight.toFixed(1)} kg</div>`;
+      `<div class="es-col"><div class="es-head">Attack bonus</div>` +
+      row('Stab', b.astab) + row('Slash', b.aslash) + row('Crush', b.acrush) + row('Magic', b.amagic) + row('Range', b.arange) +
+      `</div><div class="es-col"><div class="es-head">Defence bonus</div>` +
+      row('Stab', b.dstab) + row('Slash', b.dslash) + row('Crush', b.dcrush) + row('Magic', b.dmagic) + row('Range', b.drange) +
+      `</div><div class="es-col es-other"><div class="es-head">Other bonuses</div>` +
+      row('Melee strength', b.str) + row('Prayer', b.prayer) +
+      `<span class="es-row equip-weight">Weight: <b>${weight.toFixed(1)} kg</b></span></div>`;
   }
 
   /** Create a slot element wired for click + drag-and-drop against `ref`. */
