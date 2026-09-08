@@ -15,9 +15,12 @@ import {
   dropItemCommand,
   equipItemCommand,
   unequipItemCommand,
+  talkCommand,
 } from './sim/commands';
+import { Fire } from './sim/Fire';
+import { DialogueView } from './sim/dialogue';
+import { shopBuyPrice, shopSellPrice } from './sim/shops';
 import { GameLoop } from './engine/GameLoop';
-import { TICKS_PER_SECOND } from './engine/constants';
 import { Renderer } from './render/Renderer';
 import { Terrain } from './render/Terrain';
 import { TileGridView } from './render/TileGridView';
@@ -36,6 +39,10 @@ import { MiniMap } from './ui/MiniMap';
 import { InventoryPanel } from './ui/InventoryPanel';
 import { SidePanel } from './ui/SidePanel';
 import { SkillGuidePanel } from './ui/SkillGuidePanel';
+import { QuestPanel } from './ui/QuestPanel';
+import { DialogueBox } from './ui/DialogueBox';
+import { ShopPanel } from './ui/ShopPanel';
+import { WorldMap } from './ui/WorldMap';
 import { buildSettingsPane, buildMusicPane, buildLogoutPane, buildPlaceholderPane } from './ui/miscTabs';
 import { BankPanel } from './ui/BankPanel';
 import { MessageLog } from './ui/MessageLog';
@@ -46,6 +53,7 @@ import { Sfx } from './audio/Sfx';
 import { Music } from './audio/Music';
 import { SKILL_META } from './ui/skillMeta';
 import { buildStartingWorld } from './world/startingWorld';
+import { populateNpcs } from './world/npcs';
 import { hasWebGL, showFatal, installErrorHandlers } from './diagnostics';
 
 const MAP_W = 52;
@@ -99,11 +107,16 @@ function runGame(): void {
       world.addInteractable('bank', prop.tile);
     } else if (prop.kind === 'altar') {
       world.addInteractable('altar', prop.tile);
+    } else if (prop.kind === 'range') {
+      world.addRange(prop.tile);
     }
   }
   for (const group of fishingSpotGroups) world.addFishingSpotGroup(group);
 
   populateNpcs(world, map);
+  const inStone = (x: number, y: number): boolean =>
+    terrainSpec.stoneZones.some((r) => x >= r.x0 && x <= r.x1 && y >= r.y0 && y <= r.y1);
+  const mapExtras = { roads: terrainSpec.paths, stone: inStone };
 
   // --- Input → command queue -----------------------------------------------
   // Clicks become commands that are drained into the sim on the next tick. This
@@ -164,12 +177,50 @@ function runGame(): void {
 
   const sidePanel = new SidePanel();
   const skillGuide = new SkillGuidePanel();
+  const questPanel = new QuestPanel(player, sidePanel);
+  let lastDialogueView: DialogueView | null = null;
+  const dialogue = new DialogueBox(document.body, {
+    onContinue: () => commandQueue.push({ type: 'dialogueContinue', entityId: player.id }),
+    onChoose: (index) => commandQueue.push({ type: 'dialogueChoose', entityId: player.id, index }),
+  });
+  const shopPanel = new ShopPanel({
+    onValue: (itemId, price) => log.add(`${itemDef(itemId).name}: currently costs ${price} coins.`),
+    onStockMenu: (itemId, x, y) => {
+      const def = itemDef(itemId);
+      const buy = (qty: number): MenuOption => ({
+        verb: `Buy ${qty}`,
+        target: def.name,
+        onSelect: () => commandQueue.push({ type: 'shopBuy', entityId: player.id, itemId, qty }),
+      });
+      menu.open(x, y, [
+        {
+          verb: 'Value',
+          target: def.name,
+          onSelect: () => {
+            const shop = shopPanel.current;
+            if (shop) log.add(`${def.name}: currently costs ${shopBuyPrice(shop, itemId)} coins.`);
+          },
+        },
+        buy(1),
+        buy(5),
+        buy(10),
+        { verb: 'Examine', target: def.name, onSelect: () => log.add(def.examine) },
+        { verb: 'Cancel' },
+      ]);
+    },
+  });
+
   const panel = new InventoryPanel(world, player, sidePanel, {
     onSkillClick: (skill) => skillGuide.open(skill, player.skills.levelOf(skill)),
     onItemMenu: (index, item, x, y) => menu.open(x, y, itemMenuOptions(index, item)),
     onItemQuick: (index, item) => {
       if (bankPanel.isOpen) {
         commandQueue.push({ type: 'bankDeposit', entityId: player.id, slot: index, qty: 1 });
+        return;
+      }
+      if (shopPanel.isOpen) {
+        const shop = shopPanel.current;
+        if (shop) log.add(`${itemDef(item.id).name}: shop will buy for ${shopSellPrice(shop, item.id)} coins.`);
         return;
       }
       const def = itemDef(item.id);
@@ -201,7 +252,6 @@ function runGame(): void {
   sidePanel.register('settings', buildSettingsPane(musicCb));
   sidePanel.register('music', buildMusicPane(musicCb));
   sidePanel.register('logout', buildLogoutPane());
-  sidePanel.register('quests', buildPlaceholderPane('Quest List', 'No quests are available yet.'));
   sidePanel.register('magic', buildPlaceholderPane('Magic', 'You have not learned any spells yet.'));
   sidePanel.register('clan', buildPlaceholderPane('Clan Chat', 'Aeloria is single-player for now.'));
   sidePanel.register('friends', buildPlaceholderPane('Friends List', 'Aeloria is single-player for now.'));
@@ -209,10 +259,40 @@ function runGame(): void {
   sidePanel.register('emotes', buildPlaceholderPane('Emotes', 'No emotes yet.'));
   sidePanel.select('inventory');
 
-  const minimap = new MiniMap(map, world, player.id, renderer.camera, props, (target) => {
-    commandQueue.push(moveCommand(player.id, target));
-    tileView.showClickMarker(target);
-  });
+  const minimap = new MiniMap(
+    map,
+    world,
+    player.id,
+    renderer.camera,
+    props,
+    (target) => {
+      commandQueue.push(moveCommand(player.id, target));
+      tileView.showClickMarker(target);
+    },
+    mapExtras,
+  );
+  const worldMap = new WorldMap(
+    map,
+    world,
+    player.id,
+    props,
+    [
+      { text: 'Aeloria Castle', tile: { x: 24, y: 47 } },
+      { text: 'Goblin Camp', tile: { x: 30, y: 15 } },
+      { text: 'Western Wood', tile: { x: 10, y: 31 } },
+      { text: 'Eastern Wood', tile: { x: 39, y: 31 } },
+      { text: 'Mine', tile: { x: 13, y: 21 } },
+      { text: 'Mine', tile: { x: 37, y: 28 } },
+      { text: 'Southern Treeline', tile: { x: 24, y: 6 } },
+    ],
+    mapExtras,
+  );
+  const worldMapBtn = document.createElement('button');
+  worldMapBtn.id = 'world-map-btn';
+  worldMapBtn.textContent = '🌍';
+  worldMapBtn.title = 'World map';
+  worldMapBtn.addEventListener('click', () => worldMap.toggle());
+  document.body.appendChild(worldMapBtn);
   log.add('Welcome to Aeloria.');
 
   // Start the camera already framing the player instead of flying in from origin.
@@ -234,6 +314,29 @@ function runGame(): void {
         deposit(1),
         deposit(5),
         deposit(-1),
+        { verb: 'Examine', target: def.name, onSelect: () => log.add(def.examine) },
+        { verb: 'Cancel' },
+      ];
+    }
+
+    if (shopPanel.isOpen) {
+      const sell = (qty: number): MenuOption => ({
+        verb: `Sell ${qty}`,
+        target: def.name,
+        onSelect: () => commandQueue.push({ type: 'shopSell', entityId: player.id, slot: index, qty }),
+      });
+      return [
+        {
+          verb: 'Value',
+          target: def.name,
+          onSelect: () => {
+            const shop = shopPanel.current;
+            if (shop) log.add(`${def.name}: shop will buy for ${shopSellPrice(shop, item.id)} coins.`);
+          },
+        },
+        sell(1),
+        sell(5),
+        sell(10),
         { verb: 'Examine', target: def.name, onSelect: () => log.add(def.examine) },
         { verb: 'Cancel' },
       ];
@@ -292,15 +395,18 @@ function runGame(): void {
     renderer.camera,
     terrain,
     (target) => {
-      // Left click = the default action: attack NPC > take item > gather >
-      // use object > walk. (The same priority order the context menu lists.)
+      // Left click = the default action: attack (or talk to) the NPC > take
+      // item > gather > use object > walk. (The same priority order the
+      // context menu lists.)
       if (menu.isOpen) return;
       const npc = npcAt(world, target);
       const ground = world.groundItemAt(target);
       const node = world.resourceNodeAt(target);
       const object = world.interactableAt(target);
       if (npc) {
-        commandQueue.push(attackCommand(player.id, npc.id));
+        if (npc.attackable) commandQueue.push(attackCommand(player.id, npc.id));
+        else if (npc.dialogue) commandQueue.push(talkCommand(player.id, npc.id));
+        else if (npc.shopId) commandQueue.push({ type: 'trade', entityId: player.id, npcId: npc.id });
         tileView.showClickMarker(target, 'interact');
       } else if (ground) {
         commandQueue.push(pickupCommand(player.id, ground.id));
@@ -331,13 +437,29 @@ function runGame(): void {
     const object = world.interactableAt(target);
 
     if (npc) {
-      const level = npc.combatLevel;
-      options.push({
-        verb: 'Attack',
-        target: `${npc.name} (level-${level})`,
-        targetColor: levelColor(level),
-        onSelect: () => commandQueue.push(attackCommand(player.id, npc.id)),
-      });
+      if (npc.dialogue) {
+        options.push({
+          verb: 'Talk-to',
+          target: npc.name,
+          onSelect: () => commandQueue.push(talkCommand(player.id, npc.id)),
+        });
+      }
+      if (npc.shopId) {
+        options.push({
+          verb: 'Trade',
+          target: npc.name,
+          onSelect: () => commandQueue.push({ type: 'trade', entityId: player.id, npcId: npc.id }),
+        });
+      }
+      if (npc.attackable) {
+        const level = npc.combatLevel;
+        options.push({
+          verb: 'Attack',
+          target: `${npc.name} (level-${level})`,
+          targetColor: levelColor(level),
+          onSelect: () => commandQueue.push(attackCommand(player.id, npc.id)),
+        });
+      }
     }
     if (ground) {
       options.push({
@@ -455,6 +577,25 @@ function runGame(): void {
         case 'openBank':
           if (ev.entityId === player.id) bankPanel.open();
           break;
+        case 'dialogue':
+          if (ev.entityId !== player.id) break;
+          lastDialogueView = ev.view;
+          if (ev.view) dialogue.show(ev.view);
+          else dialogue.hide();
+          break;
+        case 'questComplete':
+          if (ev.entityId === player.id) {
+            questPanel.showComplete(ev.questId);
+            sfx.levelUp();
+          }
+          break;
+        case 'shop': {
+          if (ev.entityId !== player.id) break;
+          const shop = ev.shopId ? world.shops.get(ev.shopId) : null;
+          if (shop) shopPanel.open(shop);
+          else shopPanel.close();
+          break;
+        }
         case 'message':
           log.add(ev.text);
           break;
@@ -478,6 +619,8 @@ function runGame(): void {
       closeBankIfFar();
       panel.refresh(); // reflect XP/level/inventory changes from this tick
       bankPanel.refresh();
+      shopPanel.refresh();
+      questPanel.refresh();
       skillGuide.refresh((skill) => player.skills.levelOf(skill));
     },
     onRender: (alpha, dt) => {
@@ -497,6 +640,7 @@ function runGame(): void {
       hud.update(world, player, dt);
       compass.update();
       minimap.update();
+      worldMap.update();
       orbs.update(player);
     },
   });
@@ -530,7 +674,26 @@ function runGame(): void {
     moveTo: (x: number, y: number) => commandQueue.push(moveCommand(player.id, { x, y })),
     hoverTile: () => input.hoverTile,
     sfx,
+    camera: renderer.camera,
     stats: () => renderer.stats,
+    talk: (npcName: string) => {
+      let best: Npc | null = null;
+      let bestDist = Infinity;
+      for (const e of world.entities.values()) {
+        if (!(e instanceof Npc) || !e.isAlive || e.name !== npcName) continue;
+        const dist = chebyshev(e.position, player.position);
+        if (dist < bestDist) {
+          bestDist = dist;
+          best = e;
+        }
+      }
+      if (!best) return null;
+      commandQueue.push(talkCommand(player.id, best.id));
+      return best.id;
+    },
+    dialogueView: () => lastDialogueView,
+    lastMinimapTarget: () => minimap.lastTarget,
+    shopIsOpen: () => shopPanel.isOpen,
     gather: (x: number, y: number) => {
       const node = world.resourceNodeAt({ x, y });
       if (node) commandQueue.push(gatherCommand(player.id, node.id));
@@ -548,87 +711,6 @@ function runGame(): void {
     },
     bankIsOpen: () => bankPanel.isOpen,
   };
-}
-
-/** The starting cast: a goblin camp, giant rats by the treeline, gate guards. */
-function populateNpcs(world: World, map: TileMap): void {
-  const respawn = Math.round(15 * TICKS_PER_SECOND);
-
-  // A camp of goblins on the grass south-east of the approach. Aggressive,
-  // like the low-level pests they are — but only toward adventurers near their
-  // level — and sited so their wander-plus-aggro reach never covers the spawn
-  // tile: a fresh (re)spawn is safe, like Lumbridge's goblins across the river.
-  const goblin = {
-    name: 'Goblin',
-    kind: 'goblin' as const,
-    attack: 1,
-    strength: 1,
-    defense: 1,
-    maxHitpoints: 5,
-    attackSpeed: 4,
-    respawnTicks: respawn,
-    aggroRange: 2,
-    wanderRadius: 3,
-    drops: [
-      { itemId: 'bones', chance: 1 },
-      { itemId: 'coins', chance: 0.5, min: 5, max: 24 },
-      { itemId: 'bronze_scimitar', chance: 1 / 16 },
-      { itemId: 'bronze_med_helm', chance: 1 / 12 },
-    ],
-  };
-  for (const tile of [{ x: 30, y: 21 }, { x: 28, y: 19 }, { x: 32, y: 22 }, { x: 27, y: 17 }]) {
-    if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, goblin);
-  }
-
-  // Giant rats scurrying along the southern treeline. Weak but bitey, and a
-  // steady source of meat for the cooking fire.
-  const rat = {
-    name: 'Giant rat',
-    kind: 'rat' as const,
-    attack: 2,
-    strength: 3,
-    defense: 2,
-    maxHitpoints: 5,
-    attackSpeed: 4,
-    respawnTicks: respawn,
-    aggroRange: 2,
-    wanderRadius: 4,
-    drops: [
-      { itemId: 'bones', chance: 1 },
-      { itemId: 'raw_rat_meat', chance: 1 },
-    ],
-  };
-  for (const tile of [{ x: 18, y: 12 }, { x: 27, y: 10 }, { x: 31, y: 13 }]) {
-    if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, rat);
-  }
-
-  // Two guards flanking the bridge approach. Passive, but they hit back hard —
-  // and their pockets hold the first real gear upgrades.
-  const guard = {
-    name: 'Guard',
-    kind: 'guard' as const,
-    attack: 15,
-    strength: 15,
-    defense: 15,
-    maxHitpoints: 22,
-    attackSpeed: 5,
-    respawnTicks: respawn * 2,
-    aggroRange: 0,
-    wanderRadius: 2,
-    drops: [
-      { itemId: 'bones', chance: 1 },
-      { itemId: 'coins', chance: 0.9, min: 4, max: 36 },
-      { itemId: 'iron_scimitar', chance: 0.08 },
-      { itemId: 'steel_scimitar', chance: 0.03 },
-      { itemId: 'iron_pickaxe', chance: 0.04 },
-      { itemId: 'steel_axe', chance: 0.04 },
-      { itemId: 'bread', chance: 0.1 },
-      { itemId: 'holy_symbol', chance: 0.02 },
-    ],
-  };
-  for (const tile of [{ x: 22, y: 31 }, { x: 26, y: 31 }]) {
-    if (!map.isBlocked(tile.x, tile.y)) world.spawnNpc(tile, guard);
-  }
 }
 
 /**
@@ -652,11 +734,11 @@ function examinables(
   npc: Npc | null,
   ground: { item: ItemStack } | null,
   node: { kind: 'tree' | 'rock' | 'fishing_spot'; regrowTimer: number } | null,
-  fire: unknown | null,
+  fire: Fire | null,
   object: { kind: 'bank' | 'altar' } | null,
 ): Array<[string, string]> {
   const out: Array<[string, string]> = [];
-  if (npc) out.push([npc.name, EXAMINE_NPC[npc.kind] ?? 'A creature.']);
+  if (npc) out.push([npc.name, npc.examine]);
   if (ground) out.push([itemDef(ground.item.id).name, itemDef(ground.item.id).examine]);
   if (node && node.regrowTimer <= 0) {
     const texts: Record<string, [string, string]> = {
@@ -666,7 +748,13 @@ function examinables(
     };
     out.push(texts[node.kind]);
   }
-  if (fire) out.push(['Fire', 'A warm crackling fire, good for cooking.']);
+  if (fire) {
+    out.push(
+      fire.kind === 'range'
+        ? ['Range', 'A hot kitchen range. The Cook guards it jealously.']
+        : ['Fire', 'A warm crackling fire, good for cooking.'],
+    );
+  }
   if (object) {
     out.push(
       object.kind === 'bank'
@@ -676,12 +764,6 @@ function examinables(
   }
   return out;
 }
-
-const EXAMINE_NPC: Record<string, string> = {
-  goblin: 'An ugly green creature.',
-  rat: 'Overgrown vermin.',
-  guard: 'He looks bored, but capable.',
-};
 
 /** The living NPC standing on a tile, if any — used to turn a click into an attack. */
 function npcAt(world: World, tile: Tile): Npc | null {

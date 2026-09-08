@@ -120,6 +120,12 @@ export class Sfx {
     this.tone({ freq: 660, to: 440, dur: 0.14, type: 'triangle', gain: 0.24 });
   }
 
+  /** A bright clink of coins changing hands. */
+  coins(): void {
+    this.tone({ freq: 2200, to: 1800, dur: 0.06, type: 'triangle', gain: 0.22 });
+    this.tone({ freq: 2900, to: 2400, dur: 0.08, type: 'triangle', gain: 0.18, delay: 0.05 });
+  }
+
   /** A warm swell — recharging at the altar. */
   recharge(): void {
     const notes = [392, 523.25, 659.25];

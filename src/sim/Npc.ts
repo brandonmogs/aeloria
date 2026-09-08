@@ -1,9 +1,18 @@
 import { Entity } from './Entity';
 import { Tile } from './coords';
 import { combatLevel } from './combat';
+import type { DialogueFn } from './dialogue';
 
 /** What the renderer should draw this NPC as. */
-export type NpcKind = 'goblin' | 'rat' | 'guard';
+export type NpcKind =
+  | 'goblin'
+  | 'rat'
+  | 'guard'
+  | 'cook'
+  | 'captain'
+  | 'woodsman'
+  | 'fisherman'
+  | 'shopkeeper';
 
 /** One entry in an NPC's drop table: the item and its per-kill drop chance. */
 export interface DropEntry {
@@ -34,13 +43,22 @@ export interface NpcConfig {
   wanderRadius?: number;
   /** Items rolled onto the ground when this NPC dies. */
   drops?: DropEntry[];
+  /** False for townsfolk: no Attack option, and attacks are refused. */
+  attackable?: boolean;
+  /** Right-click Examine text. */
+  examine?: string;
+  /** The conversation this NPC offers (adds a Talk-to option). */
+  dialogue?: DialogueFn;
+  /** The shop this NPC runs (adds a Trade option). */
+  shopId?: string;
 }
 
 /**
- * A non-player combatant. Holds its combat levels and a respawn timer: when it
+ * A non-player character: a monster with combat levels and a respawn timer,
+ * or a villager with a script to say and maybe a shop to run. When a monster
  * dies it goes dormant for {@link respawnTicks} and then returns to its
- * {@link spawnTile} at full health. The combat rules themselves live in
- * {@link World}; this just carries the stats.
+ * {@link spawnTile} at full health. The combat and dialogue rules themselves
+ * live in {@link World}; this just carries the config.
  */
 export class Npc extends Entity {
   readonly name: string;
@@ -57,6 +75,10 @@ export class Npc extends Entity {
   readonly leashRange: number;
   readonly spawnTile: Tile;
   readonly drops: DropEntry[];
+  readonly attackable: boolean;
+  readonly examine: string;
+  readonly dialogue: DialogueFn | null;
+  readonly shopId: string | null;
 
   /** Set while dead; counts down to respawn. */
   respawnTimer = 0;
@@ -81,6 +103,10 @@ export class Npc extends Entity {
     this.wanderRadius = config.wanderRadius ?? 3;
     this.leashRange = this.wanderRadius + 6;
     this.drops = config.drops ?? [];
+    this.attackable = config.attackable ?? true;
+    this.examine = config.examine ?? 'A creature.';
+    this.dialogue = config.dialogue ?? null;
+    this.shopId = config.shopId ?? null;
     this.spawnTile = position;
     this.maxHitpoints = config.maxHitpoints;
     this.hitpoints = config.maxHitpoints;

@@ -20,6 +20,16 @@ import { SkillId } from './Skills';
 import { GameEvent } from './events';
 import { GroundItem, GROUND_ITEM_TTL } from './GroundItem';
 import { Fire } from './Fire';
+import { DialogueContext, DialogueNode, DialogueScript, DialogueView } from './dialogue';
+import { questDef } from './quests';
+import {
+  SHOPS,
+  ShopState,
+  createShop,
+  shopAccepts,
+  shopBuyPrice,
+  shopSellPrice,
+} from './shops';
 import {
   ResourceKind,
   ResourceNode,
@@ -79,6 +89,12 @@ export class World {
   /** Bank booths and altars registered by the world builder. */
   readonly interactables: Interactable[] = [];
 
+  /** Every shop's live stock, keyed by shop id. */
+  readonly shops = new Map<string, ShopState>();
+
+  /** The script each player is currently conversing through, by player id. */
+  private readonly scripts = new Map<number, DialogueScript>();
+
   private nextEntityId = 1;
   private nextGroundItemId = 1;
   private nextNodeId = 1;
@@ -89,6 +105,7 @@ export class World {
   constructor(map: TileMap) {
     this.map = map;
     this.pathfinder = new Pathfinder(map);
+    for (const def of SHOPS) this.shops.set(def.id, createShop(def));
   }
 
   spawnPlayer(position: Tile, name?: string): Player {
@@ -115,12 +132,14 @@ export class World {
     this.updateGathering();
     this.updateActions();
     this.updateObjectInteractions();
+    this.updateTalk();
     this.updateFires();
     this.updateFishingSpots();
     this.updateGroundItems();
     this.updatePrayer();
     this.updateRegen();
     this.updateRespawns();
+    this.updateShops();
     this.tickCount++;
   }
 
@@ -149,6 +168,13 @@ export class World {
 
   addInteractable(kind: 'bank' | 'altar', tile: Tile): void {
     this.interactables.push({ kind, tile });
+  }
+
+  /** Register a kitchen range: a fire that never goes out and burns less. */
+  addRange(tile: Tile): Fire {
+    const range: Fire = { id: this.nextFireId++, tile, kind: 'range', expiresAtTick: Infinity };
+    this.fires.set(range.id, range);
+    return range;
   }
 
   // --- Lookups the input layer uses to build menus -------------------------
@@ -219,14 +245,17 @@ export class World {
       const entity = this.entities.get(cmd.entityId);
       if (!entity) continue;
 
-      // Any new *intent* replaces the previous one wholesale.
+      // Any new *intent* replaces the previous one wholesale — and walking
+      // off mid-sentence ends a conversation, like OSRS.
       const clearIntents = (): void => {
         entity.targetId = null;
         if (entity instanceof Player) {
           entity.pickupTarget = null;
           entity.gatherTarget = null;
           entity.objectTarget = null;
+          entity.talkTarget = null;
           entity.action = null;
+          this.closeDialogue(entity);
         }
       };
 
@@ -239,6 +268,10 @@ export class World {
         }
         case 'attack': {
           const target = this.entities.get(cmd.targetId);
+          if (target instanceof Npc && !target.attackable) {
+            if (entity instanceof Player) this.say("You can't attack that.");
+            break;
+          }
           if (target && target.isAlive && target.id !== entity.id) {
             if (!this.canEngage(entity, target)) {
               if (entity instanceof Player) this.refuseEngagement(entity, target);
@@ -339,6 +372,282 @@ export class World {
           }
           break;
         }
+        case 'talk':
+        case 'trade': {
+          if (!(entity instanceof Player)) break;
+          const npc = this.entities.get(cmd.npcId);
+          if (!(npc instanceof Npc) || npc.isDead) break;
+          clearIntents();
+          entity.talkTarget = { npcId: npc.id, mode: cmd.type };
+          const dest = this.adjacentDestination(entity.position, npc.position);
+          entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
+          break;
+        }
+        case 'dialogueContinue':
+          if (entity instanceof Player) this.advanceDialogue(entity);
+          break;
+        case 'dialogueChoose':
+          if (entity instanceof Player) this.chooseDialogue(entity, cmd.index);
+          break;
+        case 'shopBuy':
+          if (entity instanceof Player) this.shopBuy(entity, cmd.itemId, cmd.qty);
+          break;
+        case 'shopSell':
+          if (entity instanceof Player) this.shopSell(entity, cmd.slot, cmd.qty);
+          break;
+      }
+    }
+  }
+
+  // --- Talking, quests, and shops ------------------------------------------
+
+  /** Players walking up to an NPC: open the conversation (or shop) on arrival. */
+  private updateTalk(): void {
+    for (const entity of this.entities.values()) {
+      if (!(entity instanceof Player) || !entity.talkTarget) continue;
+      const npc = this.entities.get(entity.talkTarget.npcId);
+      if (!(npc instanceof Npc) || npc.isDead) {
+        entity.talkTarget = null;
+        continue;
+      }
+      if (chebyshev(entity.position, npc.position) <= 1) {
+        const mode = entity.talkTarget.mode;
+        entity.path.length = 0;
+        entity.talkTarget = null;
+        npc.path.length = 0; // stop and listen
+        if (mode === 'trade' && npc.shopId) this.openShop(entity, npc.shopId);
+        else this.openDialogue(entity, npc);
+      } else if (entity.path.length === 0) {
+        const dest = this.adjacentDestination(entity.position, npc.position);
+        entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
+        if (entity.path.length === 0) entity.talkTarget = null; // unreachable
+      }
+    }
+  }
+
+  /** Whether some player is mid-conversation with this NPC (it stands still). */
+  inDialogueWith(npcId: number): boolean {
+    for (const entity of this.entities.values()) {
+      if (entity instanceof Player && entity.dialogue?.npcId === npcId) return true;
+    }
+    return false;
+  }
+
+  private openDialogue(player: Player, npc: Npc): void {
+    if (!npc.dialogue) {
+      this.say(`${npc.name} doesn't seem interested in talking.`);
+      return;
+    }
+    const script = npc.dialogue(this.dialogueContext(player));
+    this.scripts.set(player.id, script);
+    player.dialogue = { npcId: npc.id, nodeKey: script.start };
+    this.enterNode(player, script.start);
+  }
+
+  /** Step into a node: run its effect, then show it (or finish on 'end'). */
+  private enterNode(player: Player, key: string): void {
+    const script = this.scripts.get(player.id);
+    const npc = player.dialogue ? this.entities.get(player.dialogue.npcId) : null;
+    const node = script?.nodes[key];
+    if (!script || !node || !(npc instanceof Npc)) {
+      this.closeDialogue(player);
+      return;
+    }
+    player.dialogue = { npcId: npc.id, nodeKey: key };
+    if (node.kind !== 'options' && node.effect) node.effect(this.dialogueContext(player));
+    if (node.kind === 'end') {
+      this.closeDialogue(player);
+      return;
+    }
+    if (!player.dialogue) return; // an effect (a shop opening) ended the chat
+    this.eventQueue.push({ type: 'dialogue', entityId: player.id, view: this.viewOf(node, npc, player) });
+  }
+
+  private advanceDialogue(player: Player): void {
+    const script = player.dialogue && this.scripts.get(player.id);
+    const node = script && player.dialogue ? script.nodes[player.dialogue.nodeKey] : undefined;
+    if (!node || node.kind === 'options' || node.kind === 'end') return;
+    if (node.next === undefined) this.closeDialogue(player);
+    else this.enterNode(player, node.next);
+  }
+
+  private chooseDialogue(player: Player, index: number): void {
+    const script = player.dialogue && this.scripts.get(player.id);
+    const node = script && player.dialogue ? script.nodes[player.dialogue.nodeKey] : undefined;
+    if (!node || node.kind !== 'options') return;
+    const option = node.options[index];
+    if (option) this.enterNode(player, option.next);
+  }
+
+  private closeDialogue(player: Player): void {
+    if (!player.dialogue) return;
+    player.dialogue = null;
+    this.scripts.delete(player.id);
+    this.eventQueue.push({ type: 'dialogue', entityId: player.id, view: null });
+  }
+
+  private viewOf(node: DialogueNode, npc: Npc, player: Player): DialogueView {
+    switch (node.kind) {
+      case 'npc':
+        return { kind: 'npc', speaker: npc.name, text: node.text };
+      case 'player':
+        return { kind: 'player', speaker: player.name, text: node.text };
+      case 'options':
+        return { kind: 'options', title: node.title ?? 'Select an option', options: node.options.map((o) => o.text) };
+      default:
+        return { kind: 'message', text: node.kind === 'message' ? node.text : '' };
+    }
+  }
+
+  /** The sim's side of the dialogue contract: what scripts may read and do. */
+  private dialogueContext(player: Player): DialogueContext {
+    return {
+      player,
+      questStage: (id) => player.quests.get(id) ?? 0,
+      setQuestStage: (id, stage) => {
+        player.quests.set(id, stage);
+      },
+      completeQuest: (id) => this.completeQuest(player, id),
+      questVar: (key) => player.questVars.get(key) ?? 0,
+      setQuestVar: (key, value) => {
+        player.questVars.set(key, value);
+      },
+      hasItem: (id, qty = 1) => player.inventory.countOf(id) >= qty,
+      countItem: (id) => player.inventory.countOf(id),
+      takeItem: (id, qty = 1) => {
+        if (player.inventory.countOf(id) < qty) return false;
+        player.inventory.removeById(id, qty);
+        return true;
+      },
+      giveItem: (id, qty = 1) => this.giveItem(player, id, qty),
+      grantXp: (skill, amount) => this.grantXp(player, skill, amount),
+      killCount: (kind) => player.killCounts.get(kind) ?? 0,
+      skillLevel: (skill) => player.skills.levelOf(skill),
+      message: (text) => this.say(text),
+      openShop: (shopId) => {
+        this.closeDialogue(player);
+        this.openShop(player, shopId);
+      },
+    };
+  }
+
+  /** Put items in the backpack; anything that doesn't fit drops at the feet. */
+  private giveItem(player: Player, id: string, qty: number): void {
+    const leftover = player.inventory.add(id, qty);
+    if (leftover > 0) {
+      this.dropItem(stackOf(id, leftover), player.position);
+      this.say("Your backpack is full, so the rest is on the ground.");
+    }
+  }
+
+  private completeQuest(player: Player, questId: string): void {
+    const def = questDef(questId);
+    player.quests.set(questId, def.completeStage);
+    this.say(`Congratulations! You have completed ${def.name}.`);
+    this.eventQueue.push({ type: 'questComplete', entityId: player.id, questId });
+  }
+
+  /** Quest hook: a fire lit beside Gareth settles the woodsman's wager. */
+  private onFireLit(player: Player, tile: Tile): void {
+    if ((player.quests.get('woodsmans_wager') ?? 0) !== 1) return;
+    if (player.questVars.get('woodsmans_wager.fire')) return;
+    for (const other of this.entities.values()) {
+      if (other instanceof Npc && other.kind === 'woodsman' && chebyshev(other.position, tile) <= 2) {
+        player.questVars.set('woodsmans_wager.fire', 1);
+        this.say('Gareth nods approvingly at your fire.');
+        return;
+      }
+    }
+  }
+
+  private openShop(player: Player, shopId: string): void {
+    if (!this.shops.has(shopId)) return;
+    player.shopId = shopId;
+    this.eventQueue.push({ type: 'shop', entityId: player.id, shopId });
+  }
+
+  private closeShop(player: Player): void {
+    if (!player.shopId) return;
+    player.shopId = null;
+    this.eventQueue.push({ type: 'shop', entityId: player.id, shopId: null });
+  }
+
+  /** The shop the player has open, if they're still standing by its keeper. */
+  private openShopOf(player: Player): ShopState | null {
+    if (!player.shopId) return null;
+    const shop = this.shops.get(player.shopId);
+    if (!shop) return null;
+    for (const other of this.entities.values()) {
+      if (other instanceof Npc && other.shopId === player.shopId && chebyshev(other.position, player.position) <= 2) {
+        return shop;
+      }
+    }
+    this.closeShop(player);
+    return null;
+  }
+
+  /** Buy up to `qty` units; each unit is priced at the stock level of the moment. */
+  private shopBuy(player: Player, itemId: string, qty: number): void {
+    const shop = this.openShopOf(player);
+    if (!shop || !shop.stock.has(itemId)) return;
+    let bought = 0;
+    for (let i = 0; i < qty; i++) {
+      const stock = shop.stock.get(itemId) ?? 0;
+      if (stock <= 0) {
+        if (bought === 0) this.say("The shop has run out of stock.");
+        break;
+      }
+      const price = shopBuyPrice(shop, itemId);
+      if (player.inventory.countOf('coins') < price) {
+        if (bought === 0) this.say("You don't have enough coins.");
+        break;
+      }
+      if (player.inventory.add(itemId, 1) > 0) {
+        if (bought === 0) this.say("You don't have enough inventory space.");
+        break;
+      }
+      player.inventory.removeById('coins', price);
+      shop.stock.set(itemId, stock - 1);
+      bought++;
+    }
+    if (bought > 0) this.eventQueue.push({ type: 'sfx', name: 'coins' });
+  }
+
+  private shopSell(player: Player, slot: number, qty: number): void {
+    const shop = this.openShopOf(player);
+    const item = player.inventory.slots[slot];
+    if (!shop || !item) return;
+    if (!shopAccepts(shop, item.id)) {
+      this.say("You can't sell this item to this shop.");
+      return;
+    }
+    const want = Math.min(qty, player.inventory.countOf(item.id));
+    let sold = 0;
+    for (let i = 0; i < want; i++) {
+      const price = shopSellPrice(shop, item.id);
+      if (player.inventory.removeById(item.id, 1) < 1) break;
+      if (player.inventory.add('coins', price) > 0) {
+        player.inventory.add(item.id, 1); // no room for the coins: undo
+        this.say("You don't have enough inventory space.");
+        break;
+      }
+      shop.stock.set(item.id, (shop.stock.get(item.id) ?? 0) + 1);
+      sold++;
+    }
+    if (sold > 0) this.eventQueue.push({ type: 'sfx', name: 'coins' });
+  }
+
+  /** Stock drifts one unit a minute toward its default, like OSRS shops. */
+  private updateShops(): void {
+    if (this.tickCount % 100 !== 0 || this.tickCount === 0) return;
+    for (const shop of this.shops.values()) {
+      for (const [id, qty] of shop.stock) {
+        const base = shop.defaults.get(id) ?? 0;
+        if (qty < base) shop.stock.set(id, qty + 1);
+        else if (qty > base) {
+          if (qty - 1 <= 0 && base === 0) shop.stock.delete(id);
+          else shop.stock.set(id, qty - 1);
+        }
       }
     }
   }
@@ -393,8 +702,9 @@ export class World {
         if (picked) continue;
       }
 
-      // Idle wander: occasionally amble to a nearby tile around the spawn.
-      if (entity.path.length === 0 && this.rng() < 0.06) {
+      // Idle wander: occasionally amble to a nearby tile around the spawn —
+      // unless someone is talking to us.
+      if (entity.path.length === 0 && this.rng() < 0.06 && !this.inDialogueWith(entity.id)) {
         const r = entity.wanderRadius;
         const dest = {
           x: entity.spawnTile.x + Math.floor(this.rng() * (2 * r + 1)) - r,
@@ -552,6 +862,7 @@ export class World {
       victim.respawnTimer = victim.respawnTicks; // stays dead, then returns
       if (killer instanceof Player) {
         this.eventQueue.push({ type: 'kill', killerId: killer.id, victimName: victim.name });
+        killer.killCounts.set(victim.kind, (killer.killCounts.get(victim.kind) ?? 0) + 1);
       }
       // Roll the drop table onto the tile the NPC died on.
       for (const entry of victim.drops) {
@@ -573,6 +884,9 @@ export class World {
       victim.gatherTarget = null;
       victim.pickupTarget = null;
       victim.objectTarget = null;
+      victim.talkTarget = null;
+      this.closeDialogue(victim);
+      this.closeShop(victim);
       if (this.playerSpawn) {
         victim.position = this.playerSpawn;
         victim.previousPosition = this.playerSpawn;
@@ -838,6 +1152,11 @@ export class World {
       this.say(`You don't have any ${def.name.toLowerCase()} to cook.`);
       return;
     }
+    // The castle range is the Cook's until you've done him a favour.
+    if (fire.kind === 'range' && (player.quests.get('cooks_rats') ?? 0) < 2) {
+      this.say('The Cook shoos you away from his range. Perhaps if you helped him first...');
+      return;
+    }
     clearIntents();
     player.action = { type: 'cook', fireId, itemId, cooldown: 2 };
     if (chebyshev(player.position, fire.tile) > 1) {
@@ -868,6 +1187,7 @@ export class World {
         const fire: Fire = {
           id: this.nextFireId++,
           tile: action.tile,
+          kind: 'fire',
           // Fire lifetimes are unpredictable, like OSRS: one to three minutes.
           expiresAtTick: this.tickCount + 100 + Math.floor(this.rng() * 200),
         };
@@ -877,6 +1197,7 @@ export class World {
         this.eventQueue.push({ type: 'sfx', name: 'light' });
         entity.action = null;
         this.stepOffFire(entity);
+        this.onFireLit(entity, fire.tile);
         continue;
       }
 
@@ -910,7 +1231,8 @@ export class World {
       }
       this.consumeOne(entity, slot);
       const level = entity.skills.levelOf('cooking');
-      if (this.rng() < cookSuccessChance(level, cooking.stopBurn)) {
+      const stopBurn = fire.kind === 'range' ? (cooking.stopBurnRange ?? cooking.stopBurn) : cooking.stopBurn;
+      if (this.rng() < cookSuccessChance(level, stopBurn)) {
         entity.inventory.add(cooking.cooked, 1);
         this.grantXp(entity, 'cooking', cooking.xp);
         this.say(`You successfully cook some ${itemDef(cooking.cooked).name.toLowerCase()}.`);
@@ -942,7 +1264,7 @@ export class World {
 
   private updateFires(): void {
     for (const [id, fire] of this.fires) {
-      if (this.tickCount >= fire.expiresAtTick) {
+      if (fire.kind === 'fire' && this.tickCount >= fire.expiresAtTick) {
         this.fires.delete(id);
         this.dropItem(stackOf('ashes', 1), fire.tile);
       }

@@ -193,9 +193,23 @@ export class SceneryView {
         return this.buildBankBooth();
       case 'altar':
         return this.buildAltar();
+      case 'range':
+        return this.buildRange();
       default:
         return null;
     }
+  }
+
+  /** The castle kitchen's iron range: a hob on a stone base with a fire door. */
+  private buildRange(): THREE.Object3D {
+    const g = new THREE.Group();
+    g.add(place(box(0.9, 0.5, 0.7), this.mat.stone, 0, 0.25, 0));
+    g.add(place(box(0.92, 0.42, 0.72), this.mat.iron, 0, 0.71, 0));
+    g.add(place(box(0.96, 0.06, 0.76), this.mat.dark, 0, 0.95, 0));
+    for (const x of [-0.22, 0.22]) g.add(place(box(0.26, 0.03, 0.26), this.mat.dark, x, 0.99, 0));
+    g.add(place(box(0.4, 0.22, 0.04), this.mat.dark, 0, 0.66, 0.37)); // fire door
+    g.add(place(box(0.12, 0.7, 0.12), this.mat.iron, 0.3, 1.3, -0.25)); // flue
+    return g;
   }
 
   /** A wooden counter with a barred grille — the castle's bank booth. */

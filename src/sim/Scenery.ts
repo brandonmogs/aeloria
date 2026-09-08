@@ -17,6 +17,7 @@ export type PropKind =
   | 'castle-keep'
   | 'bank-booth'
   | 'altar'
+  | 'range'
   | 'water';
 
 /** A single placed piece of scenery. */

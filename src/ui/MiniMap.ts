@@ -1,36 +1,28 @@
 import { TileMap } from '../sim/TileMap';
 import { World } from '../sim/World';
-import { Entity } from '../sim/Entity';
+import { Npc } from '../sim/Npc';
 import { Prop } from '../sim/Scenery';
 import { Tile, tile } from '../sim/coords';
 import { OrbitCamera } from '../render/OrbitCamera';
+import { bakeTerrain } from './WorldMap';
 
 /**
- * A top-right "world view": the whole map drawn from above, north-up, with the
- * static terrain baked once and the live actors painted on each frame. The
- * tracked player sits as a bright dot with a wedge showing which way the camera
- * is looking, so the minimap and the on-screen view always agree. Pairs with the
- * {@link Compass}, which shares the same heading.
+ * The OSRS minimap: a round window on the world, centred on the player and
+ * rotated so that the way the camera faces is up. Terrain is baked once
+ * (north up) and a rotated, scrolled slice of it is blitted each frame, with
+ * yellow dots for NPCs, red for items on the ground, and the player as a
+ * white dot at the centre. Clicking walks there: the click is unrotated back
+ * into tile space, so "up" on the minimap is always where you're looking.
  */
 export class MiniMap {
-  private readonly px = 4; // pixels per tile in the baked terrain
+  /** Pixels per tile in the baked terrain and on screen. */
+  private readonly px = 4;
+  private readonly size = 184;
   private readonly canvas = document.createElement('canvas');
   private readonly ctx: CanvasRenderingContext2D;
   private readonly terrain: HTMLCanvasElement;
-
-  private static readonly COLORS: Record<string, string> = {
-    ground: '#45603e',
-    blocked: '#5b5f67',
-    tree: '#2f5a2c',
-    rock: '#8b909a',
-    'castle-wall': '#c3bcad',
-    'castle-tower': '#cfc8b8',
-    'castle-gate': '#a89a82',
-    'castle-keep': '#d4ccba',
-    'bank-booth': '#c79c4e',
-    altar: '#efe6c8',
-    water: '#2f6f9e',
-  };
+  /** The tile the last minimap click resolved to (for diagnostics/tests). */
+  lastTarget: Tile | null = null;
 
   constructor(
     private readonly map: TileMap,
@@ -39,110 +31,87 @@ export class MiniMap {
     private readonly camera: OrbitCamera,
     props: ReadonlyArray<Prop>,
     onClickTile?: (target: Tile) => void,
+    extras: { roads?: ReadonlyArray<ReadonlyArray<Tile>>; stone?: (x: number, y: number) => boolean } = {},
   ) {
-    const res = map.width * this.px;
-    this.canvas.width = res;
-    this.canvas.height = res;
+    this.canvas.width = this.size;
+    this.canvas.height = this.size;
     this.canvas.id = 'minimap';
     document.body.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d')!;
+    this.terrain = bakeTerrain(map, props, this.px, extras);
 
-    this.terrain = this.bakeTerrain(props);
-
-    // Click-to-walk, like OSRS: map the click back to a tile.
     if (onClickTile) {
       this.canvas.addEventListener('pointerdown', (e) => {
-        const rect = this.canvas.getBoundingClientRect();
-        const cx = ((e.clientX - rect.left) / rect.width) * this.canvas.width;
-        const cy = ((e.clientY - rect.top) / rect.height) * this.canvas.height;
-        const x = Math.floor(cx / this.px);
-        const y = this.flipY(Math.floor(cy / this.px));
-        if (this.map.inBounds(x, y)) onClickTile(tile(x, y));
+        const target = this.tileAtClick(e.clientX, e.clientY);
+        if (target) {
+          this.lastTarget = target;
+          onClickTile(target);
+        }
       });
     }
   }
 
-  /** Redraw the live layer (terrain blit + actors). Call once per frame. */
+  /** Redraw. Call once per frame. */
   update(): void {
     const ctx = this.ctx;
-    ctx.drawImage(this.terrain, 0, 0);
-
-    for (const entity of this.world.entities.values()) {
-      if (entity.id === this.trackedId) continue;
-      this.dot(entity, '#ffd34d', 2.5);
-    }
-
     const tracked = this.world.entities.get(this.trackedId);
-    if (tracked) {
-      this.viewWedge(tracked);
-      this.dot(tracked, '#ffffff', 3.5, '#39c5ff');
-    }
-  }
+    const half = this.size / 2;
+    ctx.clearRect(0, 0, this.size, this.size);
+    if (!tracked) return;
 
-  /** Bake the static terrain to an offscreen canvas once, north pointing up. */
-  private bakeTerrain(props: ReadonlyArray<Prop>): HTMLCanvasElement {
-    const c = document.createElement('canvas');
-    c.width = this.canvas.width;
-    c.height = this.canvas.height;
-    const ctx = c.getContext('2d')!;
-    const px = this.px;
-
-    ctx.fillStyle = MiniMap.COLORS.ground;
-    ctx.fillRect(0, 0, c.width, c.height);
-
-    // Generic blocked tiles first (covers the keep footprint), props on top.
-    ctx.fillStyle = MiniMap.COLORS.blocked;
-    for (let y = 0; y < this.map.height; y++) {
-      for (let x = 0; x < this.map.width; x++) {
-        if (this.map.isBlocked(x, y)) ctx.fillRect(x * px, this.flipY(y) * px, px, px);
-      }
-    }
-    for (const prop of props) {
-      ctx.fillStyle = MiniMap.COLORS[prop.kind] ?? MiniMap.COLORS.blocked;
-      ctx.fillRect(prop.tile.x * px, this.flipY(prop.tile.y) * px, px, px);
-    }
-    return c;
-  }
-
-  /** Tile y is north-positive; canvas y is down, so flip for a north-up view. */
-  private flipY(y: number): number {
-    return this.map.height - 1 - y;
-  }
-
-  /** Centre-of-tile pixel coordinates on the minimap canvas. */
-  private toCanvas(x: number, y: number): [number, number] {
-    return [(x + 0.5) * this.px, (this.flipY(y) + 0.5) * this.px];
-  }
-
-  private dot(entity: Entity, fill: string, r: number, ring?: string): void {
-    const [cx, cy] = this.toCanvas(entity.position.x, entity.position.y);
-    const ctx = this.ctx;
-    if (ring) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, r + 1.5, 0, Math.PI * 2);
-      ctx.fillStyle = ring;
-      ctx.fill();
-    }
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(half, half, half - 1, 0, Math.PI * 2);
+    ctx.clip();
+
+    // Rotate the world so the camera's heading points up, then scroll it so
+    // the player's tile sits at the centre.
+    ctx.translate(half, half);
+    ctx.rotate(-this.camera.heading);
+    const px = this.px;
+    const p = tracked.position;
+    ctx.drawImage(this.terrain, -(p.x + 0.5) * px, -(this.map.height - 1 - p.y + 0.5) * px);
+
+    for (const ground of this.world.groundItems.values()) {
+      this.dot(ground.tile.x - p.x, ground.tile.y - p.y, '#ff3b2f', 2);
+    }
+    for (const entity of this.world.entities.values()) {
+      if (!(entity instanceof Npc) || entity.isDead) continue;
+      this.dot(entity.position.x - p.x, entity.position.y - p.y, '#ffd34d', 2.2);
+    }
+    ctx.restore();
+
+    // The player, always dead centre, always facing "up".
+    ctx.beginPath();
+    ctx.arc(half, half, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+
+  /** A dot at a tile offset from the player, inside the rotated context. */
+  private dot(dx: number, dy: number, fill: string, r: number): void {
+    const ctx = this.ctx;
+    ctx.beginPath();
+    ctx.arc(dx * this.px, -dy * this.px, r, 0, Math.PI * 2);
     ctx.fillStyle = fill;
     ctx.fill();
   }
 
-  /** A translucent cone from the player showing the camera's facing direction. */
-  private viewWedge(player: Entity): void {
-    const [cx, cy] = this.toCanvas(player.position.x, player.position.y);
+  /** Undo the rotation and scroll to find which tile a click landed on. */
+  private tileAtClick(clientX: number, clientY: number): Tile | null {
+    const tracked = this.world.entities.get(this.trackedId);
+    if (!tracked) return null;
+    const rect = this.canvas.getBoundingClientRect();
+    const ox = ((clientX - rect.left) / rect.width) * this.size - this.size / 2;
+    const oy = ((clientY - rect.top) / rect.height) * this.size - this.size / 2;
     const h = this.camera.heading;
-    const spread = 0.5; // ~28° half-angle
-    const len = this.px * 6;
-    const ctx = this.ctx;
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    for (const a of [h - spread, h + spread]) {
-      ctx.lineTo(cx + Math.sin(a) * len, cy - Math.cos(a) * len);
-    }
-    ctx.closePath();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
-    ctx.fill();
+    const dx = ox * Math.cos(h) - oy * Math.sin(h);
+    const dy = ox * Math.sin(h) + oy * Math.cos(h);
+    const x = Math.round(tracked.position.x + dx / this.px);
+    const y = Math.round(tracked.position.y - dy / this.px);
+    return this.map.inBounds(x, y) ? tile(x, y) : null;
   }
 }

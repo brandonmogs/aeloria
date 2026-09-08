@@ -1,4 +1,5 @@
 import { SkillId } from './Skills';
+import type { DialogueView } from './dialogue';
 
 /** The one-shot sounds the sim can ask the audio layer to play. */
 export type SfxName =
@@ -8,7 +9,8 @@ export type SfxName =
   | 'cook'
   | 'prayerOn'
   | 'prayerOff'
-  | 'recharge';
+  | 'recharge'
+  | 'coins';
 
 /**
  * Things that happened during a tick that the UI wants to announce: XP drops,
@@ -28,4 +30,10 @@ export type GameEvent =
   | { type: 'sfx'; name: SfxName }
   /** The player reached a bank booth; the UI should open the bank screen. */
   | { type: 'openBank'; entityId: number }
+  /** The conversation changed: show this node, or close the box when null. */
+  | { type: 'dialogue'; entityId: number; view: DialogueView | null }
+  /** A quest was just finished: show the completion scroll. */
+  | { type: 'questComplete'; entityId: number; questId: string }
+  /** Open (or, with null, close) the shop screen. */
+  | { type: 'shop'; entityId: number; shopId: string | null }
   | { type: 'message'; text: string };

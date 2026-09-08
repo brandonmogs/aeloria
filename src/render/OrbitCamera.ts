@@ -51,6 +51,11 @@ export class OrbitCamera {
     this.yaw = Math.PI;
   }
 
+  /** Snap the view to look due south. */
+  faceSouth(): void {
+    this.yaw = 0;
+  }
+
   /** Smoothly ease the focus toward a world-space target (the player). */
   follow(target: THREE.Vector3): void {
     this.focus.lerp(target, 0.15);

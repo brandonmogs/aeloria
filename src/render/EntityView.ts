@@ -139,8 +139,14 @@ export class EntityView {
       const ground = this.terrain.heightAt(avatar.group.position.x, avatar.group.position.z);
 
       const moving = !this.prev.equals(this.curr);
+      const partner = this.dialoguePartnerOf(entity);
       if (moving) {
         avatar.group.rotation.y = Math.atan2(this.curr.x - this.prev.x, this.curr.z - this.prev.z);
+      } else if (partner) {
+        // Talking: the two face each other.
+        const dx = partner.position.x - entity.position.x;
+        const dz = partner.position.y - entity.position.y;
+        if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
       } else if (entity.targetId !== null && entity.isAlive) {
         // Standing in combat: square up to the opponent.
         const foe = this.world.entities.get(entity.targetId);
@@ -251,6 +257,17 @@ export class EntityView {
     return this.avatars.get(id)?.group.position ?? null;
   }
 
+  /** Whoever this entity is mid-conversation with, if anyone. */
+  private dialoguePartnerOf(entity: Entity): Entity | null {
+    if (entity instanceof Player) {
+      return entity.dialogue ? (this.world.entities.get(entity.dialogue.npcId) ?? null) : null;
+    }
+    for (const other of this.world.entities.values()) {
+      if (other instanceof Player && other.dialogue?.npcId === entity.id) return other;
+    }
+    return null;
+  }
+
   /** Swing limbs and add a gentle bob while walking; ease back to rest at a stop. */
   private animate(avatar: Avatar, moving: boolean, dt: number, ground: number): void {
     const target = moving ? 1 : 0;
@@ -324,19 +341,58 @@ export class EntityView {
 
   private createAvatar(entity: Entity): Avatar {
     if (entity instanceof Npc) {
-      if (entity.kind === 'goblin') return buildGoblinAvatar();
-      if (entity.kind === 'rat') return buildRatAvatar();
-      if (entity.kind === 'guard') {
-        // Castle guards: the human rig in chainmail and crimson, plus a helm.
-        return buildHumanAvatar(
-          { skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a, hair: 0x3a2a1a },
-          (g) => {
-            const steel = flat(0xb4b8bf);
-            g.add(place(taperedBox(0.36, 0.22, 0.36, 0.8), steel, 0, 1.58, 0));
-            g.add(place(box(0.36, 0.1, 0.36), steel, 0, 1.45, 0));
-            g.add(place(box(0.06, 0.16, 0.03), steel, 0, 1.4, 0.18));
-          },
-        );
+      switch (entity.kind) {
+        case 'goblin':
+          return buildGoblinAvatar();
+        case 'rat':
+          return buildRatAvatar();
+        case 'guard':
+          // Castle guards: the human rig in chainmail and crimson, plus a helm.
+          return buildHumanAvatar(
+            { skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a, hair: 0x3a2a1a },
+            (g) => addHelm(g, 0xb4b8bf),
+          );
+        case 'captain':
+          // Same kit, redder, with an officer's plume.
+          return buildHumanAvatar(
+            { skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x8b2b1f, boots: 0x2a2a2a, hair: 0x3a2a1a },
+            (g) => {
+              addHelm(g, 0xc9ccd2);
+              g.add(place(box(0.06, 0.22, 0.16), flat(0xc0332a), 0, 1.78, -0.04));
+            },
+          );
+        case 'cook':
+          return buildHumanAvatar(
+            { skin: 0xe0ac79, tunic: 0xf0ede4, trouser: 0x4a4a4a, boots: 0x2a2a2a, hair: 0x3a2a1a },
+            (g) => {
+              g.add(place(box(0.3, 0.26, 0.3), flat(0xffffff), 0, 1.74, 0)); // chef's hat
+              g.add(place(box(0.34, 0.06, 0.34), flat(0xffffff), 0, 1.62, 0));
+            },
+          );
+        case 'woodsman':
+          return buildHumanAvatar(
+            { skin: 0xd9a06c, tunic: 0x6b8f3a, trouser: 0x5a4632, boots: 0x3b2a1c, hair: 0x8b5a2b },
+            (g, armL) => {
+              // A big beard and a felling axe in hand.
+              g.add(place(box(0.24, 0.16, 0.08), flat(0x8b5a2b), 0, 1.3, 0.14));
+              armL.add(buildWeapon({ id: 'steel_axe', qty: 1 }));
+            },
+          );
+        case 'fisherman':
+          return buildHumanAvatar(
+            { skin: 0xd9a06c, tunic: 0x4f6f8f, trouser: 0x6b6b6b, boots: 0x3b2a1c, hair: 0xd0d0d0 },
+            (g) => {
+              const straw = flat(0xc9b26a);
+              g.add(place(box(0.5, 0.05, 0.5), straw, 0, 1.6, 0)); // wide-brimmed hat
+              g.add(place(box(0.28, 0.16, 0.28), straw, 0, 1.7, 0));
+              g.add(place(box(0.2, 0.14, 0.06), flat(0xd0d0d0), 0, 1.3, 0.14)); // grey beard
+            },
+          );
+        case 'shopkeeper':
+          return buildHumanAvatar(
+            { skin: 0xe0ac79, tunic: 0x7a4f8a, trouser: 0x3a3a4a, boots: 0x2a2a2a, hair: 0x2a1a0a },
+            (g) => g.add(place(box(0.34, 0.44, 0.04), flat(0xd8cfa8), 0, 0.86, 0.15)), // apron
+          );
       }
     }
     return buildHumanAvatar({ skin: 0xe0ac79, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, hair: 0x4a2f16 });
@@ -407,7 +463,18 @@ interface HumanPalette {
  * square head, short legs, all hard edges. Limbs hang from pivots at the
  * shoulders and hips so `rotation.x` swings them.
  */
-function buildHumanAvatar(p: HumanPalette, extras?: (g: THREE.Group) => void): Avatar {
+/** A steel helm with a nose guard, sized for the human rig's head. */
+function addHelm(g: THREE.Group, color: number): void {
+  const steel = flat(color);
+  g.add(place(taperedBox(0.36, 0.22, 0.36, 0.8), steel, 0, 1.58, 0));
+  g.add(place(box(0.36, 0.1, 0.36), steel, 0, 1.45, 0));
+  g.add(place(box(0.06, 0.16, 0.03), steel, 0, 1.4, 0.18));
+}
+
+function buildHumanAvatar(
+  p: HumanPalette,
+  extras?: (g: THREE.Group, armL: THREE.Group, armR: THREE.Group) => void,
+): Avatar {
   const group = new THREE.Group();
   // Yaw first, then lean: flinch/death tilts happen relative to facing.
   group.rotation.order = 'YXZ';
@@ -441,7 +508,7 @@ function buildHumanAvatar(p: HumanPalette, extras?: (g: THREE.Group) => void): A
   armR.position.set(0.3, 1.18, 0);
   group.add(armR);
 
-  extras?.(group);
+  extras?.(group, armL, armR);
 
   group.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;

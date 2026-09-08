@@ -39,7 +39,7 @@ export class FireView {
     for (const fire of this.world.fires.values()) {
       let visual = this.visuals.get(fire.id);
       if (!visual) {
-        visual = this.createVisual(fire.tile.x, fire.tile.y, fire.id);
+        visual = this.createVisual(fire.tile.x, fire.tile.y, fire.id, fire.kind === 'range');
         this.visuals.set(fire.id, visual);
         this.scene.add(visual.group);
       }
@@ -59,18 +59,23 @@ export class FireView {
     }
   }
 
-  private createVisual(x: number, y: number, id: number): FireVisual {
+  /** A campfire's crossed logs and flames — or, on a range, just the flames on the hob. */
+  private createVisual(x: number, y: number, id: number, range: boolean): FireVisual {
     const group = new THREE.Group();
     group.position.set(x, this.terrain.heightAt(x, y), y);
 
-    for (const angle of [0.5, -0.7]) {
-      const log = new THREE.Mesh(this.logGeo, this.logMat);
-      log.rotation.y = angle;
-      log.position.y = 0.06;
-      log.castShadow = true;
-      group.add(log);
+    if (!range) {
+      for (const angle of [0.5, -0.7]) {
+        const log = new THREE.Mesh(this.logGeo, this.logMat);
+        log.rotation.y = angle;
+        log.position.y = 0.06;
+        log.castShadow = true;
+        group.add(log);
+      }
     }
 
+    const lift = range ? 0.98 : 0;
+    const size = range ? 0.55 : 1;
     const flames: THREE.Mesh[] = [];
     const spots: ReadonlyArray<readonly [number, number, number, number]> = [
       [0, 0.38, 0, 1.1],
@@ -79,8 +84,8 @@ export class FireView {
     ];
     spots.forEach(([fx, fy, fz, s], i) => {
       const flame = new THREE.Mesh(this.flameGeo, this.flameMats[i]);
-      flame.position.set(fx, fy, fz);
-      flame.scale.setScalar(s);
+      flame.position.set(fx * size, lift + fy * size, fz * size);
+      flame.scale.setScalar(s * size);
       group.add(flame);
       flames.push(flame);
     });

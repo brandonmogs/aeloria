@@ -26,13 +26,24 @@ export type Command =
   | { type: 'togglePrayer'; entityId: number; prayerId: string }
   /** Strike a tinderbox against the logs in `slot`. */
   | { type: 'lightFire'; entityId: number; slot: number }
-  /** Cook every `itemId` in the backpack on the given fire. */
+  /** Cook every `itemId` in the backpack on the given fire (or range). */
   | { type: 'cook'; entityId: number; fireId: number; itemId: string }
   /** Walk to and use a world object (bank booth, altar). */
   | { type: 'interact'; entityId: number; kind: 'bank' | 'altar'; target: Tile }
   | { type: 'bankDeposit'; entityId: number; slot: number; qty: number }
   | { type: 'bankWithdraw'; entityId: number; itemId: string; qty: number }
-  | { type: 'bankDepositAll'; entityId: number };
+  | { type: 'bankDepositAll'; entityId: number }
+  /** Walk up to an NPC and start its conversation. */
+  | { type: 'talk'; entityId: number; npcId: number }
+  /** Walk up to a shopkeeper and open the shop. */
+  | { type: 'trade'; entityId: number; npcId: number }
+  /** "Click here to continue" in the dialogue box. */
+  | { type: 'dialogueContinue'; entityId: number }
+  /** Pick the n-th option in the dialogue box. */
+  | { type: 'dialogueChoose'; entityId: number; index: number }
+  | { type: 'shopBuy'; entityId: number; itemId: string; qty: number }
+  /** Sell `qty` of the item in backpack `slot` to the open shop. */
+  | { type: 'shopSell'; entityId: number; slot: number; qty: number };
 
 export function moveCommand(entityId: number, target: Tile, run?: boolean): Command {
   return { type: 'move', entityId, target, run };
@@ -64,4 +75,8 @@ export function equipItemCommand(entityId: number, slot: number): Command {
 
 export function unequipItemCommand(entityId: number, slot: EquipSlot): Command {
   return { type: 'unequipItem', entityId, slot };
+}
+
+export function talkCommand(entityId: number, npcId: number): Command {
+  return { type: 'talk', entityId, npcId };
 }

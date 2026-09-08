@@ -111,6 +111,7 @@ export function buildStartingWorld(map: TileMap): StartingWorld {
   place('bank-booth', 20, 43);
   place('bank-booth', 21, 43);
   place('altar', 27, 43);
+  place('range', 28, 37); // the castle kitchen, where the Cook works
 
   const bridgeTiles: Tile[] = [];
   for (let y = BRIDGE.y0; y <= BRIDGE.y1; y++) {

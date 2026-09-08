@@ -58,6 +58,8 @@ export interface ItemDef {
     readonly xp: number;
     /** Cooking level at which this food stops burning on a fire. */
     readonly stopBurn: number;
+    /** …and on a kitchen range (the Lumbridge-style range burns less). */
+    readonly stopBurnRange?: number;
   };
 }
 
@@ -125,10 +127,10 @@ define({ id: 'small_fishing_net', name: 'Small fishing net', icon: '🕸️', ex
 
 // --- Food & fish -----------------------------------------------------------
 define({ id: 'bread', name: 'Bread', icon: '🍞', examine: 'Nice crusty bread.', value: 12, weightKg: 0.3, heals: 5 });
-define({ id: 'raw_shrimps', name: 'Raw shrimps', icon: '🦐', examine: 'I should try cooking these.', value: 5, weightKg: 0.2, cooking: { cooked: 'shrimps', burnt: 'burnt_shrimps', xp: 30, stopBurn: 34 } });
+define({ id: 'raw_shrimps', name: 'Raw shrimps', icon: '🦐', examine: 'I should try cooking these.', value: 5, weightKg: 0.2, cooking: { cooked: 'shrimps', burnt: 'burnt_shrimps', xp: 30, stopBurn: 34, stopBurnRange: 31 } });
 define({ id: 'shrimps', name: 'Shrimps', icon: '🍤', examine: 'Some nicely cooked shrimps.', value: 5, weightKg: 0.2, heals: 3 });
 define({ id: 'burnt_shrimps', name: 'Burnt shrimps', icon: '🍂', examine: 'Oops.', value: 1, weightKg: 0.2 });
-define({ id: 'raw_anchovies', name: 'Raw anchovies', icon: '🐟', examine: 'I should try cooking these.', value: 15, weightKg: 0.2, cooking: { cooked: 'anchovies', burnt: 'burnt_anchovies', xp: 30, stopBurn: 34 } });
+define({ id: 'raw_anchovies', name: 'Raw anchovies', icon: '🐟', examine: 'I should try cooking these.', value: 15, weightKg: 0.2, cooking: { cooked: 'anchovies', burnt: 'burnt_anchovies', xp: 30, stopBurn: 34, stopBurnRange: 31 } });
 define({ id: 'anchovies', name: 'Anchovies', icon: '🐟', examine: 'Some nicely cooked anchovies.', value: 15, weightKg: 0.2, heals: 1 });
 define({ id: 'burnt_anchovies', name: 'Burnt anchovies', icon: '🍂', examine: 'Oops.', value: 1, weightKg: 0.2 });
 define({ id: 'raw_rat_meat', name: 'Raw rat meat', icon: '🥩', examine: 'Freshly killed rat meat.', value: 2, weightKg: 0.3, cooking: { cooked: 'cooked_meat', burnt: 'burnt_meat', xp: 30, stopBurn: 34 } });
