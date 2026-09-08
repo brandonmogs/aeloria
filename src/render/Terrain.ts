@@ -4,7 +4,7 @@ import { TileMap } from '../sim/TileMap';
 import { Prop } from '../sim/Scenery';
 import { Tile } from '../sim/coords';
 import { TerrainSpec, TileRect } from '../world/startingWorld';
-import { flat, seededRandom, smoothstep } from './lowpoly';
+import { seededRandom, smoothstep } from './lowpoly';
 
 /** World-space height of the moat's surface. */
 export const WATER_LEVEL = -0.28;
@@ -166,7 +166,9 @@ export class Terrain {
     geo.setIndex(index);
     geo.computeVertexNormals();
 
-    this.mesh = new THREE.Mesh(geo, flat(0xffffff, { vertexColors: true }));
+    // Smooth (Gouraud) shading: the vertex colours carry the tile-to-tile
+    // variation, and the facets show only where the ground actually turns.
+    this.mesh = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
     this.mesh.receiveShadow = true;
   }
 

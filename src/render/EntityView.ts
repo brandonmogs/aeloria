@@ -6,16 +6,25 @@ import { Npc } from '../sim/Npc';
 import { EquipSlot, EQUIP_SLOTS } from '../sim/Inventory';
 import { ItemStack } from '../sim/items';
 import { Terrain } from './Terrain';
-import { box, flat, place, taperedBox } from './lowpoly';
 import {
-  buildHelmet,
-  buildChest,
-  buildLegGuard,
+  Rig,
+  addHelm,
   buildBoot,
+  buildChest,
   buildGlove,
-  buildWeapon,
+  buildGoblin,
+  buildHelmet,
+  buildHuman,
+  buildLegGuard,
+  buildRat,
   buildShield,
-} from './gear';
+  buildWeapon,
+  lathe,
+  prism,
+  put,
+  shade,
+  wedge,
+} from './models';
 
 /** Cloth geometry plus its undeformed positions, so it can be re-billowed. */
 interface Cape {
@@ -23,15 +32,8 @@ interface Cape {
   base: Float32Array;
 }
 
-/** The swinging limbs we animate, cached per entity to avoid re-lookups. */
-interface Avatar {
-  group: THREE.Group;
-  legL: THREE.Object3D;
-  legR: THREE.Object3D;
-  armL: THREE.Object3D;
-  armR: THREE.Object3D;
-  /** The arm holding the weapon; the one that swings on attack. */
-  weaponArm: THREE.Object3D;
+/** A rig plus everything the animator and HUD hang off it. */
+interface Avatar extends Rig {
   /** Eased 0..1 gait weight: 0 standing, 1 walking. */
   gait: number;
   /** Seconds left of the attack-swing animation (0 = not swinging). */
@@ -53,8 +55,6 @@ interface Avatar {
   hpCanvas: HTMLCanvasElement;
   hpTex: THREE.CanvasTexture;
   lastHpFrac: number;
-  /** Height above the avatar origin for the health bar / hitsplats. */
-  barHeight: number;
   /** Overhead prayer icon (Protect from Melee), created lazily for players. */
   overhead?: THREE.Sprite;
 }
@@ -77,9 +77,9 @@ const DEATH_TIME = 0.7;
 const SPLAT_TIME = 1.0;
 
 /**
- * Renders entities as blocky, flat-shaded RuneScape figures and — crucially —
- * makes their tile-by-tile movement look smooth. The sim teleports an entity
- * from one tile to the next on each tick; here we interpolate between
+ * Renders entities as low-poly RuneScape figures and — crucially — makes their
+ * tile-by-tile movement look smooth. The sim teleports an entity from one
+ * tile to the next on each tick; here we interpolate between
  * `previousPosition` and `position` using the loop's `alpha`, so the figure
  * glides across the grid while the underlying logic stays a clean
  * 1-tile-per-tick, and we drop it onto the terrain's height at every frame.
@@ -163,6 +163,11 @@ export class EntityView {
           const dz = node.tile.y - entity.position.y;
           if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
         }
+      } else if (entity instanceof Player && entity.action && 'tile' in entity.action) {
+        // Smelting or smithing: face the furnace or anvil.
+        const dx = entity.action.tile.x - entity.position.x;
+        const dz = entity.action.tile.y - entity.position.y;
+        if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
       }
 
       // Drain sim combat events into animation timers.
@@ -170,8 +175,8 @@ export class EntityView {
         avatar.swingT = SWING_TIME;
         entity.swingQueue.length = 0;
       }
-      // Working a node (or a tinderbox/fire): keep the swing cycling even
-      // between the sim's spaced-out harvest rolls.
+      // Working a node (or a tinderbox/fire/anvil): keep the swing cycling
+      // even between the sim's spaced-out rolls.
       if (
         entity instanceof Player &&
         (entity.gatherTarget !== null || entity.action !== null) &&
@@ -340,62 +345,88 @@ export class EntityView {
   }
 
   private createAvatar(entity: Entity): Avatar {
+    return this.finish(this.rigFor(entity));
+  }
+
+  /** Pick a rig for an entity: the monster models, or a dressed-up human. */
+  private rigFor(entity: Entity): Rig {
     if (entity instanceof Npc) {
       switch (entity.kind) {
         case 'goblin':
-          return buildGoblinAvatar();
+          return buildGoblin();
         case 'rat':
-          return buildRatAvatar();
+          return buildRat();
         case 'guard':
           // Castle guards: the human rig in chainmail and crimson, plus a helm.
-          return buildHumanAvatar(
+          return buildHuman(
             { skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a, hair: 0x3a2a1a },
             (g) => addHelm(g, 0xb4b8bf),
           );
         case 'captain':
           // Same kit, redder, with an officer's plume.
-          return buildHumanAvatar(
+          return buildHuman(
             { skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x8b2b1f, boots: 0x2a2a2a, hair: 0x3a2a1a },
             (g) => {
               addHelm(g, 0xc9ccd2);
-              g.add(place(box(0.06, 0.22, 0.16), flat(0xc0332a), 0, 1.78, -0.04));
+              g.add(put(wedge(0.05, 0.22, 0.16, 0.6, 0.9), 0xc0332a, 0, 1.82, -0.04));
             },
           );
         case 'cook':
-          return buildHumanAvatar(
+          return buildHuman(
             { skin: 0xe0ac79, tunic: 0xf0ede4, trouser: 0x4a4a4a, boots: 0x2a2a2a, hair: 0x3a2a1a },
             (g) => {
-              g.add(place(box(0.3, 0.26, 0.3), flat(0xffffff), 0, 1.74, 0)); // chef's hat
-              g.add(place(box(0.34, 0.06, 0.34), flat(0xffffff), 0, 1.62, 0));
+              g.add(put(lathe([[0.16, 0], [0.18, 0.14], [0.2, 0.24], [0, 0.28]], 8), 0xffffff, 0, 1.66, 0)); // toque
+              g.add(put(prism(0.185, 0.185, 0.05, 8), 0xffffff, 0, 1.66, 0));
             },
           );
         case 'woodsman':
-          return buildHumanAvatar(
+          return buildHuman(
             { skin: 0xd9a06c, tunic: 0x6b8f3a, trouser: 0x5a4632, boots: 0x3b2a1c, hair: 0x8b5a2b },
             (g, armL) => {
               // A big beard and a felling axe in hand.
-              g.add(place(box(0.24, 0.16, 0.08), flat(0x8b5a2b), 0, 1.3, 0.14));
+              g.add(put(lathe([[0.12, 0], [0.13, 0.08], [0.06, 0.16], [0, 0.17]], 6, 0.6), 0x8b5a2b, 0, 1.26, 0.12));
               armL.add(buildWeapon({ id: 'steel_axe', qty: 1 }));
             },
           );
         case 'fisherman':
-          return buildHumanAvatar(
+          return buildHuman(
             { skin: 0xd9a06c, tunic: 0x4f6f8f, trouser: 0x6b6b6b, boots: 0x3b2a1c, hair: 0xd0d0d0 },
             (g) => {
-              const straw = flat(0xc9b26a);
-              g.add(place(box(0.5, 0.05, 0.5), straw, 0, 1.6, 0)); // wide-brimmed hat
-              g.add(place(box(0.28, 0.16, 0.28), straw, 0, 1.7, 0));
-              g.add(place(box(0.2, 0.14, 0.06), flat(0xd0d0d0), 0, 1.3, 0.14)); // grey beard
+              const straw = 0xc9b26a;
+              g.add(put(lathe([[0.26, 0], [0.27, 0.03], [0.15, 0.04], [0.14, 0.18], [0, 0.2]], 8), straw, 0, 1.62, 0)); // wide-brimmed hat
+              g.add(put(lathe([[0.1, 0], [0.11, 0.08], [0.05, 0.15], [0, 0.16]], 6, 0.6), 0xd0d0d0, 0, 1.27, 0.12)); // grey beard
             },
           );
         case 'shopkeeper':
-          return buildHumanAvatar(
+          return buildHuman(
             { skin: 0xe0ac79, tunic: 0x7a4f8a, trouser: 0x3a3a4a, boots: 0x2a2a2a, hair: 0x2a1a0a },
-            (g) => g.add(place(box(0.34, 0.44, 0.04), flat(0xd8cfa8), 0, 0.86, 0.15)), // apron
+            (g) => g.add(put(wedge(0.3, 0.44, 0.03, 1.1, 1), 0xd8cfa8, 0, 0.86, 0.15)), // apron
           );
       }
     }
-    return buildHumanAvatar({ skin: 0xe0ac79, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, hair: 0x4a2f16 });
+    return buildHuman({ skin: 0xe0ac79, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, hair: 0x4a2f16 });
+  }
+
+  /** Attach the health bar and animation state to a freshly built rig. */
+  private finish(rig: Rig): Avatar {
+    rig.group.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.castShadow = true;
+    });
+    const hp = attachHealthBar(rig.group, rig.barHeight);
+    return {
+      ...rig,
+      gait: 0,
+      swingT: 0,
+      flinchT: 0,
+      deathT: -1,
+      wasAlive: true,
+      gear: [],
+      gearSig: '',
+      hpBar: hp.sprite,
+      hpCanvas: hp.canvas,
+      hpTex: hp.tex,
+      lastHpFrac: -1,
+    };
   }
 
   /** Tear down the worn gear and rebuild it from the current equipment. */
@@ -442,100 +473,11 @@ export class EntityView {
   private createCape(): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cape } {
     const cape = makeCape();
     const cloth = new THREE.Mesh(cape.geo, makeCapeMaterial());
-    cloth.position.set(0, 1.19, -0.15); // off the back of the shoulders
+    cloth.position.set(0, 1.23, -0.16); // off the back of the shoulders
     cloth.rotation.x = 0.18;
-    const clasp = place(box(0.08, 0.08, 0.06), flat(0xe8c66a), 0, 1.22, -0.05);
+    const clasp = put(shade(new THREE.OctahedronGeometry(0.05, 0)), 0xe8c66a, 0, 1.26, -0.04);
     return { cloth, clasp, cape };
   }
-}
-
-/** The colour set a human avatar is dressed in. */
-interface HumanPalette {
-  skin: number;
-  tunic: number;
-  trouser: number;
-  boots: number;
-  hair: number;
-}
-
-/**
- * The standard human rig, RuneScape-proportioned: a broad boxy torso, a big
- * square head, short legs, all hard edges. Limbs hang from pivots at the
- * shoulders and hips so `rotation.x` swings them.
- */
-/** A steel helm with a nose guard, sized for the human rig's head. */
-function addHelm(g: THREE.Group, color: number): void {
-  const steel = flat(color);
-  g.add(place(taperedBox(0.36, 0.22, 0.36, 0.8), steel, 0, 1.58, 0));
-  g.add(place(box(0.36, 0.1, 0.36), steel, 0, 1.45, 0));
-  g.add(place(box(0.06, 0.16, 0.03), steel, 0, 1.4, 0.18));
-}
-
-function buildHumanAvatar(
-  p: HumanPalette,
-  extras?: (g: THREE.Group, armL: THREE.Group, armR: THREE.Group) => void,
-): Avatar {
-  const group = new THREE.Group();
-  // Yaw first, then lean: flinch/death tilts happen relative to facing.
-  group.rotation.order = 'YXZ';
-
-  const skin = flat(p.skin);
-  const tunic = flat(p.tunic);
-  const trouser = flat(p.trouser);
-  const boots = flat(p.boots);
-  const hair = flat(p.hair);
-  const eye = flat(0x1c1a12);
-
-  group.add(place(taperedBox(0.44, 0.52, 0.26, 1.1), tunic, 0, 0.95, 0)); // torso
-  group.add(place(box(0.46, 0.06, 0.28), boots, 0, 0.71, 0)); // belt
-  group.add(place(box(0.12, 0.1, 0.12), skin, 0, 1.24, 0)); // neck
-  group.add(place(taperedBox(0.3, 0.32, 0.3, 0.9), skin, 0, 1.44, 0)); // head
-  group.add(place(box(0.32, 0.12, 0.32), hair, 0, 1.6, -0.01)); // hair, top
-  group.add(place(box(0.32, 0.18, 0.08), hair, 0, 1.47, -0.15)); // hair, back
-  for (const sx of [-0.07, 0.07]) group.add(place(box(0.04, 0.05, 0.02), eye, sx, 1.46, 0.15));
-
-  const legL = limb(0.16, 0.58, 0.18, trouser, boots, true);
-  legL.position.set(-0.11, 0.68, 0);
-  group.add(legL);
-  const legR = limb(0.16, 0.58, 0.18, trouser, boots, true);
-  legR.position.set(0.11, 0.68, 0);
-  group.add(legR);
-
-  const armL = limb(0.14, 0.48, 0.15, tunic, skin, false);
-  armL.position.set(-0.3, 1.18, 0);
-  group.add(armL);
-  const armR = limb(0.14, 0.48, 0.15, tunic, skin, false);
-  armR.position.set(0.3, 1.18, 0);
-  group.add(armR);
-
-  extras?.(group, armL, armR);
-
-  group.traverse((o) => {
-    if (o instanceof THREE.Mesh) o.castShadow = true;
-  });
-
-  const barHeight = 1.95;
-  const hp = attachHealthBar(group, barHeight);
-  return {
-    group,
-    legL,
-    legR,
-    armL,
-    armR,
-    weaponArm: armL, // the sword hand — see rebuildGear
-    gait: 0,
-    swingT: 0,
-    flinchT: 0,
-    deathT: -1,
-    wasAlive: true,
-    gear: [],
-    gearSig: '',
-    hpBar: hp.sprite,
-    hpCanvas: hp.canvas,
-    hpTex: hp.tex,
-    lastHpFrac: -1,
-    barHeight,
-  };
 }
 
 /** Stable string of equipped item ids, so EntityView can spot a change cheaply. */
@@ -626,139 +568,6 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-/** A small, hunched green goblin with big ears, clutching a crude club. */
-function buildGoblinAvatar(): Avatar {
-  const group = new THREE.Group();
-  group.rotation.order = 'YXZ';
-  const skin = flat(0x7d9c3c);
-  const cloth = flat(0x6b4a2f);
-  const eye = flat(0x1c1a12);
-
-  group.add(place(taperedBox(0.34, 0.36, 0.24, 1.12), skin, 0, 0.62, 0)); // body
-  group.add(place(box(0.36, 0.14, 0.27), cloth, 0, 0.42, 0)); // loincloth
-  group.add(place(taperedBox(0.34, 0.3, 0.3, 0.85), skin, 0, 1.0, 0)); // head
-  for (const sx of [-0.2, 0.2]) {
-    const ear = place(taperedBox(0.05, 0.22, 0.09, 0.15), skin, sx, 1.08, 0);
-    ear.rotation.z = sx < 0 ? 0.8 : -0.8;
-    group.add(ear);
-  }
-  group.add(place(box(0.06, 0.06, 0.12), skin, 0, 0.96, 0.19)); // nose
-  for (const sx of [-0.07, 0.07]) group.add(place(box(0.04, 0.04, 0.02), eye, sx, 1.03, 0.15));
-
-  const legL = limb(0.12, 0.34, 0.14, skin, cloth, true);
-  legL.position.set(-0.09, 0.42, 0);
-  group.add(legL);
-  const legR = limb(0.12, 0.34, 0.14, skin, cloth, true);
-  legR.position.set(0.09, 0.42, 0);
-  group.add(legR);
-  const armL = limb(0.11, 0.38, 0.12, skin, skin, false);
-  armL.position.set(-0.23, 0.78, 0);
-  group.add(armL);
-  const armR = limb(0.11, 0.38, 0.12, skin, skin, false);
-  armR.position.set(0.23, 0.78, 0);
-  group.add(armR);
-
-  // A crude club in the right hand.
-  const club = new THREE.Group();
-  club.add(place(box(0.05, 0.36, 0.05), cloth, 0, 0.16, 0));
-  club.add(place(taperedBox(0.13, 0.16, 0.13, 0.7), flat(0x7a5230), 0, 0.38, 0));
-  club.position.set(0, -0.36, 0.04);
-  club.rotation.x = 0.5;
-  armR.add(club);
-
-  group.traverse((o) => {
-    if (o instanceof THREE.Mesh) o.castShadow = true;
-  });
-
-  const barHeight = 1.45;
-  const hp = attachHealthBar(group, barHeight);
-  return {
-    group,
-    legL,
-    legR,
-    armL,
-    armR,
-    weaponArm: armR, // the goblin's club hand
-    gait: 0,
-    swingT: 0,
-    flinchT: 0,
-    deathT: -1,
-    wasAlive: true,
-    gear: [],
-    gearSig: '',
-    hpBar: hp.sprite,
-    hpCanvas: hp.canvas,
-    hpTex: hp.tex,
-    lastHpFrac: -1,
-    barHeight,
-  };
-}
-
-/** A scruffy giant rat: long low body, wedge snout, bald tail, four stubby legs. */
-function buildRatAvatar(): Avatar {
-  const group = new THREE.Group();
-  group.rotation.order = 'YXZ';
-  const fur = flat(0x6f5c48);
-  const dark = flat(0x4a3d30);
-  const pink = flat(0xc98b8b);
-  const eye = flat(0x1c1a12);
-
-  group.add(place(box(0.3, 0.26, 0.6), fur, 0, 0.22, -0.05)); // body
-  group.add(place(box(0.22, 0.2, 0.26), fur, 0, 0.27, 0.36)); // head
-  group.add(place(box(0.09, 0.07, 0.16), pink, 0, 0.24, 0.55)); // snout
-  for (const sx of [-0.09, 0.09]) {
-    group.add(place(box(0.08, 0.09, 0.03), pink, sx, 0.4, 0.3)); // ears
-    group.add(place(box(0.03, 0.03, 0.02), eye, sx * 0.9, 0.31, 0.49)); // eyes
-  }
-  // Tail: three short segments trailing behind and drooping.
-  [
-    [-0.45, 0.16],
-    [-0.65, 0.13],
-    [-0.85, 0.1],
-  ].forEach(([z, y]) => group.add(place(box(0.04, 0.04, 0.22), pink, 0, y, z)));
-
-  // Four stubby legs; the front pair doubles as the "arms" for the walk cycle.
-  const legL = limb(0.08, 0.14, 0.1, fur, dark, false);
-  legL.position.set(-0.12, 0.14, -0.18);
-  group.add(legL);
-  const legR = limb(0.08, 0.14, 0.1, fur, dark, false);
-  legR.position.set(0.12, 0.14, -0.18);
-  group.add(legR);
-  const armL = limb(0.08, 0.14, 0.1, fur, dark, false);
-  armL.position.set(-0.12, 0.14, 0.18);
-  group.add(armL);
-  const armR = limb(0.08, 0.14, 0.1, fur, dark, false);
-  armR.position.set(0.12, 0.14, 0.18);
-  group.add(armR);
-
-  group.traverse((o) => {
-    if (o instanceof THREE.Mesh) o.castShadow = true;
-  });
-
-  const barHeight = 0.85;
-  const hp = attachHealthBar(group, barHeight);
-  return {
-    group,
-    legL,
-    legR,
-    armL,
-    armR,
-    weaponArm: armR, // a front paw — swings on its bite
-    gait: 0,
-    swingT: 0,
-    flinchT: 0,
-    deathT: -1,
-    wasAlive: true,
-    gear: [],
-    gearSig: '',
-    hpBar: hp.sprite,
-    hpCanvas: hp.canvas,
-    hpTex: hp.tex,
-    lastHpFrac: -1,
-    barHeight,
-  };
-}
-
 /** Create the floating health-bar sprite and parent it above the avatar. */
 function attachHealthBar(
   group: THREE.Group,
@@ -835,29 +644,5 @@ function makeCapeMaterial(): THREE.MeshLambertMaterial {
   return new THREE.MeshLambertMaterial({
     vertexColors: true,
     side: THREE.DoubleSide,
-    flatShading: true,
   });
-}
-
-/**
- * A limb is a pivot group at the joint with a box hanging below it, so the
- * caller can swing the whole thing with `rotation.x`. The tip is a hand or a
- * foot in a contrasting material; feet are longer and poke forward.
- */
-function limb(
-  w: number,
-  length: number,
-  d: number,
-  main: THREE.Material,
-  cap: THREE.Material,
-  foot: boolean,
-): THREE.Group {
-  const pivot = new THREE.Group();
-  pivot.add(place(box(w, length, d), main, 0, -length / 2, 0));
-  if (foot) {
-    pivot.add(place(box(w + 0.02, 0.1, d + 0.1), cap, 0, -length - 0.05, 0.05));
-  } else {
-    pivot.add(place(box(w * 0.95, 0.13, w * 0.95), cap, 0, -length - 0.06, 0));
-  }
-  return pivot;
 }

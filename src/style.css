@@ -1540,3 +1540,20 @@ button {
   color: var(--yellow);
   text-shadow: var(--shadow);
 }
+
+/* Keep the paper doll plus its stats sheet inside the panel. */
+.equip-grid {
+  grid-template-rows: repeat(5, 34px);
+  gap: 3px;
+}
+
+.equip-grid .slot {
+  height: 34px;
+}
+
+.equip-stats {
+  margin-top: 4px;
+  padding-top: 4px;
+  font-size: 10px;
+  line-height: 1.3;
+}

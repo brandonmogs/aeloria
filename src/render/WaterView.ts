@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { MoatLayout, WorldRect } from '../world/startingWorld';
 import { WATER_LEVEL } from './Terrain';
-import { box, flat, shadowed } from './lowpoly';
+import { buildBridge, makeCastleMaterials } from './castle';
 
 /**
  * The castle moat, the OSRS way: a flat blue sheet with a scrolling two-tone
@@ -29,7 +29,8 @@ export class WaterView {
     water.renderOrder = 1;
     scene.add(water);
 
-    scene.add(buildBridge(moat.bridge));
+    const b = moat.bridge;
+    scene.add(buildBridge(makeCastleMaterials(), b.x0, b.x1, b.z0, b.z1));
   }
 
   update(dt: number): void {
@@ -112,34 +113,3 @@ function rectPath(r: WorldRect): THREE.Shape {
   return s;
 }
 
-/** A plank deck with rails and corner posts spanning the bridge gap. */
-function buildBridge(b: WorldRect): THREE.Group {
-  const g = new THREE.Group();
-  const plank = flat(0x7a5632);
-  const beam = flat(0x4d341f);
-  const cx = (b.x0 + b.x1) / 2;
-  const cz = (b.z0 + b.z1) / 2;
-  const w = b.x1 - b.x0;
-  const d = b.z1 - b.z0 + 0.6; // overhang onto the banks
-
-  const deck = new THREE.Mesh(box(w, 0.14, d), plank);
-  deck.position.set(cx, -0.03, cz);
-  g.add(deck);
-  // Plank seams: thin darker strips across the deck.
-  for (let z = cz - d / 2 + 0.5; z < cz + d / 2; z += 0.5) {
-    const seam = new THREE.Mesh(box(w, 0.15, 0.04), beam);
-    seam.position.set(cx, -0.03, z);
-    g.add(seam);
-  }
-  for (const sx of [b.x0 + 0.08, b.x1 - 0.08]) {
-    const rail = new THREE.Mesh(box(0.08, 0.1, d), beam);
-    rail.position.set(sx, 0.5, cz);
-    g.add(rail);
-    for (let z = cz - d / 2 + 0.12; z <= cz + d / 2; z += (d - 0.24) / 3) {
-      const post = new THREE.Mesh(box(0.12, 0.62, 0.12), beam);
-      post.position.set(sx, 0.25, z);
-      g.add(post);
-    }
-  }
-  return shadowed(g, true);
-}
