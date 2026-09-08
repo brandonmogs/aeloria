@@ -19,6 +19,7 @@ import {
 import { GameLoop } from './engine/GameLoop';
 import { TICKS_PER_SECOND } from './engine/constants';
 import { Renderer } from './render/Renderer';
+import { Terrain } from './render/Terrain';
 import { TileGridView } from './render/TileGridView';
 import { SceneryView } from './render/SceneryView';
 import { WaterView } from './render/WaterView';
@@ -41,7 +42,6 @@ import { ContextMenu, MenuOption } from './ui/ContextMenu';
 import { Sfx } from './audio/Sfx';
 import { Music } from './audio/Music';
 import { SKILL_META } from './ui/skillMeta';
-import { tileToWorld } from './render/coords3d';
 import { buildStartingWorld } from './world/startingWorld';
 import { hasWebGL, showFatal, installErrorHandlers } from './diagnostics';
 
@@ -81,7 +81,7 @@ function start(): void {
 function runGame(): void {
   // --- Simulation ----------------------------------------------------------
   const map = new TileMap(MAP_W, MAP_H);
-  const { props, spawn, moat, fishingSpotGroups } = buildStartingWorld(map);
+  const { props, spawn, moat, fishingSpotGroups, terrain: terrainSpec } = buildStartingWorld(map);
 
   const world = new World(map);
   const player = world.spawnPlayer(spawn, 'You');
@@ -110,12 +110,15 @@ function runGame(): void {
   // --- Rendering -----------------------------------------------------------
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const renderer = new Renderer(canvas);
-  const tileView = new TileGridView(renderer.scene, map);
-  const scenery = new SceneryView(renderer.scene, props);
-  const water = new WaterView(renderer.scene, moat, renderer.sunDirection);
-  const entityView = new EntityView(renderer.scene, world);
-  const groundView = new GroundItemView(renderer.scene, world);
-  const fireView = new FireView(renderer.scene, world);
+  const terrain = new Terrain(map, props, terrainSpec);
+  renderer.scene.add(terrain.mesh);
+  renderer.frameShadows(MAP_W / 2, MAP_H / 2, 36);
+  const tileView = new TileGridView(renderer.scene, terrain);
+  const scenery = new SceneryView(renderer.scene, props, terrain);
+  const water = new WaterView(renderer.scene, moat);
+  const entityView = new EntityView(renderer.scene, world, terrain);
+  const groundView = new GroundItemView(renderer.scene, world, terrain);
+  const fireView = new FireView(renderer.scene, world, terrain);
   const spotView = new FishingSpotView(renderer.scene, world);
   const hud = new Hud();
   const compass = new Compass(renderer.camera);
@@ -186,7 +189,7 @@ function runGame(): void {
   log.add('Welcome to Aeloria.');
 
   // Start the camera already framing the player instead of flying in from origin.
-  renderer.camera.focus.copy(tileToWorld(player.position));
+  renderer.camera.focus.set(player.position.x, terrain.tileHeight(player.position), player.position.y);
 
   /** Right-click options for a backpack item, OSRS verb-first. */
   function itemMenuOptions(index: number, item: ItemStack): MenuOption[] {
@@ -260,6 +263,7 @@ function runGame(): void {
   const input = new InputController(
     canvas,
     renderer.camera,
+    terrain,
     (target) => {
       // Left click = the default action: attack NPC > take item > gather >
       // use object > walk. (The same priority order the context menu lists.)

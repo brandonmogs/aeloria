@@ -5,6 +5,8 @@ import { Player } from '../sim/Player';
 import { Npc } from '../sim/Npc';
 import { EquipSlot, EQUIP_SLOTS } from '../sim/Inventory';
 import { ItemStack } from '../sim/items';
+import { Terrain } from './Terrain';
+import { box, flat, place, taperedBox } from './lowpoly';
 import {
   buildHelmet,
   buildChest,
@@ -57,7 +59,7 @@ interface Avatar {
   overhead?: THREE.Sprite;
 }
 
-/** A drifting damage number spawned when an entity is hit. */
+/** A hitsplat spawned when an entity is hit. */
 interface Splat {
   sprite: THREE.Sprite;
   life: number;
@@ -71,15 +73,18 @@ const SWING_TIME = 0.38;
 const FLINCH_TIME = 0.28;
 /** Death fall duration in seconds. */
 const DEATH_TIME = 0.7;
+/** How long a hitsplat stays up — OSRS shows them for roughly a tick and a half. */
+const SPLAT_TIME = 1.0;
 
 /**
- * Renders entities as little humanoid adventurers and — crucially — makes their
- * tile-by-tile movement look smooth. The sim teleports an entity from one tile
- * to the next on each tick; here we interpolate between `previousPosition` and
- * `position` using the loop's `alpha`, so the figure glides across the grid at
- * 60fps while the underlying logic stays a clean 1-tile-per-tick. On top of that
- * we swing the arms and legs whenever the figure is actually moving. Avatars are
- * created and destroyed lazily as entities appear and despawn.
+ * Renders entities as blocky, flat-shaded RuneScape figures and — crucially —
+ * makes their tile-by-tile movement look smooth. The sim teleports an entity
+ * from one tile to the next on each tick; here we interpolate between
+ * `previousPosition` and `position` using the loop's `alpha`, so the figure
+ * glides across the grid while the underlying logic stays a clean
+ * 1-tile-per-tick, and we drop it onto the terrain's height at every frame.
+ * On top of that we swing the arms and legs whenever the figure is actually
+ * moving. Avatars are created and destroyed lazily as entities come and go.
  */
 export class EntityView {
   private readonly avatars = new Map<number, Avatar>();
@@ -91,6 +96,7 @@ export class EntityView {
   constructor(
     private readonly scene: THREE.Scene,
     private readonly world: World,
+    private readonly terrain: Terrain,
   ) {}
 
   sync(alpha: number, dt: number): void {
@@ -130,6 +136,7 @@ export class EntityView {
       this.prev.set(entity.previousPosition.x, 0, entity.previousPosition.y);
       this.curr.set(entity.position.x, 0, entity.position.y);
       avatar.group.position.lerpVectors(this.prev, this.curr, alpha);
+      const ground = this.terrain.heightAt(avatar.group.position.x, avatar.group.position.z);
 
       const moving = !this.prev.equals(this.curr);
       if (moving) {
@@ -167,7 +174,7 @@ export class EntityView {
       ) {
         avatar.swingT = SWING_TIME;
       }
-      this.animate(avatar, moving, dt);
+      this.animate(avatar, moving, dt, ground);
       this.updateHealthBar(avatar, entity);
       this.updateOverhead(avatar, entity);
       this.spawnSplats(avatar, entity);
@@ -210,15 +217,15 @@ export class EntityView {
     avatar.overhead.visible = true;
   }
 
-  /** Drain the sim's hit queue into floating damage numbers above the entity. */
+  /** Drain the sim's hit queue into hitsplats on the entity. */
   private spawnSplats(avatar: Avatar, entity: Entity): void {
     if (entity.splatQueue.length === 0) return;
     const p = avatar.group.position;
     for (const damage of entity.splatQueue) {
       const sprite = makeSplatSprite(damage);
-      sprite.position.set(p.x, avatar.barHeight + 0.28, p.z);
+      sprite.position.set(p.x, p.y + avatar.barHeight * 0.55, p.z);
       this.scene.add(sprite);
-      this.splats.push({ sprite, life: 0.9 });
+      this.splats.push({ sprite, life: SPLAT_TIME });
       if (damage > 0) avatar.flinchT = FLINCH_TIME; // recoil from a real hit
     }
     entity.splatQueue.length = 0;
@@ -228,14 +235,12 @@ export class EntityView {
     for (let i = this.splats.length - 1; i >= 0; i--) {
       const splat = this.splats[i];
       splat.life -= dt;
-      splat.sprite.position.y += dt * 0.7;
-      // Punchy entrance: overshoot the scale for the first instant, then settle.
-      const age = 0.9 - splat.life;
-      const pop = age < 0.1 ? 0.5 + (age / 0.1) * 0.72 : Math.max(1, 1.22 - (age - 0.1) * 1.4);
-      splat.sprite.scale.set(0.5 * pop, 0.5 * pop, 1);
-      (splat.sprite.material as THREE.SpriteMaterial).opacity = Math.max(0, Math.min(1, splat.life / 0.3));
+      const mat = splat.sprite.material as THREE.SpriteMaterial;
+      mat.opacity = Math.max(0, Math.min(1, splat.life / 0.2));
       if (splat.life <= 0) {
         this.scene.remove(splat.sprite);
+        mat.map?.dispose();
+        mat.dispose();
         this.splats.splice(i, 1);
       }
     }
@@ -247,7 +252,7 @@ export class EntityView {
   }
 
   /** Swing limbs and add a gentle bob while walking; ease back to rest at a stop. */
-  private animate(avatar: Avatar, moving: boolean, dt: number): void {
+  private animate(avatar: Avatar, moving: boolean, dt: number, ground: number): void {
     const target = moving ? 1 : 0;
     avatar.gait += (target - avatar.gait) * Math.min(1, dt * 10);
 
@@ -256,7 +261,7 @@ export class EntityView {
     avatar.legR.rotation.x = -swing;
     avatar.armL.rotation.x = -swing;
     avatar.armR.rotation.x = swing;
-    avatar.group.position.y = Math.abs(Math.sin(this.clock * 9)) * 0.04 * avatar.gait;
+    avatar.group.position.y = ground + Math.abs(Math.sin(this.clock * 9)) * 0.04 * avatar.gait;
 
     // Attack: raise the weapon arm overhead, then snap it down, with a small
     // lunge toward the facing direction at the moment of the strike.
@@ -322,11 +327,19 @@ export class EntityView {
       if (entity.kind === 'goblin') return buildGoblinAvatar();
       if (entity.kind === 'rat') return buildRatAvatar();
       if (entity.kind === 'guard') {
-        // Castle guards are the human rig in steel and crimson.
-        return buildHumanAvatar({ skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x5a2f2f, leather: 0x3a3f4a });
+        // Castle guards: the human rig in chainmail and crimson, plus a helm.
+        return buildHumanAvatar(
+          { skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a, hair: 0x3a2a1a },
+          (g) => {
+            const steel = flat(0xb4b8bf);
+            g.add(place(taperedBox(0.36, 0.22, 0.36, 0.8), steel, 0, 1.58, 0));
+            g.add(place(box(0.36, 0.1, 0.36), steel, 0, 1.45, 0));
+            g.add(place(box(0.06, 0.16, 0.03), steel, 0, 1.4, 0.18));
+          },
+        );
       }
     }
-    return buildHumanAvatar({ skin: 0xe0ac79, tunic: 0x3f6f4a, trouser: 0x4a4754, leather: 0x4a3525 });
+    return buildHumanAvatar({ skin: 0xe0ac79, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, hair: 0x4a2f16 });
   }
 
   /** Tear down the worn gear and rebuild it from the current equipment. */
@@ -373,13 +386,9 @@ export class EntityView {
   private createCape(): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cape } {
     const cape = makeCape();
     const cloth = new THREE.Mesh(cape.geo, makeCapeMaterial());
-    cloth.position.set(0, 1.17, -0.12); // off the back of the shoulders
+    cloth.position.set(0, 1.19, -0.15); // off the back of the shoulders
     cloth.rotation.x = 0.18;
-    const clasp = new THREE.Mesh(
-      new THREE.SphereGeometry(0.045, 12, 10),
-      new THREE.MeshStandardMaterial({ color: 0xe8c66a, metalness: 0.8, roughness: 0.3 }),
-    );
-    clasp.position.set(0, 1.21, -0.03);
+    const clasp = place(box(0.08, 0.08, 0.06), flat(0xe8c66a), 0, 1.22, -0.05);
     return { cloth, clasp, cape };
   }
 }
@@ -389,105 +398,77 @@ interface HumanPalette {
   skin: number;
   tunic: number;
   trouser: number;
-  leather: number;
+  boots: number;
+  hair: number;
 }
 
-/** The standard human rig: torso, head, four swinging limbs, health bar. */
-function buildHumanAvatar(palette: HumanPalette): Avatar {
+/**
+ * The standard human rig, RuneScape-proportioned: a broad boxy torso, a big
+ * square head, short legs, all hard edges. Limbs hang from pivots at the
+ * shoulders and hips so `rotation.x` swings them.
+ */
+function buildHumanAvatar(p: HumanPalette, extras?: (g: THREE.Group) => void): Avatar {
   const group = new THREE.Group();
   // Yaw first, then lean: flinch/death tilts happen relative to facing.
   group.rotation.order = 'YXZ';
 
-  const skin = mat(palette.skin, 0.65);
-  const tunic = mat(palette.tunic, 0.7);
-  const trouser = mat(palette.trouser, 0.8);
-  const leather = mat(palette.leather, 0.8);
+  const skin = flat(p.skin);
+  const tunic = flat(p.tunic);
+  const trouser = flat(p.trouser);
+  const boots = flat(p.boots);
+  const hair = flat(p.hair);
+  const eye = flat(0x1c1a12);
 
-  // Torso — a smoothly revolved profile (narrow waist, fuller chest), then
-    // flattened front-to-back. A curved surface like this is what stops it
-    // reading as a box the way flat-faced geometry does.
-    const torso = mesh(makeTorso(), tunic);
-    torso.position.y = 0.64;
-    group.add(torso);
+  group.add(place(taperedBox(0.44, 0.52, 0.26, 1.1), tunic, 0, 0.95, 0)); // torso
+  group.add(place(box(0.46, 0.06, 0.28), boots, 0, 0.71, 0)); // belt
+  group.add(place(box(0.12, 0.1, 0.12), skin, 0, 1.24, 0)); // neck
+  group.add(place(taperedBox(0.3, 0.32, 0.3, 0.9), skin, 0, 1.44, 0)); // head
+  group.add(place(box(0.32, 0.12, 0.32), hair, 0, 1.6, -0.01)); // hair, top
+  group.add(place(box(0.32, 0.18, 0.08), hair, 0, 1.47, -0.15)); // hair, back
+  for (const sx of [-0.07, 0.07]) group.add(place(box(0.04, 0.05, 0.02), eye, sx, 1.46, 0.15));
 
-    // Rounded shoulder caps blend the arms into the torso instead of butting
-    // flat tubes against flat sides.
-    for (const sx of [-0.21, 0.21]) {
-      const cap = mesh(new THREE.SphereGeometry(0.11, 16, 12), tunic);
-      cap.position.set(sx, 1.12, 0);
-      cap.scale.set(1, 0.85, 0.9);
-      group.add(cap);
-    }
+  const legL = limb(0.16, 0.58, 0.18, trouser, boots, true);
+  legL.position.set(-0.11, 0.68, 0);
+  group.add(legL);
+  const legR = limb(0.16, 0.58, 0.18, trouser, boots, true);
+  legR.position.set(0.11, 0.68, 0);
+  group.add(legR);
 
-    // Pelvis fills the gap between waist and legs.
-    const pelvis = mesh(new THREE.SphereGeometry(0.16, 18, 12), trouser);
-    pelvis.position.y = 0.62;
-    pelvis.scale.set(1.05, 0.7, 0.66);
-    group.add(pelvis);
+  const armL = limb(0.14, 0.48, 0.15, tunic, skin, false);
+  armL.position.set(-0.3, 1.18, 0);
+  group.add(armL);
+  const armR = limb(0.14, 0.48, 0.15, tunic, skin, false);
+  armR.position.set(0.3, 1.18, 0);
+  group.add(armR);
 
-    // Belt — a thin ring at the waist rather than a slab.
-    const belt = mesh(new THREE.TorusGeometry(0.15, 0.028, 10, 28), leather);
-    belt.rotation.x = Math.PI / 2;
-    belt.position.y = 0.72;
-    belt.scale.set(1, 0.64, 1);
-    group.add(belt);
+  extras?.(group);
 
-    // Neck + head + a rounded cap of hair.
-    const neck = mesh(new THREE.CylinderGeometry(0.07, 0.08, 0.1, 12), skin);
-    neck.position.y = 1.2;
-    group.add(neck);
-    const head = mesh(new THREE.SphereGeometry(0.16, 24, 18), skin);
-    head.position.y = 1.34;
-    head.scale.set(0.95, 1.05, 0.98);
-    group.add(head);
-    const hair = mesh(
-      new THREE.SphereGeometry(0.172, 24, 16, 0, Math.PI * 2, 0, Math.PI * 0.58),
-      leather,
-    );
-    hair.position.y = 1.36;
-    group.add(hair);
+  group.traverse((o) => {
+    if (o instanceof THREE.Mesh) o.castShadow = true;
+  });
 
-    // Limbs hang from a pivot at the shoulder/hip so rotation.x swings them.
-    const legL = limb(0.09, 0.42, trouser, leather);
-    legL.position.set(-0.11, 0.62, 0);
-    group.add(legL);
-    const legR = limb(0.09, 0.42, trouser, leather);
-    legR.position.set(0.11, 0.62, 0);
-    group.add(legR);
-
-    const armL = limb(0.07, 0.4, tunic, skin);
-    armL.position.set(-0.27, 1.12, 0);
-    group.add(armL);
-    const armR = limb(0.07, 0.4, tunic, skin);
-    armR.position.set(0.27, 1.12, 0);
-    group.add(armR);
-
-    group.traverse((o) => {
-      if (o instanceof THREE.Mesh) o.castShadow = true;
-    });
-
-    const barHeight = 1.95;
-    const hp = attachHealthBar(group, barHeight);
-    return {
-      group,
-      legL,
-      legR,
-      armL,
-      armR,
-      weaponArm: armL, // the sword hand — see rebuildGear
-      gait: 0,
-      swingT: 0,
-      flinchT: 0,
-      deathT: -1,
-      wasAlive: true,
-      gear: [],
-      gearSig: '',
-      hpBar: hp.sprite,
-      hpCanvas: hp.canvas,
-      hpTex: hp.tex,
-      lastHpFrac: -1,
-      barHeight,
-    };
+  const barHeight = 1.95;
+  const hp = attachHealthBar(group, barHeight);
+  return {
+    group,
+    legL,
+    legR,
+    armL,
+    armR,
+    weaponArm: armL, // the sword hand — see rebuildGear
+    gait: 0,
+    swingT: 0,
+    flinchT: 0,
+    deathT: -1,
+    wasAlive: true,
+    gear: [],
+    gearSig: '',
+    hpBar: hp.sprite,
+    hpCanvas: hp.canvas,
+    hpTex: hp.tex,
+    lastHpFrac: -1,
+    barHeight,
+  };
 }
 
 /** Stable string of equipped item ids, so EntityView can spot a change cheaply. */
@@ -532,7 +513,7 @@ const CAPE_TOP_WIDTH = 0.34;
  * and recorded `base` positions so {@link EntityView.billowCape} can ripple it.
  */
 function makeCape(): Cape {
-  const geo = new THREE.PlaneGeometry(CAPE_TOP_WIDTH, CAPE_HEIGHT, 10, 18);
+  const geo = new THREE.PlaneGeometry(CAPE_TOP_WIDTH, CAPE_HEIGHT, 4, 8);
   geo.translate(0, -CAPE_HEIGHT / 2, 0); // pivot at the top edge
 
   const pos = geo.attributes.position as THREE.BufferAttribute;
@@ -557,8 +538,8 @@ function makeCape(): Cape {
     // Rainbow trim hugging the two side edges and the bottom hem.
     const side = Math.abs(u - 0.5) * 2; // 0 centre → 1 edge
     const edge = Math.max(
-      f > 0.9 ? (f - 0.9) / 0.1 : 0,
-      side > 0.82 ? (side - 0.82) / 0.18 : 0,
+      f > 0.85 ? (f - 0.85) / 0.15 : 0,
+      side > 0.75 ? (side - 0.75) / 0.25 : 0,
     );
     if (edge > 0) {
       trim.setHSL((u * 0.55 + f * 0.45) % 1, 0.85, 0.56);
@@ -578,73 +559,49 @@ function clamp01(v: number): number {
   return v < 0 ? 0 : v > 1 ? 1 : v;
 }
 
-/** A small, hunched green goblin clutching a crude club. */
+/** A small, hunched green goblin with big ears, clutching a crude club. */
 function buildGoblinAvatar(): Avatar {
   const group = new THREE.Group();
-  // Yaw first, then lean: flinch/death tilts happen relative to facing.
   group.rotation.order = 'YXZ';
-  const skin = mat(0x6f8f3d, 0.85);
-  const cloth = mat(0x6b4a2f, 0.9);
-  const eye = mat(0x1c1a12, 0.5);
+  const skin = flat(0x7d9c3c);
+  const cloth = flat(0x6b4a2f);
+  const eye = flat(0x1c1a12);
 
-  const torso = mesh(new THREE.SphereGeometry(0.2, 16, 12), skin);
-  torso.position.y = 0.62;
-  torso.scale.set(1, 1.15, 0.85);
-  group.add(torso);
-
-  const loin = mesh(new THREE.SphereGeometry(0.17, 12, 10), cloth);
-  loin.position.y = 0.46;
-  loin.scale.set(1.1, 0.6, 0.85);
-  group.add(loin);
-
-  const head = mesh(new THREE.SphereGeometry(0.17, 16, 14), skin);
-  head.position.set(0, 0.92, 0.02);
-  group.add(head);
-  for (const sx of [-0.16, 0.16]) {
-    const ear = mesh(new THREE.ConeGeometry(0.05, 0.17, 6), skin);
-    ear.position.set(sx, 0.97, 0);
-    ear.rotation.z = sx < 0 ? 1.0 : -1.0;
+  group.add(place(taperedBox(0.34, 0.36, 0.24, 1.12), skin, 0, 0.62, 0)); // body
+  group.add(place(box(0.36, 0.14, 0.27), cloth, 0, 0.42, 0)); // loincloth
+  group.add(place(taperedBox(0.34, 0.3, 0.3, 0.85), skin, 0, 1.0, 0)); // head
+  for (const sx of [-0.2, 0.2]) {
+    const ear = place(taperedBox(0.05, 0.22, 0.09, 0.15), skin, sx, 1.08, 0);
+    ear.rotation.z = sx < 0 ? 0.8 : -0.8;
     group.add(ear);
   }
-  const nose = mesh(new THREE.ConeGeometry(0.045, 0.13, 6), skin);
-  nose.rotation.x = Math.PI / 2;
-  nose.position.set(0, 0.89, 0.18);
-  group.add(nose);
-  for (const sx of [-0.06, 0.06]) {
-    const e = mesh(new THREE.SphereGeometry(0.026, 8, 6), eye);
-    e.position.set(sx, 0.96, 0.15);
-    group.add(e);
-  }
+  group.add(place(box(0.06, 0.06, 0.12), skin, 0, 0.96, 0.19)); // nose
+  for (const sx of [-0.07, 0.07]) group.add(place(box(0.04, 0.04, 0.02), eye, sx, 1.03, 0.15));
 
-  const legL = limb(0.07, 0.26, skin, cloth);
+  const legL = limb(0.12, 0.34, 0.14, skin, cloth, true);
   legL.position.set(-0.09, 0.42, 0);
   group.add(legL);
-  const legR = limb(0.07, 0.26, skin, cloth);
+  const legR = limb(0.12, 0.34, 0.14, skin, cloth, true);
   legR.position.set(0.09, 0.42, 0);
   group.add(legR);
-  const armL = limb(0.06, 0.3, skin, skin);
-  armL.position.set(-0.2, 0.78, 0);
+  const armL = limb(0.11, 0.38, 0.12, skin, skin, false);
+  armL.position.set(-0.23, 0.78, 0);
   group.add(armL);
-  const armR = limb(0.06, 0.3, skin, skin);
-  armR.position.set(0.2, 0.78, 0);
+  const armR = limb(0.11, 0.38, 0.12, skin, skin, false);
+  armR.position.set(0.23, 0.78, 0);
   group.add(armR);
 
   // A crude club in the right hand.
   const club = new THREE.Group();
-  const handle = mesh(new THREE.CylinderGeometry(0.022, 0.028, 0.3, 6), cloth);
-  handle.position.y = 0.15;
-  club.add(handle);
-  const knob = mesh(new THREE.SphereGeometry(0.07, 8, 7), mat(0x7a5230, 0.9));
-  knob.position.y = 0.32;
-  club.add(knob);
-  club.position.set(0, -0.32, 0.03);
+  club.add(place(box(0.05, 0.36, 0.05), cloth, 0, 0.16, 0));
+  club.add(place(taperedBox(0.13, 0.16, 0.13, 0.7), flat(0x7a5230), 0, 0.38, 0));
+  club.position.set(0, -0.36, 0.04);
   club.rotation.x = 0.5;
   armR.add(club);
 
   group.traverse((o) => {
     if (o instanceof THREE.Mesh) o.castShadow = true;
   });
-  group.scale.setScalar(0.95);
 
   const barHeight = 1.45;
   const hp = attachHealthBar(group, barHeight);
@@ -670,52 +627,41 @@ function buildGoblinAvatar(): Avatar {
   };
 }
 
-/** A scruffy giant rat: low body, pointed snout, bald tail, four stubby legs. */
+/** A scruffy giant rat: long low body, wedge snout, bald tail, four stubby legs. */
 function buildRatAvatar(): Avatar {
   const group = new THREE.Group();
   group.rotation.order = 'YXZ';
-  const fur = mat(0x71604c, 0.9);
-  const dark = mat(0x4c4034, 0.9);
-  const pink = mat(0xc98b8b, 0.75);
+  const fur = flat(0x6f5c48);
+  const dark = flat(0x4a3d30);
+  const pink = flat(0xc98b8b);
+  const eye = flat(0x1c1a12);
 
-  const body = mesh(new THREE.SphereGeometry(0.24, 16, 12), fur);
-  body.position.set(0, 0.24, -0.05);
-  body.scale.set(0.85, 0.8, 1.35);
-  group.add(body);
-
-  const head = mesh(new THREE.SphereGeometry(0.14, 14, 10), fur);
-  head.position.set(0, 0.28, 0.28);
-  head.scale.set(0.9, 0.9, 1.15);
-  group.add(head);
-  const snout = mesh(new THREE.ConeGeometry(0.06, 0.16, 8), pink);
-  snout.rotation.x = Math.PI / 2;
-  snout.position.set(0, 0.26, 0.45);
-  group.add(snout);
-  for (const sx of [-0.08, 0.08]) {
-    const ear = mesh(new THREE.SphereGeometry(0.05, 8, 6), pink);
-    ear.position.set(sx, 0.4, 0.24);
-    ear.scale.set(1, 1.1, 0.5);
-    group.add(ear);
+  group.add(place(box(0.3, 0.26, 0.6), fur, 0, 0.22, -0.05)); // body
+  group.add(place(box(0.22, 0.2, 0.26), fur, 0, 0.27, 0.36)); // head
+  group.add(place(box(0.09, 0.07, 0.16), pink, 0, 0.24, 0.55)); // snout
+  for (const sx of [-0.09, 0.09]) {
+    group.add(place(box(0.08, 0.09, 0.03), pink, sx, 0.4, 0.3)); // ears
+    group.add(place(box(0.03, 0.03, 0.02), eye, sx * 0.9, 0.31, 0.49)); // eyes
   }
-
-  // Tail: a thin curved cylinder trailing behind.
-  const tail = mesh(new THREE.CylinderGeometry(0.012, 0.03, 0.5, 6), pink);
-  tail.rotation.x = Math.PI / 2 - 0.35;
-  tail.position.set(0, 0.18, -0.5);
-  group.add(tail);
+  // Tail: three short segments trailing behind and drooping.
+  [
+    [-0.45, 0.16],
+    [-0.65, 0.13],
+    [-0.85, 0.1],
+  ].forEach(([z, y]) => group.add(place(box(0.04, 0.04, 0.22), pink, 0, y, z)));
 
   // Four stubby legs; the front pair doubles as the "arms" for the walk cycle.
-  const legL = limb(0.045, 0.12, fur, dark);
-  legL.position.set(-0.12, 0.16, -0.18);
+  const legL = limb(0.08, 0.14, 0.1, fur, dark, false);
+  legL.position.set(-0.12, 0.14, -0.18);
   group.add(legL);
-  const legR = limb(0.045, 0.12, fur, dark);
-  legR.position.set(0.12, 0.16, -0.18);
+  const legR = limb(0.08, 0.14, 0.1, fur, dark, false);
+  legR.position.set(0.12, 0.14, -0.18);
   group.add(legR);
-  const armL = limb(0.045, 0.12, fur, dark);
-  armL.position.set(-0.12, 0.16, 0.16);
+  const armL = limb(0.08, 0.14, 0.1, fur, dark, false);
+  armL.position.set(-0.12, 0.14, 0.18);
   group.add(armL);
-  const armR = limb(0.045, 0.12, fur, dark);
-  armR.position.set(0.12, 0.16, 0.16);
+  const armR = limb(0.08, 0.14, 0.1, fur, dark, false);
+  armR.position.set(0.12, 0.14, 0.18);
   group.add(armR);
 
   group.traverse((o) => {
@@ -753,13 +699,14 @@ function attachHealthBar(
 ): { sprite: THREE.Sprite; canvas: HTMLCanvasElement; tex: THREE.CanvasTexture } {
   const canvas = document.createElement('canvas');
   canvas.width = 64;
-  canvas.height = 12;
+  canvas.height = 10;
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace; // canvas pixels are sRGB, not linear
+  tex.magFilter = THREE.NearestFilter;
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
   );
-  sprite.scale.set(0.95, 0.16, 1);
+  sprite.scale.set(0.8, 0.125, 1);
   sprite.position.set(0, barHeight, 0);
   sprite.renderOrder = 11;
   sprite.visible = false;
@@ -767,34 +714,44 @@ function attachHealthBar(
   return { sprite, canvas, tex };
 }
 
+/** The OSRS health bar: bright green over red, no frills. */
 function drawHealthBar(canvas: HTMLCanvasElement, frac: number): void {
   const ctx = canvas.getContext('2d')!;
   const w = canvas.width;
   const h = canvas.height;
   ctx.clearRect(0, 0, w, h);
-  ctx.fillStyle = '#1d0c0c';
+  ctx.fillStyle = '#ff0000';
   ctx.fillRect(0, 0, w, h);
-  ctx.fillStyle = frac > 0.5 ? '#46c83c' : frac > 0.25 ? '#d9b13a' : '#cc3b34';
-  ctx.fillRect(1, 1, Math.max(0, Math.round((w - 2) * frac)), h - 2);
-  ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-  ctx.lineWidth = 1;
-  ctx.strokeRect(0.5, 0.5, w - 1, h - 1);
+  ctx.fillStyle = '#00ff00';
+  ctx.fillRect(0, 0, Math.max(0, Math.round(w * frac)), h);
 }
 
-/** A RuneScape-style hitsplat: red for a hit, blue for a 0, with the number. */
+/**
+ * A RuneScape hitsplat: the red four-lobed splat with a white number for a
+ * hit, the blue one for a miss (a 0).
+ */
 function makeSplatSprite(damage: number): THREE.Sprite {
   const canvas = document.createElement('canvas');
   canvas.width = 48;
   canvas.height = 48;
   const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = damage > 0 ? '#9e2b25' : '#3a6ea5';
-  ctx.beginPath();
-  ctx.arc(24, 24, 18, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillStyle = damage > 0 ? '#b3261e' : '#2d5aa8';
+  const lobe = (x: number, y: number, r: number): void => {
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  lobe(24, 24, 15);
+  lobe(24, 9, 8);
+  lobe(24, 39, 8);
+  lobe(9, 24, 8);
+  lobe(39, 24, 8);
   ctx.fillStyle = '#ffffff';
-  ctx.font = '700 24px ui-monospace, Menlo, monospace';
+  ctx.font = '700 22px Verdana, Arial, sans-serif';
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0,0,0,0.8)';
+  ctx.shadowBlur = 2;
   ctx.fillText(String(damage), 24, 25);
 
   const tex = new THREE.CanvasTexture(canvas);
@@ -802,62 +759,38 @@ function makeSplatSprite(damage: number): THREE.Sprite {
   const sprite = new THREE.Sprite(
     new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
   );
-  sprite.scale.set(0.5, 0.5, 1);
+  sprite.scale.set(0.55, 0.55, 1);
   sprite.renderOrder = 12;
   return sprite;
 }
 
-function makeCapeMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({
+function makeCapeMaterial(): THREE.MeshLambertMaterial {
+  return new THREE.MeshLambertMaterial({
     vertexColors: true,
     side: THREE.DoubleSide,
-    roughness: 0.62,
-    metalness: 0.06,
-    envMapIntensity: 0.6,
+    flatShading: true,
   });
 }
 
-function mat(color: number, roughness: number): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ color, roughness, envMapIntensity: 0.5 });
-}
-
 /**
- * A torso built by revolving a side profile (radius at each height) around the
- * vertical axis, then squashing it front-to-back. The curved surface — wider at
- * the chest, pinched at the waist — is what reads as a body instead of a box.
+ * A limb is a pivot group at the joint with a box hanging below it, so the
+ * caller can swing the whole thing with `rotation.x`. The tip is a hand or a
+ * foot in a contrasting material; feet are longer and poke forward.
  */
-function makeTorso(): THREE.BufferGeometry {
-  const profile = [
-    [0.11, 0.0], // waist
-    [0.16, 0.12],
-    [0.2, 0.3], // chest
-    [0.19, 0.44],
-    [0.13, 0.54], // shoulders / neck base
-  ].map(([r, y]) => new THREE.Vector2(r, y));
-  const geo = new THREE.LatheGeometry(profile, 24);
-  geo.scale(1, 1, 0.62); // flatten depth so it isn't a barrel
-  return geo;
-}
-
-function mesh(geo: THREE.BufferGeometry, material: THREE.Material): THREE.Mesh {
-  return new THREE.Mesh(geo, material);
-}
-
-/**
- * A limb is a pivot group at the joint with the limb hanging below it, so the
- * caller can swing the whole thing with `rotation.x`. A capsule gives smooth,
- * rounded shoulders/knees; the rounded tip is a hand or boot in a contrasting
- * material.
- */
-function limb(radius: number, length: number, main: THREE.Material, cap: THREE.Material): THREE.Group {
+function limb(
+  w: number,
+  length: number,
+  d: number,
+  main: THREE.Material,
+  cap: THREE.Material,
+  foot: boolean,
+): THREE.Group {
   const pivot = new THREE.Group();
-  const total = length + radius * 2;
-  const seg = mesh(new THREE.CapsuleGeometry(radius, length, 6, 14), main);
-  seg.position.y = -total / 2;
-  pivot.add(seg);
-  const tip = mesh(new THREE.SphereGeometry(radius * 1.15, 14, 10), cap);
-  tip.position.y = -total + radius * 0.3;
-  tip.scale.set(1.1, 0.85, 1.25); // flatten into a foot/hand
-  pivot.add(tip);
+  pivot.add(place(box(w, length, d), main, 0, -length / 2, 0));
+  if (foot) {
+    pivot.add(place(box(w + 0.02, 0.1, d + 0.1), cap, 0, -length - 0.05, 0.05));
+  } else {
+    pivot.add(place(box(w * 0.95, 0.13, w * 0.95), cap, 0, -length - 0.06, 0));
+  }
   return pivot;
 }

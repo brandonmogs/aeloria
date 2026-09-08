@@ -12,13 +12,14 @@ export class OrbitCamera {
   readonly focus = new THREE.Vector3();
 
   private yaw = Math.PI * 0.25;
-  private pitch = 0.95;
-  private distance = 15;
+  private pitch = 0.82;
+  private distance = 13;
 
-  private readonly minPitch = 0.45;
+  // OSRS lets the camera dip to about 25° and rise to nearly overhead.
+  private readonly minPitch = 0.42;
   private readonly maxPitch = 1.35;
   private readonly minDistance = 6;
-  private readonly maxDistance = 30;
+  private readonly maxDistance = 26;
 
   private dragging = false;
   private lastX = 0;

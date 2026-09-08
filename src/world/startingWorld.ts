@@ -20,11 +20,35 @@ export interface WorldRect {
   z1: number;
 }
 
+/** Inclusive tile bounds. */
+export interface TileRect {
+  x0: number;
+  y0: number;
+  x1: number;
+  y1: number;
+}
+
 /** The moat ring (outer minus inner) and the bridge gap across its south side. */
 export interface MoatLayout {
   outer: WorldRect;
   inner: WorldRect;
   bridge: WorldRect;
+}
+
+/**
+ * What the ground renderer needs to know about the map's shape: where to stay
+ * level, where to pave, where the roads run, and which walkable tiles span
+ * water. Height is presentation only; the sim never sees it.
+ */
+export interface TerrainSpec {
+  /** Tile rects held perfectly flat at height 0 (the castle and its moat). */
+  readonly flatZones: ReadonlyArray<TileRect>;
+  /** Tile rects paved in stone rather than grass (the castle courtyard). */
+  readonly stoneZones: ReadonlyArray<TileRect>;
+  /** Dirt roads as polylines through tile centres. */
+  readonly paths: ReadonlyArray<ReadonlyArray<Tile>>;
+  /** Walkable tiles that span water (the moat bridge): held at height 0. */
+  readonly bridgeTiles: ReadonlyArray<Tile>;
 }
 
 export interface StartingWorld {
@@ -38,6 +62,7 @@ export interface StartingWorld {
    * between. Spots sit on the outermost water row so the bank below is in reach.
    */
   readonly fishingSpotGroups: Tile[][];
+  readonly terrain: TerrainSpec;
 }
 
 // Castle footprint (inclusive tile bounds). Odd width so it has a true centre
@@ -51,6 +76,22 @@ const SPAWN: Tile = { x: 24, y: 28 };
 const MOAT_OUTER = { x0: 15, y0: 32, x1: 33, y1: 48 };
 const MOAT_INNER = { x0: 18, y0: 35, x1: 30, y1: 45 };
 const BRIDGE = { x0: 23, y0: 32, x1: 25, y1: 34 };
+
+/** Dirt roads: the main approach up to the bridge, and spurs to the camps. */
+const PATHS: ReadonlyArray<ReadonlyArray<Tile>> = [
+  [
+    { x: 24, y: 1 },
+    { x: 24, y: 31 },
+  ],
+  [
+    { x: 24, y: 20 },
+    { x: 29, y: 20 },
+  ],
+  [
+    { x: 24, y: 17 },
+    { x: 16, y: 18 },
+  ],
+];
 
 export function buildStartingWorld(map: TileMap): StartingWorld {
   const props: Prop[] = [];
@@ -70,6 +111,11 @@ export function buildStartingWorld(map: TileMap): StartingWorld {
   place('bank-booth', 20, 43);
   place('bank-booth', 21, 43);
   place('altar', 27, 43);
+
+  const bridgeTiles: Tile[] = [];
+  for (let y = BRIDGE.y0; y <= BRIDGE.y1; y++) {
+    for (let x = BRIDGE.x0; x <= BRIDGE.x1; x++) bridgeTiles.push({ x, y });
+  }
 
   return {
     props,
@@ -93,6 +139,21 @@ export function buildStartingWorld(map: TileMap): StartingWorld {
         { x: 31, y: 32 },
       ],
     ],
+    terrain: {
+      flatZones: [
+        {
+          x0: MOAT_OUTER.x0 - 1,
+          y0: MOAT_OUTER.y0 - 1,
+          x1: MOAT_OUTER.x1 + 1,
+          y1: MOAT_OUTER.y1 + 1,
+        },
+      ],
+      stoneZones: [
+        { x0: CASTLE.west + 1, y0: CASTLE.south + 1, x1: CASTLE.east - 1, y1: CASTLE.north - 1 },
+      ],
+      paths: PATHS,
+      bridgeTiles,
+    },
   };
 }
 
@@ -100,7 +161,7 @@ export function buildStartingWorld(map: TileMap): StartingWorld {
  * Floods the moat ring: every tile in the outer rectangle but outside the inner
  * one becomes impassable water, except the bridge tiles, which stay walkable so
  * the player can cross to the gate. Water tiles are emitted as 'water' props
- * purely so the minimap can colour them; the 3D surface is drawn by WaterView.
+ * so the minimap and terrain can colour them; the 3D surface is drawn by WaterView.
  */
 function buildMoat(props: Prop[], map: TileMap): void {
   for (let y = MOAT_OUTER.y0; y <= MOAT_OUTER.y1; y++) {
@@ -152,12 +213,30 @@ function buildCastle(place: (k: PropKind, x: number, y: number, block?: boolean)
       const x = keepCx + dx;
       const y = keepCy + dy;
       if (dx === 0 && dy === 0) place('castle-keep', x, y);
-      else place('castle-wall', x, y); // blocked; visually covered by the keep mesh
+      else place('castle-wall', x, y, true); // blocked; visually covered by the keep mesh
     }
   }
 }
 
-/** Two woods flanking the approach, kept clear of the central walking corridor. */
+/** Distance from a tile centre to the nearest road, in tiles. */
+function pathDistance(x: number, y: number): number {
+  let best = Infinity;
+  for (const path of PATHS) {
+    for (let i = 0; i + 1 < path.length; i++) {
+      const a = path[i];
+      const b = path[i + 1];
+      const abx = b.x - a.x;
+      const aby = b.y - a.y;
+      const len2 = abx * abx + aby * aby;
+      let t = len2 > 0 ? ((x - a.x) * abx + (y - a.y) * aby) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      best = Math.min(best, Math.hypot(x - (a.x + abx * t), y - (a.y + aby * t)));
+    }
+  }
+  return best;
+}
+
+/** Two woods flanking the approach, kept clear of the roads and the gate corridor. */
 function buildForests(props: Prop[], map: TileMap): void {
   const woods = [
     { x0: 4, x1: 16, y0: 14, y1: 40, density: 0.24 },
@@ -171,6 +250,7 @@ function buildForests(props: Prop[], map: TileMap): void {
       for (let x = w.x0; x <= w.x1; x++) {
         if (corridor(x) && y < CASTLE.south) continue;
         if (map.isBlocked(x, y)) continue;
+        if (pathDistance(x, y) < 1.5) continue;
         if (tileSeed(x, y) >= w.density) continue;
         map.setBlocked(x, y);
         props.push({ kind: 'tree', tile: { x, y }, seed: tileSeed(x * 7, y * 7) });

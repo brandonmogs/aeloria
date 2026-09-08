@@ -1,17 +1,17 @@
 import * as THREE from 'three';
 import { OrbitCamera } from '../render/OrbitCamera';
+import { Terrain } from '../render/Terrain';
 import { Tile, tile } from '../sim/coords';
 
 /**
  * Translates mouse input into the tile space the simulation understands. A left
- * click is ray-cast onto the ground plane to find the target tile, which is
- * handed off as a movement intent. This is deliberately the *only* place raw
- * input becomes a game command — the same seam where a networked client would
- * send the command to the server instead of applying it locally.
+ * click is ray-cast onto the terrain to find the target tile, which is handed
+ * off as a movement intent. This is deliberately the *only* place raw input
+ * becomes a game command — the same seam where a networked client would send
+ * the command to the server instead of applying it locally.
  */
 export class InputController {
   private readonly raycaster = new THREE.Raycaster();
-  private readonly groundPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly ndc = new THREE.Vector2();
   private readonly hit = new THREE.Vector3();
 
@@ -21,6 +21,7 @@ export class InputController {
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly camera: OrbitCamera,
+    private readonly terrain: Terrain,
     private readonly onMoveTo: (target: Tile) => void,
     private readonly onContextMenu?: (clientX: number, clientY: number, tile: Tile) => void,
   ) {
@@ -48,8 +49,8 @@ export class InputController {
     this.ndc.x = ((clientX - rect.left) / rect.width) * 2 - 1;
     this.ndc.y = -((clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.ndc, this.camera.camera);
-    const point = this.raycaster.ray.intersectPlane(this.groundPlane, this.hit);
-    if (!point) return null;
+    const point = this.terrain.intersectRay(this.raycaster.ray, this.hit);
+    if (!point || !this.terrain.inBoundsWorld(point.x, point.z)) return null;
     return tile(Math.round(point.x), Math.round(point.z));
   }
 }

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { World } from '../sim/World';
+import { WATER_LEVEL } from './Terrain';
 
 /**
  * Renders fishing spots as expanding rings of disturbed water — the OSRS tell
@@ -8,7 +9,7 @@ import { World } from '../sim/World';
  */
 export class FishingSpotView {
   private readonly groups = new Map<number, THREE.Group>();
-  private readonly ringGeo = new THREE.RingGeometry(0.82, 1, 28);
+  private readonly ringGeo = new THREE.RingGeometry(0.8, 1, 8);
   private clock = 0;
 
   constructor(
@@ -29,14 +30,14 @@ export class FishingSpotView {
         this.groups.set(node.id, group);
         this.scene.add(group);
       }
-      // Float just above the water plane (y = 0.05) and follow the spot.
-      group.position.set(node.tile.x, 0.075, node.tile.y);
+      // Float just above the water and follow the spot.
+      group.position.set(node.tile.x, WATER_LEVEL + 0.02, node.tile.y);
 
       group.children.forEach((ring, i) => {
-        const t = (this.clock * 0.55 + i / group.children.length) % 1;
+        const t = (this.clock * 0.55 + i / group!.children.length) % 1;
         const s = 0.12 + t * 0.4;
         ring.scale.set(s, 1, s);
-        ((ring as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.5;
+        ((ring as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity = (1 - t) * 0.55;
       });
     }
 
@@ -53,13 +54,15 @@ export class FishingSpotView {
     const group = new THREE.Group();
     for (let i = 0; i < 3; i++) {
       const mat = new THREE.MeshBasicMaterial({
-        color: 0xd8ecff,
+        color: 0xe4f2ff,
         transparent: true,
         opacity: 0.5,
         depthWrite: false,
         side: THREE.DoubleSide,
       });
-      group.add(new THREE.Mesh(this.ringGeo, mat));
+      const ring = new THREE.Mesh(this.ringGeo, mat);
+      ring.renderOrder = 2;
+      group.add(ring);
     }
     return group;
   }

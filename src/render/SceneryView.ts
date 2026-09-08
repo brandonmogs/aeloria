@@ -1,9 +1,10 @@
 import * as THREE from 'three';
-import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { SimplexNoise } from 'three/examples/jsm/math/SimplexNoise.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { Prop } from '../sim/Scenery';
 import { World } from '../sim/World';
+import { Terrain } from './Terrain';
+import { box, flat, place, seedAt, seededRandom, shadowed, taperedBox } from './lowpoly';
 
 /** Where a gatherable prop's instances live, so the sim can hide/show them. */
 interface ResourceVisual {
@@ -15,17 +16,74 @@ interface ResourceVisual {
   isDepleted: boolean;
 }
 
+/** Canopy lump layout: [x, y-above-base, z, radius]. */
+type Lumps = ReadonlyArray<readonly [number, number, number, number]>;
+
+/** The three tree silhouettes in the clearing. */
+interface TreeStyle {
+  lumps: Lumps;
+  base: number;
+  trunkScale: number;
+  leaf: THREE.Color;
+  leafAlt: THREE.Color;
+  squash: number;
+}
+
+const TREE_STYLES: Record<'regular' | 'oak' | 'willow', TreeStyle> = {
+  regular: {
+    lumps: [
+      [0, 0, 0, 0.74],
+      [0.4, 0.2, 0.2, 0.5],
+      [-0.36, 0.16, -0.22, 0.52],
+      [0.04, 0.56, -0.06, 0.48],
+      [-0.06, -0.1, 0.42, 0.42],
+    ],
+    base: 1.35,
+    trunkScale: 1,
+    leaf: new THREE.Color(0x3f7f34),
+    leafAlt: new THREE.Color(0x5a9a3e),
+    squash: 1,
+  },
+  oak: {
+    lumps: [
+      [0, 0.1, 0, 0.95],
+      [0.62, 0.2, 0.3, 0.62],
+      [-0.6, 0.1, -0.3, 0.64],
+      [0.1, 0.75, -0.1, 0.6],
+      [-0.2, 0.05, 0.62, 0.54],
+      [0.3, -0.05, -0.6, 0.5],
+    ],
+    base: 1.55,
+    trunkScale: 1.25,
+    leaf: new THREE.Color(0x2f6a2a),
+    leafAlt: new THREE.Color(0x477f33),
+    squash: 0.92,
+  },
+  willow: {
+    lumps: [
+      [0, 0.1, 0, 0.8],
+      [0.5, -0.15, 0.25, 0.55],
+      [-0.5, -0.2, -0.2, 0.55],
+      [0.05, 0.55, -0.05, 0.5],
+      [-0.1, -0.3, 0.55, 0.45],
+    ],
+    base: 1.9,
+    trunkScale: 1.5,
+    leaf: new THREE.Color(0x7aa650),
+    leafAlt: new THREE.Color(0x93b85f),
+    squash: 1.25,
+  },
+};
+
 /**
- * Renders the static, decorative world: trees, boulders, and the castle.
+ * Renders the static, decorative world: trees, boulders, and the castle — all
+ * hard-edged, flat-shaded low-poly in the OSRS spirit.
  *
  * Draw-call budget is the whole design here. The castle — hundreds of wall
  * blocks and merlons — is baked into ONE merged mesh per material. Trees and
  * rocks, which must be hidden individually when the sim depletes them, are
- * drawn with a handful of InstancedMeshes (one per geometry+material pair);
- * a depleted node just zeroes its instance matrices and shows a small stump
- * or rubble mesh instead. The result is a scene that renders in tens of draw
- * calls rather than thousands, which matters fourfold once shadows, water
- * reflections, and SSAO each re-render it.
+ * drawn with a handful of InstancedMeshes; a depleted node just zeroes its
+ * instance matrices and shows a small stump or rubble mesh instead.
  */
 export class SceneryView {
   private readonly root = new THREE.Group();
@@ -34,8 +92,14 @@ export class SceneryView {
   /** Gatherable props keyed by "x,y". */
   private readonly resources = new Map<string, ResourceVisual>();
   private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+  private readonly waterTiles = new Set<string>();
 
-  constructor(scene: THREE.Scene, props: ReadonlyArray<Prop>) {
+  constructor(
+    scene: THREE.Scene,
+    props: ReadonlyArray<Prop>,
+    private readonly terrain: Terrain,
+  ) {
+    for (const p of props) if (p.kind === 'water') this.waterTiles.add(`${p.tile.x},${p.tile.y}`);
     const trees = props.filter((p) => p.kind === 'tree');
     const rocks = props.filter((p) => p.kind === 'rock');
     const castle = props.filter(
@@ -69,6 +133,17 @@ export class SceneryView {
     }
   }
 
+  /** Which silhouette a tree gets: willows by the water, the odd oak, else regular. */
+  treeStyleOf(prop: Prop): keyof typeof TREE_STYLES {
+    const { x, y } = prop.tile;
+    for (let dy = -2; dy <= 2; dy++) {
+      for (let dx = -2; dx <= 2; dx++) {
+        if (this.waterTiles.has(`${x + dx},${y + dy}`)) return 'willow';
+      }
+    }
+    return prop.seed < 0.14 ? 'oak' : 'regular';
+  }
+
   // --- Castle: bake everything into one mesh per material -------------------
 
   private buildCastleMerged(props: ReadonlyArray<Prop>): void {
@@ -77,7 +152,6 @@ export class SceneryView {
       group.updateMatrixWorld(true);
       group.traverse((o) => {
         if (o instanceof THREE.Mesh) {
-          // Normalize to non-indexed: merge requires all-or-none indexing.
           let geo = (o.geometry as THREE.BufferGeometry).clone();
           if (geo.index) geo = geo.toNonIndexed();
           geo.applyMatrix4(o.matrixWorld);
@@ -91,7 +165,7 @@ export class SceneryView {
     for (const prop of props) {
       const obj = this.buildCastlePiece(prop);
       if (!obj) continue;
-      obj.position.set(prop.tile.x, 0, prop.tile.y);
+      obj.position.set(prop.tile.x, this.terrain.tileHeight(prop.tile), prop.tile.y);
       collect(obj);
     }
 
@@ -124,98 +198,84 @@ export class SceneryView {
     }
   }
 
-  /** A timber banking counter with a gilt rail — the castle's bank. */
+  /** A wooden counter with a barred grille — the castle's bank booth. */
   private buildBankBooth(): THREE.Object3D {
     const g = new THREE.Group();
-    const counter = new THREE.Mesh(this.geo.boothBase, this.mat.bark);
-    counter.position.y = 0.45;
-    g.add(this.shadowed(counter));
-    const top = new THREE.Mesh(this.geo.boothTop, this.mat.roof);
-    top.position.y = 0.95;
-    g.add(this.shadowed(top));
-    const rail = new THREE.Mesh(this.geo.boothRail, this.mat.gold);
-    rail.position.set(0, 1.28, 0);
-    g.add(rail);
-    for (const sx of [-0.34, 0.34]) {
-      const post = new THREE.Mesh(this.geo.boothPost, this.mat.bark);
-      post.position.set(sx, 1.1, 0);
-      g.add(this.shadowed(post));
+    g.add(place(box(0.92, 0.9, 0.5), this.mat.wood, 0, 0.45, 0));
+    g.add(place(box(1.0, 0.1, 0.62), this.mat.woodLight, 0, 0.95, 0));
+    g.add(place(box(1.0, 0.08, 0.62), this.mat.woodLight, 0, 1.72, 0));
+    for (let x = -0.4; x <= 0.41; x += 0.16) {
+      g.add(place(box(0.035, 0.7, 0.035), this.mat.iron, x, 1.35, 0));
     }
+    g.add(place(box(0.5, 0.16, 0.03), this.mat.gold, 0, 1.12, 0.27));
     return g;
   }
 
-  /** A stone altar with a glowing gilt star — recharge Prayer here. */
+  /** A stone altar with a gilt cross — recharge Prayer here. */
   private buildAltar(): THREE.Object3D {
     const g = new THREE.Group();
-    const base = new THREE.Mesh(this.geo.altarBase, this.mat.stone);
-    base.position.y = 0.35;
-    g.add(this.shadowed(base));
-    const slab = new THREE.Mesh(this.geo.altarSlab, this.mat.stone);
-    slab.position.y = 0.78;
-    g.add(this.shadowed(slab));
-    const icon = new THREE.Mesh(this.geo.altarIcon, this.mat.gold);
-    icon.position.y = 1.15;
-    icon.rotation.x = Math.PI / 2;
-    g.add(icon);
+    g.add(place(taperedBox(0.9, 0.7, 0.62, 0.9), this.mat.stone, 0, 0.35, 0));
+    g.add(place(box(1.05, 0.14, 0.78), this.mat.stoneLight, 0, 0.77, 0));
+    g.add(place(box(0.06, 0.4, 0.06), this.mat.gold, 0, 1.04, 0));
+    g.add(place(box(0.24, 0.06, 0.06), this.mat.gold, 0, 1.1, 0));
     return g;
   }
 
-  // --- Trees: three instanced meshes for the whole forest -------------------
+  // --- Trees: two instanced meshes for the whole forest ---------------------
 
   private buildTreesInstanced(trees: ReadonlyArray<Prop>): void {
-    // The same canopy blob layout buildTree used, kept verbatim so the look
-    // doesn't change: [x, y-above-base, z, radius].
-    const blobLayout: ReadonlyArray<readonly [number, number, number, number]> = [
-      [0, 0, 0, 0.62],
-      [0.28, 0.32, 0.12, 0.42],
-      [-0.24, 0.28, -0.16, 0.4],
-      [0.05, 0.6, 0, 0.34],
-    ];
+    let lumpTotal = 0;
+    for (const t of trees) lumpTotal += TREE_STYLES[this.treeStyleOf(t)].lumps.length;
 
-    const treesA = trees.filter((t) => t.seed > 0.5);
-    const treesB = trees.filter((t) => t.seed <= 0.5);
-
-    const trunks = this.instanced(this.geo.trunk, this.mat.bark, trees.length);
-    const canopyA = this.instanced(this.geo.canopy, this.mat.leafA, treesA.length * blobLayout.length);
-    const canopyB = this.instanced(this.geo.canopy, this.mat.leafB, treesB.length * blobLayout.length);
+    const trunks = this.instanced(this.geo.trunk, this.mat.bark, Math.max(1, trees.length));
+    const canopy = this.instanced(this.geo.canopy, this.mat.leaf, Math.max(1, lumpTotal));
 
     const pos = new THREE.Vector3();
     const quat = new THREE.Quaternion();
     const scl = new THREE.Vector3();
     const m = new THREE.Matrix4();
+    const tint = new THREE.Color();
+    const barkTint = new THREE.Color();
 
     let trunkI = 0;
-    const canopyI = { A: 0, B: 0 };
+    let lumpI = 0;
 
     for (const tree of trees) {
+      const style = TREE_STYLES[this.treeStyleOf(tree)];
       const seed = tree.seed;
-      const s = 0.85 + seed * 0.35; // whole-tree scale
+      const s = 0.88 + seedAt(seed, 1) * 0.3; // whole-tree scale
       const yaw = seed * Math.PI * 2;
+      const ground = this.terrain.tileHeight(tree.tile);
       const slots: ResourceVisual['slots'] = [];
 
-      // Trunk: local (0, 0.55, 0), uniform scale, yaw irrelevant but applied.
+      // Trunk: a 6-sided post sunk a little into the ground.
       quat.setFromAxisAngle(UP, yaw);
-      pos.set(tree.tile.x, 0.55 * s, tree.tile.y);
-      scl.setScalar(s);
+      pos.set(tree.tile.x, ground + 0.55 * s * style.trunkScale, tree.tile.y);
+      scl.set(s, s * style.trunkScale, s);
       m.compose(pos, quat, scl);
       trunks.setMatrixAt(trunkI, m);
+      barkTint.setHex(0x6b4a2f).offsetHSL(0, 0, (seedAt(seed, 2) - 0.5) * 0.08);
+      trunks.setColorAt(trunkI, barkTint);
       slots.push({ mesh: trunks, index: trunkI, matrix: m.clone() });
       trunkI++;
 
-      const isA = seed > 0.5;
-      const canopy = isA ? canopyA : canopyB;
-      const base = 1.2 + seed * 0.4;
-      for (const [bx, by, bz, r] of blobLayout) {
-        // Rotate the blob offset by the tree's yaw, scale by the tree scale.
+      const base = style.base + seedAt(seed, 3) * 0.3;
+      style.lumps.forEach(([bx, by, bz, r], li) => {
         pos.set(bx, base + by, bz).multiplyScalar(s).applyQuaternion(quat);
         pos.x += tree.tile.x;
+        pos.y += ground;
         pos.z += tree.tile.y;
-        scl.setScalar(r * s);
+        // Each lump gets its own tumble so the facets don't line up.
+        quat.setFromEuler(new THREE.Euler(seedAt(seed, li + 10) * 3, seedAt(seed, li + 20) * 6, seedAt(seed, li + 30) * 3));
+        scl.set(r * s, r * s * style.squash, r * s);
         m.compose(pos, quat, scl);
-        const idx = isA ? canopyI.A++ : canopyI.B++;
-        canopy.setMatrixAt(idx, m);
-        slots.push({ mesh: canopy, index: idx, matrix: m.clone() });
-      }
+        canopy.setMatrixAt(lumpI, m);
+        tint.copy(style.leaf).lerp(style.leafAlt, seedAt(seed, li + 40));
+        canopy.setColorAt(lumpI, tint);
+        slots.push({ mesh: canopy, index: lumpI, matrix: m.clone() });
+        lumpI++;
+        quat.setFromAxisAngle(UP, yaw);
+      });
 
       this.resources.set(`${tree.tile.x},${tree.tile.y}`, {
         slots,
@@ -224,16 +284,19 @@ export class SceneryView {
       });
     }
 
-    for (const mesh of [trunks, canopyA, canopyB]) mesh.instanceMatrix.needsUpdate = true;
+    for (const mesh of [trunks, canopy]) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   // --- Rocks: one instanced mesh per boulder variant -------------------------
 
   private buildRocksInstanced(rocks: ReadonlyArray<Prop>): void {
-    // First pass: count instances per variant so the meshes can be sized.
     interface Boulder {
       variant: number;
       matrix: THREE.Matrix4;
+      color: THREE.Color;
       tileKey: string;
     }
     const boulders: Boulder[] = [];
@@ -245,18 +308,27 @@ export class SceneryView {
 
     for (const rock of rocks) {
       const seed = rock.seed;
+      const ground = this.terrain.tileHeight(rock.tile);
       const count = 2 + Math.floor(seed * 3);
       for (let i = 0; i < count; i++) {
         const s = seedAt(seed, i);
         const variant = Math.floor(seedAt(seed, i + 3) * this.geo.rocks.length);
-        const size = 0.24 + s * 0.32;
-        pos.set(rock.tile.x + (s - 0.5) * 0.6, size * 0.32, rock.tile.y + (seedAt(seed, i + 9) - 0.5) * 0.6);
-        scl.set(size, size * (0.7 + s * 0.35), size);
+        const size = 0.26 + s * 0.3;
+        pos.set(
+          rock.tile.x + (s - 0.5) * 0.6,
+          ground + size * 0.35,
+          rock.tile.y + (seedAt(seed, i + 9) - 0.5) * 0.6,
+        );
+        scl.set(size, size * (0.75 + s * 0.35), size);
         euler.set(s * 3, s * 6, s * 2);
         quat.setFromEuler(euler);
+        // Grey stone with a copper-brown vein on the odd boulder.
+        const color = new THREE.Color(0x8a857b).offsetHSL(0, 0, (seedAt(seed, i + 12) - 0.5) * 0.12);
+        if (seedAt(seed, i + 15) < 0.4) color.lerp(new THREE.Color(0xb3703c), 0.45);
         boulders.push({
           variant,
           matrix: new THREE.Matrix4().compose(pos, quat, scl),
+          color,
           tileKey: `${rock.tile.x},${rock.tile.y}`,
         });
       }
@@ -272,6 +344,7 @@ export class SceneryView {
       const mesh = perVariant[b.variant];
       const index = nextIndex[b.variant]++;
       mesh.setMatrixAt(index, b.matrix);
+      mesh.setColorAt(index, b.color);
 
       let visual = this.resources.get(b.tileKey);
       if (!visual) {
@@ -287,7 +360,10 @@ export class SceneryView {
       visual.slots.push({ mesh, index, matrix: b.matrix });
     }
 
-    for (const mesh of perVariant) mesh.instanceMatrix.needsUpdate = true;
+    for (const mesh of perVariant) {
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    }
   }
 
   private instanced(
@@ -305,12 +381,10 @@ export class SceneryView {
   /** What's left after a tree is felled: a low cut trunk. */
   private buildStump(tree: Prop): THREE.Object3D {
     const g = new THREE.Group();
-    const stump = new THREE.Mesh(this.geo.stump, this.mat.bark);
-    stump.position.y = 0.14;
-    g.add(this.shadowed(stump));
+    g.add(place(this.geo.stump, this.mat.bark, 0, 0.14, 0));
     g.rotation.y = tree.seed * Math.PI * 2;
-    g.position.set(tree.tile.x, 0, tree.tile.y);
-    return g;
+    g.position.set(tree.tile.x, this.terrain.tileHeight(tree.tile), tree.tile.y);
+    return shadowed(g, true);
   }
 
   /** What's left after a rock is mined out: low, darker rubble. */
@@ -324,163 +398,143 @@ export class SceneryView {
       rock.scale.set(size, size * 0.6, size);
       rock.position.set((s - 0.5) * 0.5, size * 0.25, (seedAt(seed, i + 27) - 0.5) * 0.5);
       rock.rotation.set(s * 3, s * 6, s * 2);
-      g.add(this.shadowed(rock));
+      g.add(rock);
     }
-    g.position.set(x, 0, y);
-    return g;
+    g.position.set(x, this.terrain.tileHeight({ x, y }), y);
+    return shadowed(g, true);
   }
 
   private buildWall(): THREE.Object3D {
     const g = new THREE.Group();
-    const body = new THREE.Mesh(this.geo.wall, this.mat.stone);
-    body.position.y = 1.1;
-    g.add(this.shadowed(body));
-    this.addBattlements(g, 2.2, 0.46);
+    g.add(place(this.geo.wall, this.mat.stone, 0, 1.05, 0));
+    // Battlements: a walkway with a row of merlons along each face.
+    g.add(place(box(1.0, 0.12, 1.0), this.mat.stoneLight, 0, 2.44, 0));
+    for (const x of [-0.25, 0.25]) {
+      for (const z of [-0.36, 0.36]) g.add(place(this.geo.merlon, this.mat.stoneLight, x, 2.66, z));
+    }
     return g;
   }
 
   private buildTower(): THREE.Object3D {
     const g = new THREE.Group();
-    const shaft = new THREE.Mesh(this.geo.tower, this.mat.stone);
-    shaft.position.y = 1.55;
-    g.add(this.shadowed(shaft));
-
-    // Crenellated ring around the top.
-    const ring = 8;
-    for (let i = 0; i < ring; i++) {
-      const a = (i / ring) * Math.PI * 2;
-      const merlon = new THREE.Mesh(this.geo.merlon, this.mat.stone);
-      merlon.position.set(Math.cos(a) * 0.62, 3.2, Math.sin(a) * 0.62);
-      g.add(merlon);
+    g.add(place(this.geo.tower, this.mat.stone, 0, 1.6, 0));
+    g.add(place(box(1.7, 0.16, 1.7), this.mat.stoneLight, 0, 3.4, 0));
+    // A ring of merlons around the square top.
+    for (const t of [-0.6, -0.2, 0.2, 0.6]) {
+      for (const [x, z] of [
+        [t, -0.68],
+        [t, 0.68],
+        [-0.68, t],
+        [0.68, t],
+      ] as const) {
+        g.add(place(this.geo.merlon, this.mat.stoneLight, x, 3.66, z));
+      }
     }
-
-    const roof = new THREE.Mesh(this.geo.roof, this.mat.roof);
-    roof.position.y = 3.9;
-    g.add(this.shadowed(roof));
-
-    const finial = new THREE.Mesh(this.geo.finial, this.mat.gold);
-    finial.position.y = 4.7;
-    g.add(finial);
+    // Arrow slits, front and back.
+    for (const z of [-0.76, 0.76]) g.add(place(box(0.12, 0.5, 0.06), this.mat.dark, 0, 2.2, z));
     return g;
   }
 
   private buildGate(): THREE.Object3D {
-    // The gate tiles stay walkable; this is just the arch overhead. Side jambs
-    // sit on the tile edges so they don't crowd whoever walks through.
+    // The gate tiles stay walkable; this is the arch overhead. Side jambs sit
+    // on the tile edges so they don't crowd whoever walks through.
     const g = new THREE.Group();
-    for (const side of [-0.5, 0.5]) {
-      const jamb = new THREE.Mesh(this.geo.gateJamb, this.mat.stone);
-      jamb.position.set(side, 1.4, 0);
-      g.add(this.shadowed(jamb));
+    for (const side of [-0.5, 0.5]) g.add(place(this.geo.gateJamb, this.mat.stone, side, 1.25, 0));
+    g.add(place(this.geo.gateLintel, this.mat.stone, 0, 2.7, 0));
+    for (const x of [-0.25, 0.25]) {
+      for (const z of [-0.36, 0.36]) g.add(place(this.geo.merlon, this.mat.stoneLight, x, 3.22, z));
     }
-    const lintel = new THREE.Mesh(this.geo.gateLintel, this.mat.stone);
-    lintel.position.set(0, 2.9, 0);
-    g.add(this.shadowed(lintel));
     return g;
   }
 
   private buildKeep(): THREE.Object3D {
-    // One mesh spanning the 3x3 footprint at the heart of the castle.
+    // One block spanning the 3x3 footprint at the heart of the castle, with a
+    // taller square tower on top and a pennant for the skyline.
     const g = new THREE.Group();
-    const base = new THREE.Mesh(this.geo.keepBase, this.mat.stone);
-    base.position.y = 1.4;
-    g.add(this.shadowed(base));
-    this.addBattlements(g, 2.8, 1.3, 0.65);
-
-    const spire = new THREE.Mesh(this.geo.keepSpire, this.mat.stone);
-    spire.position.y = 3.7;
-    g.add(this.shadowed(spire));
-
-    const roof = new THREE.Mesh(this.geo.keepRoof, this.mat.roof);
-    roof.position.y = 5.2;
-    g.add(this.shadowed(roof));
-
-    // A pennant on top, just for the silhouette.
-    const pole = new THREE.Mesh(this.geo.finial, this.mat.bark);
-    pole.scale.set(0.5, 1.6, 0.5);
-    pole.position.y = 6.1;
-    g.add(pole);
-    const flag = new THREE.Mesh(this.geo.flag, this.mat.flag);
-    flag.position.set(0.22, 6.35, 0);
-    g.add(flag);
-    return g;
-  }
-
-  /** Lay a ring of merlons (crenellation teeth) around a square top edge. */
-  private addBattlements(g: THREE.Group, topY: number, half: number, gap = 0.32): void {
-    const step = gap * 2;
-    for (let t = -half + gap / 2; t <= half; t += step) {
+    g.add(place(this.geo.keepBase, this.mat.stone, 0, 1.35, 0));
+    g.add(place(box(3.1, 0.16, 3.1), this.mat.stoneLight, 0, 2.9, 0));
+    for (let t = -1.25; t <= 1.26; t += 0.5) {
       for (const [x, z] of [
-        [t, -half],
-        [t, half],
-        [-half, t],
-        [half, t],
+        [t, -1.4],
+        [t, 1.4],
+        [-1.4, t],
+        [1.4, t],
       ] as const) {
-        const merlon = new THREE.Mesh(this.geo.merlon, this.mat.stone);
-        merlon.position.set(x, topY + 0.18, z);
-        g.add(merlon);
+        g.add(place(this.geo.merlon, this.mat.stoneLight, x, 3.16, z));
       }
     }
-  }
-
-  private shadowed<T extends THREE.Mesh>(mesh: T): T {
-    mesh.castShadow = true;
-    mesh.receiveShadow = true;
-    return mesh;
+    g.add(place(this.geo.keepTower, this.mat.stone, 0, 4.0, 0));
+    g.add(place(box(1.8, 0.14, 1.8), this.mat.stoneLight, 0, 5.1, 0));
+    for (const t of [-0.6, -0.2, 0.2, 0.6]) {
+      for (const [x, z] of [
+        [t, -0.75],
+        [t, 0.75],
+        [-0.75, t],
+        [0.75, t],
+      ] as const) {
+        g.add(place(this.geo.merlon, this.mat.stoneLight, x, 5.35, z));
+      }
+    }
+    g.add(place(box(0.08, 1.6, 0.08), this.mat.wood, 0, 6.0, 0));
+    g.add(place(this.geo.flag, this.mat.flag, 0.3, 6.55, 0));
+    // A doorway on the south face and arrow-slit windows all round.
+    g.add(place(box(0.7, 1.3, 0.1), this.mat.dark, 0, 0.65, -1.5));
+    for (const [x, z] of [
+      [-0.9, -1.51],
+      [0.9, -1.51],
+      [-0.9, 1.51],
+      [0.9, 1.51],
+      [-1.51, 0],
+      [1.51, 0],
+    ] as const) {
+      g.add(place(box(z === 0 ? 0.08 : 0.16, 0.5, z === 0 ? 0.16 : 0.08), this.mat.dark, x, 1.9, z));
+    }
+    for (const [x, z] of [
+      [0, -0.86],
+      [0, 0.86],
+      [-0.86, 0],
+      [0.86, 0],
+    ] as const) {
+      g.add(place(box(x === 0 ? 0.16 : 0.08, 0.5, x === 0 ? 0.08 : 0.16), this.mat.dark, x, 4.2, z));
+    }
+    return g;
   }
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
 
-/** Deterministic sub-seed in [0, 1) so a prop's parts vary without randomness. */
-function seedAt(seed: number, i: number): number {
-  const v = Math.sin(seed * 127.1 + i * 311.7) * 43758.5453;
-  return v - Math.floor(v);
-}
-
 function makeGeometries() {
   return {
-    trunk: new THREE.CylinderGeometry(0.13, 0.2, 1.1, 12),
-    stump: new THREE.CylinderGeometry(0.17, 0.21, 0.28, 12),
-    canopy: new THREE.IcosahedronGeometry(1, 2),
-    rocks: [0, 1, 2, 3].map((i) => makeBoulder(i)),
-    wall: new RoundedBoxGeometry(1.0, 2.2, 1.0, 4, 0.07),
-    tower: new THREE.CylinderGeometry(0.62, 0.72, 3.1, 24),
-    roof: new THREE.ConeGeometry(0.82, 1.4, 24),
-    finial: new THREE.CylinderGeometry(0.05, 0.05, 0.6, 10),
-    merlon: new RoundedBoxGeometry(0.26, 0.36, 0.26, 3, 0.05),
-    gateJamb: new RoundedBoxGeometry(0.34, 2.8, 1.0, 4, 0.06),
-    gateLintel: new RoundedBoxGeometry(1.34, 0.7, 1.0, 4, 0.08),
-    keepBase: new RoundedBoxGeometry(2.8, 2.8, 2.8, 6, 0.12),
-    keepSpire: new RoundedBoxGeometry(1.4, 2.8, 1.4, 5, 0.1),
-    keepRoof: new THREE.ConeGeometry(1.2, 1.9, 24),
-    flag: new THREE.BoxGeometry(0.5, 0.34, 0.04),
-    boothBase: new RoundedBoxGeometry(0.92, 0.9, 0.6, 4, 0.05),
-    boothTop: new RoundedBoxGeometry(1.0, 0.12, 0.7, 3, 0.04),
-    boothRail: new THREE.BoxGeometry(0.9, 0.05, 0.05),
-    boothPost: new THREE.CylinderGeometry(0.035, 0.035, 0.6, 8),
-    altarBase: new RoundedBoxGeometry(0.9, 0.7, 0.66, 4, 0.06),
-    altarSlab: new RoundedBoxGeometry(1.05, 0.16, 0.8, 3, 0.05),
-    altarIcon: new THREE.TorusGeometry(0.14, 0.045, 10, 24),
+    trunk: new THREE.CylinderGeometry(0.13, 0.2, 1.3, 6),
+    stump: new THREE.CylinderGeometry(0.17, 0.21, 0.28, 6),
+    canopy: new THREE.IcosahedronGeometry(1, 1),
+    rocks: [0, 1, 2].map((i) => makeBoulder(i)),
+    // Walls and towers extend below ground so slopes never show a gap.
+    wall: box(1.0, 2.7, 1.0),
+    tower: box(1.6, 3.9, 1.6),
+    merlon: box(0.3, 0.34, 0.26),
+    gateJamb: box(0.34, 3.1, 1.0),
+    gateLintel: box(1.34, 0.7, 1.0),
+    keepBase: box(3.0, 3.3, 3.0),
+    keepTower: box(1.7, 2.2, 1.7),
+    flag: box(0.6, 0.36, 0.04),
   };
 }
 
 /**
- * A boulder: a subdivided sphere pushed around by simplex noise so each variant
- * has natural lumps and creases. Normals are recomputed so it lights smoothly
- * rather than faceted. Four variants are baked and shared across every rock.
+ * A boulder: a dodecahedron with its vertices pushed around by noise so each
+ * variant has lumps and creases, but with the facets left hard so it lights
+ * like a chunk of RuneScape scenery rather than a pebble.
  */
 function makeBoulder(variant: number): THREE.BufferGeometry {
-  const geo = new THREE.IcosahedronGeometry(1, 2);
-  const noise = new SimplexNoise();
+  const geo = new THREE.DodecahedronGeometry(1, 0);
+  const noise = new SimplexNoise(seededRandom(41 + variant));
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const v = new THREE.Vector3();
   const off = variant * 13.7;
   for (let i = 0; i < pos.count; i++) {
     v.fromBufferAttribute(pos, i);
-    const n =
-      noise.noise3d(v.x * 1.4 + off, v.y * 1.4, v.z * 1.4) * 0.28 +
-      noise.noise3d(v.x * 3.1, v.y * 3.1, v.z * 3.1 + off) * 0.1;
+    const n = noise.noise3d(v.x * 1.2 + off, v.y * 1.2, v.z * 1.2) * 0.22;
     v.multiplyScalar(1 + n);
     pos.setXYZ(i, v.x, v.y, v.z);
   }
@@ -489,16 +543,18 @@ function makeBoulder(variant: number): THREE.BufferGeometry {
 }
 
 function makeMaterials() {
-  const stone = new THREE.MeshStandardMaterial({ color: 0xb4ad9e, roughness: 0.82, metalness: 0.05, envMapIntensity: 0.6 });
   return {
-    bark: new THREE.MeshStandardMaterial({ color: 0x6b4a2f, roughness: 0.92, envMapIntensity: 0.4 }),
-    leafA: new THREE.MeshStandardMaterial({ color: 0x3f7d3a, roughness: 0.85, envMapIntensity: 0.4 }),
-    leafB: new THREE.MeshStandardMaterial({ color: 0x559449, roughness: 0.85, envMapIntensity: 0.4 }),
-    rock: new THREE.MeshStandardMaterial({ color: 0x868c96, roughness: 0.95, envMapIntensity: 0.5 }),
-    rubble: new THREE.MeshStandardMaterial({ color: 0x5c6069, roughness: 0.98, envMapIntensity: 0.4 }),
-    stone,
-    roof: new THREE.MeshStandardMaterial({ color: 0x873f3f, roughness: 0.6, envMapIntensity: 0.7 }),
-    gold: new THREE.MeshStandardMaterial({ color: 0xe8c66a, roughness: 0.25, metalness: 0.85, envMapIntensity: 1 }),
-    flag: new THREE.MeshStandardMaterial({ color: 0xb33b3b, roughness: 0.6, side: THREE.DoubleSide, envMapIntensity: 0.5 }),
+    bark: flat(0xffffff), // tinted per instance
+    leaf: flat(0xffffff), // tinted per instance
+    rock: flat(0xffffff), // tinted per instance
+    rubble: flat(0x5c5a55),
+    stone: flat(0xb3ada0),
+    stoneLight: flat(0xc4bfb2),
+    dark: flat(0x2a2622),
+    wood: flat(0x5c3f24),
+    woodLight: flat(0x8a6a3e),
+    iron: flat(0x555a63),
+    gold: flat(0xd8b24a),
+    flag: flat(0xb83232, { side: THREE.DoubleSide }),
   };
 }
