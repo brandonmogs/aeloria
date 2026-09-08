@@ -49,14 +49,20 @@ await page.evaluate((id) => {
   const slot = window.__aeloria.player.inventory.slots.findIndex((s) => s && s.id === 'logs');
   window.__aeloria.push({ type: 'lightFire', entityId: id, slot });
 }, pid);
+// The castle range is registered as a permanent "fire" too, so look for the
+// campfire the player actually lit.
 const lit = await page
-  .waitForFunction(() => window.__aeloria.world.fires.size > 0, null, { timeout: 30000 })
+  .waitForFunction(
+    () => [...window.__aeloria.world.fires.values()].some((f) => f.kind === 'fire'),
+    null,
+    { timeout: 30000 },
+  )
   .then(() => true)
   .catch(() => false);
 
 // --- Cook -------------------------------------------------------------------
 await page.evaluate((id) => {
-  const fire = [...window.__aeloria.world.fires.values()][0];
+  const fire = [...window.__aeloria.world.fires.values()].find((f) => f.kind === 'fire');
   window.__aeloria.push({
     type: 'cook',
     entityId: id,
