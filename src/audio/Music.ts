@@ -22,6 +22,11 @@ export class Music {
     window.addEventListener('pointerdown', boot);
   }
 
+  /** Whether the player has music switched on. */
+  get isOn(): boolean {
+    return this.enabled;
+  }
+
   /** Flip the music on/off. Returns the new state. */
   toggle(): boolean {
     this.enabled = !this.enabled;

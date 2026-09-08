@@ -201,6 +201,8 @@ export class World {
       s.levelOf('defense'),
       s.levelOf('hitpoints'),
       s.levelOf('prayer'),
+      s.levelOf('range'),
+      s.levelOf('magic'),
     );
   }
 

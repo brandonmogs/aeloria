@@ -13,10 +13,11 @@ export class Hud {
   private fps = 0;
 
   constructor() {
-    // Debug info hides by default now that real UI exists; F3 brings it back.
+    // Debug info hides by default now that real UI exists; F12 brings it back
+    // (F1–F7 belong to the interface tabs, as in the real client).
     this.el.style.display = 'none';
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'F3') {
+      if (e.key === 'F12') {
         e.preventDefault();
         this.el.style.display = this.el.style.display === 'none' ? '' : 'none';
       }

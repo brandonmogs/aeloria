@@ -64,9 +64,9 @@ export interface CombatProfile {
 
 /**
  * The OSRS combat level: defence, hitpoints, and half of prayer weigh in at a
- * quarter each; attack and strength together at 0.325 (melee term). Ranged and
- * magic terms are omitted until those styles exist. A goblin lands on 2, a
- * fresh player on 3.
+ * quarter each, plus 0.325 × whichever is largest of attack+strength, 1.5 ×
+ * ranged, or 1.5 × magic. A goblin lands on 2, a fresh player on 3, and a
+ * maxed melee account on 126.
  */
 export function combatLevel(
   attack: number,
@@ -74,9 +74,14 @@ export function combatLevel(
   defense: number,
   hitpoints: number,
   prayer = 0,
+  ranged = 1,
+  magic = 1,
 ): number {
   const base = 0.25 * (defense + hitpoints + Math.floor(prayer / 2));
-  return Math.max(1, Math.floor(base + 0.325 * (attack + strength)));
+  const melee = 0.325 * (attack + strength);
+  const range = 0.325 * Math.floor((ranged * 3) / 2);
+  const mage = 0.325 * Math.floor((magic * 3) / 2);
+  return Math.max(1, Math.floor(base + Math.max(melee, range, mage)));
 }
 
 /** The skills an attack trains with a given style (controlled trains three). */

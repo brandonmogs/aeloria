@@ -1,3 +1,25 @@
+/* Aeloria interface — styled after the Old School RuneScape client: stone
+   panels with bevelled edges, a parchment chatbox, orange headings, yellow
+   values, and every piece of text carrying a one-pixel black shadow. */
+
+:root {
+  --stone: #3b3327;
+  --stone-dark: #2b2419;
+  --stone-light: #5b4d3b;
+  --edge-dark: #17120c;
+  --edge-light: #7a6a52;
+  --parchment: #d6c8a7;
+  --parchment-dark: #b9a984;
+  --orange: #ff981f;
+  --yellow: #ffff00;
+  --green: #00ff00;
+  --red: #ff0000;
+  --text: #ffffff;
+  --muted: #b5a88f;
+  --font: 13px "Trebuchet MS", Verdana, Arial, sans-serif;
+  --shadow: 1px 1px 0 #000;
+}
+
 * {
   margin: 0;
   padding: 0;
@@ -9,8 +31,14 @@ body {
   width: 100%;
   height: 100%;
   overflow: hidden;
-  background: #141a24;
-  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  background: #000;
+  font: var(--font);
+  color: var(--text);
+}
+
+button {
+  font: inherit;
+  color: inherit;
 }
 
 #game {
@@ -20,91 +48,121 @@ body {
   cursor: crosshair;
 }
 
+/* Bevelled stone: the frame every panel shares. */
+.stone {
+  background: var(--stone);
+  border: 2px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 var(--edge-light), inset -1px -1px 0 #201a12;
+}
+
 #hud {
   position: fixed;
   top: 12px;
   left: 12px;
-  padding: 10px 14px;
-  background: rgba(10, 14, 20, 0.7);
-  color: #cfe0ff;
-  border: 1px solid rgba(120, 160, 220, 0.25);
-  border-radius: 8px;
-  font-size: 12px;
-  line-height: 1.6;
+  padding: 8px 12px;
+  background: rgba(20, 16, 10, 0.85);
+  color: #e8dcc0;
+  border: 2px solid var(--edge-dark);
+  font: 12px/1.6 ui-monospace, Menlo, Consolas, monospace;
   white-space: pre;
   pointer-events: none;
-  backdrop-filter: blur(4px);
+  z-index: 30;
 }
 
 #controls {
   position: fixed;
-  bottom: 12px;
-  left: 12px;
-  color: #7f95b8;
+  top: 8px;
+  left: 10px;
+  color: rgba(255, 255, 255, 0.55);
   font-size: 11px;
+  text-shadow: var(--shadow);
   pointer-events: none;
   user-select: none;
 }
 
-/* The chatbox — an OSRS-style message panel above the controls hint. */
+/* --- Chatbox --------------------------------------------------------------- */
+
 #message-log {
   position: fixed;
-  bottom: 34px;
-  left: 12px;
-  width: 400px;
-  padding: 6px 4px 6px 10px;
-  background: rgba(14, 12, 8, 0.78);
-  border: 1px solid rgba(93, 84, 71, 0.9);
-  border-radius: 6px;
-  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.45);
+  bottom: 8px;
+  left: 8px;
+  width: 519px;
+  display: flex;
+  flex-direction: column;
+  background: var(--stone);
+  border: 2px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 var(--edge-light);
   user-select: none;
-  font-size: 12px;
-  line-height: 1.45;
-  backdrop-filter: blur(3px);
+  z-index: 4;
 }
 
 .log-lines {
-  max-height: 118px;
+  height: 126px;
+  margin: 3px;
+  padding: 4px 8px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  justify-content: flex-end;
+  gap: 1px;
+  background: linear-gradient(180deg, #dccfae, #c9bb97);
+  border: 1px solid #6d5b42;
+  box-shadow: inset 0 0 0 1px #efe5cc;
   scrollbar-width: thin;
-  scrollbar-color: rgba(93, 84, 71, 0.9) transparent;
-  padding-right: 6px;
+  scrollbar-color: #6d5b42 transparent;
 }
 
 .log-line {
-  color: #dce7f7;
-  animation: log-in 0.18s ease-out;
+  color: #000;
+  font-size: 13px;
+  line-height: 15px;
+  text-shadow: none;
 }
 
 .log-line.log-xp {
-  color: #9fc3e8;
+  color: #1a3f7a;
 }
 
 .log-line.log-levelup {
-  color: #f2d06b;
-  font-weight: 700;
+  color: #5c2a00;
 }
 
 .log-line.log-danger {
-  color: #e87a6e;
-  font-weight: 700;
+  color: #9a0000;
 }
 
-@keyframes log-in {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+.chat-tabs {
+  display: flex;
+  gap: 3px;
+  padding: 0 4px 4px;
 }
 
-/* Floating XP drops, drifting up just left of the minimap like OSRS. */
+.chat-tab {
+  flex: 1;
+  height: 22px;
+  background: linear-gradient(180deg, var(--stone-light), var(--stone));
+  border: 1px solid var(--edge-dark);
+  color: var(--orange);
+  font-size: 11px;
+  text-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.chat-tab:hover {
+  filter: brightness(1.15);
+}
+
+.chat-tab.active {
+  background: linear-gradient(180deg, #6f5f47, #4b3f2f);
+  color: var(--text);
+}
+
+.chat-report {
+  flex: 0 0 60px;
+}
+
+/* --- XP drops and level-up banner ------------------------------------------ */
+
 #xp-lane {
   position: fixed;
   top: 60px;
@@ -119,9 +177,9 @@ body {
   position: absolute;
   top: 150px;
   right: 0;
-  font: 700 15px ui-monospace, Menlo, Consolas, monospace;
-  color: #efe6c8;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.9);
+  font: 700 15px "Trebuchet MS", Verdana, sans-serif;
+  color: #fff;
+  text-shadow: var(--shadow);
   animation: xp-rise 1.15s ease-out forwards;
 }
 
@@ -142,56 +200,16 @@ body {
   }
 }
 
-/* OSRS-style right-click menu. */
-#context-menu {
-  position: fixed;
-  min-width: 160px;
-  background: #5d5447;
-  border: 1px solid #0e0c08;
-  border-radius: 3px;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
-  z-index: 20;
-  user-select: none;
-  font: 13px ui-monospace, Menlo, Consolas, monospace;
-  padding: 0 0 2px;
-}
-
-.ctx-title {
-  padding: 3px 8px 2px;
-  background: #0e0c08;
-  color: #5d5447;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  border-radius: 2px 2px 0 0;
-}
-
-.ctx-row {
-  padding: 3px 8px;
-  color: #ffffff;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.ctx-row:hover {
-  background: rgba(0, 0, 0, 0.28);
-}
-
-.ctx-target {
-  color: #f5d442;
-}
-
-/* Golden level-up banner, front and center for a couple of seconds. */
 .levelup-banner {
   position: fixed;
   top: 18%;
   left: 50%;
   transform: translateX(-50%);
-  padding: 14px 28px;
+  padding: 12px 26px;
   text-align: center;
-  background: linear-gradient(180deg, rgba(38, 30, 12, 0.92), rgba(24, 18, 8, 0.92));
-  border: 1px solid rgba(232, 200, 115, 0.85);
-  border-radius: 10px;
-  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.55), 0 0 32px rgba(232, 200, 115, 0.25);
+  background: var(--stone);
+  border: 2px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 var(--edge-light), 0 6px 24px rgba(0, 0, 0, 0.6);
   pointer-events: none;
   user-select: none;
   animation: banner 2.6s ease-in-out forwards;
@@ -199,15 +217,16 @@ body {
 }
 
 .levelup-title {
-  font: 700 18px ui-monospace, Menlo, Consolas, monospace;
-  color: #f2d06b;
-  letter-spacing: 0.06em;
+  font: 700 17px "Trebuchet MS", Verdana, sans-serif;
+  color: var(--orange);
+  text-shadow: var(--shadow);
 }
 
 .levelup-body {
   margin-top: 4px;
-  font: 600 13px ui-monospace, Menlo, Consolas, monospace;
-  color: #efe6c8;
+  font-size: 13px;
+  color: var(--text);
+  text-shadow: var(--shadow);
 }
 
 @keyframes banner {
@@ -231,7 +250,45 @@ body {
   }
 }
 
-/* World-view minimap in the top-right; compass pinned to its top-left corner. */
+/* --- Right-click menu ------------------------------------------------------ */
+
+#context-menu {
+  position: fixed;
+  min-width: 160px;
+  background: #5d5447;
+  border: 1px solid #0e0c08;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.55);
+  z-index: 20;
+  user-select: none;
+  font-size: 13px;
+  padding: 0 0 2px;
+}
+
+.ctx-title {
+  padding: 3px 8px 2px;
+  background: #0e0c08;
+  color: #5d5447;
+  font-weight: 700;
+}
+
+.ctx-row {
+  padding: 2px 8px;
+  color: #ffffff;
+  text-shadow: var(--shadow);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.ctx-row:hover {
+  background: rgba(0, 0, 0, 0.28);
+}
+
+.ctx-target {
+  color: var(--yellow);
+}
+
+/* --- Minimap, compass, orbs (top-right) ------------------------------------ */
+
 #compass {
   position: fixed;
   top: 4px;
@@ -250,14 +307,13 @@ body {
   width: 184px;
   height: 184px;
   border-radius: 50%;
-  border: 2px solid rgba(150, 180, 230, 0.35);
+  border: 3px solid var(--edge-dark);
+  box-shadow: 0 0 0 2px var(--stone-light), 0 2px 10px rgba(0, 0, 0, 0.45);
   background: #45603e;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.45);
   image-rendering: pixelated;
   cursor: pointer;
 }
 
-/* Status orbs hugging the minimap's lower-left arc. */
 #orbs {
   position: fixed;
   top: 70px;
@@ -282,8 +338,8 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 700 15px ui-monospace, Menlo, Consolas, monospace;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
+  font: 700 15px "Trebuchet MS", Verdana, sans-serif;
+  text-shadow: var(--shadow);
   pointer-events: none;
 }
 
@@ -292,11 +348,13 @@ body {
   height: 44px;
   margin-left: 4px;
   display: flex;
+  flex-direction: column;
+  gap: 0;
   align-items: center;
   justify-content: center;
   font-size: 20px;
   background: #2a2418;
-  border: 2.5px solid #0e0c08;
+  border: 2.5px solid var(--edge-dark);
   border-radius: 50%;
   cursor: pointer;
 }
@@ -306,99 +364,154 @@ body {
   box-shadow: 0 0 10px rgba(242, 208, 107, 0.45);
 }
 
-/* Tabbed side panel, anchored to the bottom-right like the OSRS interface. */
+.orb-run-num {
+  font: 700 9px "Trebuchet MS", Verdana, sans-serif;
+  color: var(--yellow);
+  text-shadow: var(--shadow);
+  pointer-events: none;
+}
+
+/* --- The interface strip (bottom-right) ------------------------------------ */
+
 #inventory-panel {
   position: fixed;
-  bottom: 12px;
-  right: 12px;
-  width: 224px;
-  padding: 8px;
-  background: rgba(10, 14, 20, 0.74);
-  border: 1px solid rgba(190, 160, 90, 0.35);
-  border-radius: 10px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
-  backdrop-filter: blur(4px);
-  color: #cfe0ff;
+  bottom: 8px;
+  right: 8px;
+  width: 248px;
+  display: flex;
+  flex-direction: column;
+  background: var(--stone);
+  border: 2px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 var(--edge-light), 0 4px 16px rgba(0, 0, 0, 0.5);
   z-index: 3;
   user-select: none;
 }
 
-.inv-tabs {
+.side-tabs {
   display: flex;
-  gap: 6px;
-  margin-bottom: 8px;
+  height: 36px;
+  background: var(--stone-dark);
 }
 
-.inv-tab {
+.side-tab {
   flex: 1;
-  padding: 6px 0;
-  font-size: 16px;
+  font-size: 17px;
   line-height: 1;
-  color: #9fb4d8;
-  background: rgba(40, 52, 70, 0.6);
-  border: 1px solid rgba(120, 150, 200, 0.2);
-  border-radius: 6px;
+  background: linear-gradient(180deg, var(--stone-light), var(--stone));
+  border: 1px solid var(--edge-dark);
   cursor: pointer;
-  transition: background 0.12s, color 0.12s;
 }
 
-.inv-tab:hover {
-  color: #e7eeff;
+.side-tab:hover {
+  filter: brightness(1.15);
 }
 
-.inv-tab.active {
-  color: #1a1408;
-  background: linear-gradient(180deg, #e8c873, #c79c4e);
-  border-color: rgba(232, 200, 115, 0.8);
+.side-tab.active {
+  background: linear-gradient(180deg, #8b2f22, #5a1c14);
+  box-shadow: inset 0 0 0 1px #b04a38;
+}
+
+.side-tab.empty {
+  filter: grayscale(0.6) brightness(0.8);
+}
+
+.side-body {
+  height: 322px;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.side-pane {
+  height: 100%;
+}
+
+.side-pane[hidden] {
+  display: none;
+}
+
+.pane-heading {
+  text-align: center;
+  color: var(--orange);
+  font-weight: 700;
+  font-size: 14px;
+  text-shadow: var(--shadow);
+  padding: 4px 0 8px;
+}
+
+.pane-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  text-shadow: var(--shadow);
+  padding: 4px 2px;
+}
+
+.pane-btn {
+  display: block;
+  width: 100%;
+  margin: 4px 0;
+  padding: 7px 0;
+  background: linear-gradient(180deg, var(--stone-light), var(--stone));
+  border: 1px solid var(--edge-dark);
+  color: var(--orange);
+  text-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.pane-btn:hover {
+  filter: brightness(1.15);
+}
+
+.pane-btn.active {
+  color: var(--green);
+}
+
+.logout-btn {
+  margin-top: 14px;
+  color: var(--red);
+}
+
+.music-track {
+  text-align: center;
+  color: var(--yellow);
+  text-shadow: var(--shadow);
+  padding: 6px 0 10px;
+}
+
+/* Backpack: OSRS's 4×7 grid with no slot boxes, just the items. */
+.inv-pane {
+  display: flex;
+  justify-content: center;
 }
 
 .inv-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
-
-.equip-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  grid-template-rows: repeat(4, 1fr);
-  gap: 8px;
-  justify-items: center;
-  padding: 6px 0;
+  grid-template-columns: repeat(4, 44px);
+  grid-auto-rows: 42px;
+  gap: 2px 4px;
 }
 
 .slot {
   position: relative;
-  aspect-ratio: 1;
-  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font: 9px ui-monospace, Menlo, Consolas, monospace;
+  font-size: 10px;
   text-align: center;
-  color: rgba(159, 180, 216, 0.45);
-  background: rgba(20, 26, 36, 0.75);
-  border: 1px solid rgba(120, 150, 200, 0.18);
-  border-radius: 5px;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.45);
+  color: rgba(255, 255, 255, 0.35);
+  text-shadow: var(--shadow);
+  border: 1px solid transparent;
   cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
-}
-
-.equip-grid .slot {
-  max-width: 52px;
-  border-color: rgba(190, 160, 90, 0.3);
 }
 
 .slot:hover {
-  border-color: rgba(232, 200, 115, 0.7);
-  background: rgba(34, 42, 56, 0.85);
+  border-color: rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .slot.filled {
-  color: #f4ead0;
-  font-size: 16px;
-  border-color: rgba(232, 200, 115, 0.55);
+  color: var(--text);
+  font-size: 22px;
 }
 
 .slot.filled:active {
@@ -410,92 +523,308 @@ body {
 }
 
 .slot.drop-hover {
-  border-color: #e8c873;
-  background: rgba(232, 200, 115, 0.22);
+  border-color: var(--yellow);
+  background: rgba(255, 255, 0, 0.12);
 }
 
-/* Skills tab */
-.skills-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
-}
-
-.skill {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  gap: 4px 6px;
-  padding: 6px 8px;
-  background: rgba(20, 26, 36, 0.75);
-  border: 1px solid rgba(120, 150, 200, 0.18);
-  border-radius: 6px;
-}
-
-.skill-icon {
-  font-size: 15px;
-  line-height: 1;
-}
-
-.skill-level {
-  justify-self: end;
-  font: 700 14px ui-monospace, Menlo, Consolas, monospace;
-  color: #f4ead0;
-}
-
-.skill-bar {
-  grid-column: 1 / -1;
-  height: 4px;
-  border-radius: 2px;
-  background: rgba(0, 0, 0, 0.4);
-  overflow: hidden;
-}
-
-.skill-bar-fill {
-  height: 100%;
-  width: 0;
-  border-radius: 2px;
-  transition: width 0.3s ease;
-}
-
-.skills-total {
-  grid-column: 1 / -1;
-  margin-top: 2px;
-  padding-top: 6px;
-  border-top: 1px solid rgba(120, 150, 200, 0.18);
-  text-align: center;
-  font: 600 12px ui-monospace, Menlo, Consolas, monospace;
-  color: #cfe0ff;
-}
-
-/* Stack counts, OSRS-style: a small yellow number in the slot corner. */
 .slot-qty {
   position: absolute;
-  top: 1px;
-  left: 3px;
-  font: 700 10px ui-monospace, Menlo, Consolas, monospace;
-  color: #f5d442;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.95);
+  top: 0;
+  left: 2px;
+  font: 700 10px "Trebuchet MS", Verdana, sans-serif;
+  color: var(--yellow);
+  text-shadow: var(--shadow);
   pointer-events: none;
 }
 
-/* Combat tab: weapon header, style grid, auto-retaliate toggle. */
-.combat-pane {
+/* Worn equipment: the paper doll plus bonuses. */
+.equip-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-rows: repeat(5, 40px);
+  gap: 4px;
+  justify-items: center;
+  padding: 2px 0;
+}
+
+.equip-grid .slot {
+  width: 44px;
+  height: 40px;
+  background: var(--stone-dark);
+  border: 1px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.5), inset -1px -1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.equip-stats {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--edge-dark);
+  text-align: center;
+  font-size: 12px;
+  color: var(--orange);
+  text-shadow: var(--shadow);
+  line-height: 1.6;
+}
+
+.equip-weight {
+  color: var(--yellow);
+}
+
+/* Skills tab: three columns of "level/level" cells, total level last. */
+.skills-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: 36px;
+  gap: 3px;
+}
+
+.skill {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 4px 0 6px;
+  background: var(--stone-dark);
+  border: 1px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 rgba(0, 0, 0, 0.5), inset -1px -1px 0 rgba(255, 255, 255, 0.06);
+  cursor: pointer;
+}
+
+.skill:hover {
+  background: #3a3125;
+}
+
+.skill-icon {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.skill-levels {
+  position: relative;
+  flex: 1;
+  height: 28px;
+  font: 700 11px "Trebuchet MS", Verdana, sans-serif;
+  color: var(--yellow);
+  text-shadow: var(--shadow);
+}
+
+.skill-cur {
+  position: absolute;
+  top: 0;
+  left: 2px;
+}
+
+.skill-sep {
+  position: absolute;
+  top: 7px;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--yellow);
+}
+
+.skill-base {
+  position: absolute;
+  bottom: 0;
+  right: 2px;
+}
+
+.skill.maxed .skill-cur,
+.skill.maxed .skill-base {
+  color: var(--green);
+}
+
+.skill-total {
+  flex-direction: column;
+  justify-content: center;
+  gap: 0;
+  cursor: default;
+}
+
+.skill-total-label {
+  font-size: 10px;
+  color: var(--orange);
+  text-shadow: var(--shadow);
+}
+
+.skill-total-num {
+  font: 700 12px "Trebuchet MS", Verdana, sans-serif;
+  color: var(--yellow);
+  text-shadow: var(--shadow);
+}
+
+#skill-tip {
+  position: fixed;
+  padding: 5px 9px;
+  background: var(--stone);
+  border: 2px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 var(--edge-light), 0 3px 10px rgba(0, 0, 0, 0.5);
+  color: var(--orange);
+  font-size: 12px;
+  line-height: 1.45;
+  text-shadow: var(--shadow);
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 25;
+}
+
+#skill-tip span {
+  color: var(--yellow);
+}
+
+/* The skill guide window. */
+#skill-guide {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 14;
+}
+
+#skill-guide[hidden] {
   display: none;
 }
 
+.guide-frame {
+  width: 560px;
+  height: 420px;
+  display: flex;
+  flex-direction: column;
+  background: var(--stone);
+  border: 2px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 var(--edge-light), 0 10px 40px rgba(0, 0, 0, 0.65);
+  user-select: none;
+}
+
+.guide-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border-bottom: 2px solid var(--edge-dark);
+}
+
+.guide-title {
+  color: var(--orange);
+  font-weight: 700;
+  font-size: 15px;
+  text-shadow: var(--shadow);
+}
+
+.guide-close {
+  width: 24px;
+  height: 22px;
+  background: linear-gradient(180deg, #8b2f22, #5a1c14);
+  border: 1px solid var(--edge-dark);
+  color: #fff;
+  cursor: pointer;
+}
+
+.guide-body {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+}
+
+.guide-tabs {
+  width: 130px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 6px;
+  border-right: 2px solid var(--edge-dark);
+  overflow-y: auto;
+}
+
+.guide-tab {
+  padding: 6px 4px;
+  background: linear-gradient(180deg, var(--stone-light), var(--stone));
+  border: 1px solid var(--edge-dark);
+  color: var(--orange);
+  font-size: 12px;
+  text-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.guide-tab.active {
+  background: linear-gradient(180deg, #6f5f47, #4b3f2f);
+  color: var(--text);
+}
+
+.guide-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--edge-light) transparent;
+}
+
+.guide-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.35);
+  color: var(--text);
+  font-size: 12px;
+  text-shadow: var(--shadow);
+}
+
+.guide-row.locked {
+  color: #8f8677;
+}
+
+.guide-level {
+  flex: 0 0 30px;
+  padding: 2px 0;
+  text-align: center;
+  background: var(--stone-dark);
+  border: 1px solid var(--edge-dark);
+  color: var(--yellow);
+  font-weight: 700;
+}
+
+.guide-row.locked .guide-level {
+  color: #a89f8a;
+}
+
+.guide-text {
+  flex: 1;
+}
+
+.guide-members {
+  flex: 0 0 auto;
+  padding: 0 4px;
+  border: 1px solid var(--edge-light);
+  color: var(--orange);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.guide-foot,
+.guide-empty {
+  padding: 8px 4px;
+  color: var(--muted);
+  font-size: 12px;
+  text-shadow: var(--shadow);
+}
+
+/* Combat tab. */
 .combat-weapon {
   text-align: center;
-  font: 700 14px ui-monospace, Menlo, Consolas, monospace;
-  color: #f4ead0;
+  font-weight: 700;
+  font-size: 14px;
+  color: var(--orange);
+  text-shadow: var(--shadow);
   padding: 4px 0 2px;
 }
 
 .combat-level {
   text-align: center;
-  font: 600 11px ui-monospace, Menlo, Consolas, monospace;
-  color: #9fb4d8;
-  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--yellow);
+  text-shadow: var(--shadow);
+  margin-bottom: 10px;
 }
 
 .style-grid {
@@ -509,185 +838,150 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  padding: 8px 0 6px;
-  background: rgba(20, 26, 36, 0.75);
-  border: 1px solid rgba(120, 150, 200, 0.18);
-  border-radius: 6px;
+  padding: 10px 0 8px;
+  background: linear-gradient(180deg, var(--stone-light), var(--stone));
+  border: 1px solid var(--edge-dark);
   cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
 }
 
 .style-btn:hover {
-  border-color: rgba(232, 200, 115, 0.7);
+  filter: brightness(1.12);
 }
 
 .style-btn.active {
-  background: rgba(87, 74, 30, 0.85);
-  border-color: rgba(232, 200, 115, 0.85);
-  box-shadow: 0 0 8px rgba(242, 208, 107, 0.25) inset;
+  background: linear-gradient(180deg, #8b2f22, #5a1c14);
 }
 
 .style-name {
-  font: 700 12px ui-monospace, Menlo, Consolas, monospace;
-  color: #f4ead0;
+  font-weight: 700;
+  font-size: 12px;
+  color: var(--orange);
+  text-shadow: var(--shadow);
 }
 
 .style-kind {
-  font: 600 9px ui-monospace, Menlo, Consolas, monospace;
-  letter-spacing: 0.05em;
-  color: #9fb4d8;
+  font-size: 10px;
+  color: var(--text);
+  text-shadow: var(--shadow);
   text-transform: capitalize;
 }
 
 .retaliate-btn {
   width: 100%;
-  margin-top: 8px;
-  padding: 7px 0;
-  font: 600 11px ui-monospace, Menlo, Consolas, monospace;
-  color: #9fb4d8;
-  background: rgba(20, 26, 36, 0.75);
-  border: 1px solid rgba(120, 150, 200, 0.18);
-  border-radius: 6px;
+  margin-top: 10px;
+  padding: 8px 0;
+  font-size: 12px;
+  color: var(--orange);
+  text-shadow: var(--shadow);
+  background: linear-gradient(180deg, var(--stone-light), var(--stone));
+  border: 1px solid var(--edge-dark);
   cursor: pointer;
 }
 
 .retaliate-btn.active {
-  color: #f4ead0;
-  border-color: rgba(232, 200, 115, 0.55);
+  color: var(--green);
 }
 
 /* Prayer tab. */
-.prayer-pane {
-  display: none;
-}
-
 .prayer-points {
   text-align: center;
-  font: 700 12px ui-monospace, Menlo, Consolas, monospace;
+  font-weight: 700;
+  font-size: 12px;
   color: #9fd8e8;
-  padding: 4px 0 8px;
+  text-shadow: var(--shadow);
+  padding: 2px 0 8px;
 }
 
 .prayer-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 6px;
+  gap: 4px;
 }
 
 .prayer-cell {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 2px;
-  padding: 7px 2px 5px;
-  background: rgba(20, 26, 36, 0.75);
-  border: 1px solid rgba(120, 150, 200, 0.18);
-  border-radius: 6px;
+  gap: 1px;
+  padding: 5px 2px 4px;
+  background: var(--stone-dark);
+  border: 1px solid var(--edge-dark);
   cursor: pointer;
-  transition: border-color 0.12s, background 0.12s;
 }
 
 .prayer-cell:hover {
-  border-color: rgba(232, 200, 115, 0.7);
+  background: #3a3125;
 }
 
 .prayer-cell.active {
-  background: rgba(63, 115, 130, 0.5);
-  border-color: rgba(159, 216, 232, 0.85);
-  box-shadow: 0 0 10px rgba(159, 216, 232, 0.3) inset;
+  background: #2f4b57;
+  box-shadow: inset 0 0 0 1px #6fb4cc;
 }
 
 .prayer-cell.locked {
-  opacity: 0.42;
+  opacity: 0.45;
 }
 
 .prayer-icon {
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1;
 }
 
 .prayer-name {
-  font: 600 9px ui-monospace, Menlo, Consolas, monospace;
-  color: #f4ead0;
+  font-size: 10px;
+  color: var(--text);
+  text-shadow: var(--shadow);
   text-align: center;
 }
 
 .prayer-req {
-  font: 600 8px ui-monospace, Menlo, Consolas, monospace;
-  color: #9fb4d8;
+  font-size: 9px;
+  color: var(--orange);
+  text-shadow: var(--shadow);
 }
 
-/* Equipment tab: bonuses under the paper doll. */
-.equip-pane {
-  display: none;
-}
+/* --- The bank ---------------------------------------------------------------- */
 
-.equip-stats {
-  margin-top: 6px;
-  padding-top: 8px;
-  border-top: 1px solid rgba(120, 150, 200, 0.18);
-  text-align: center;
-  font: 600 11px ui-monospace, Menlo, Consolas, monospace;
-  color: #9fb4d8;
-  line-height: 1.7;
-}
-
-.equip-weight {
-  color: #cfe0ff;
-}
-
-/* Run orb percentage readout. */
-.orb-run {
-  flex-direction: column;
-  gap: 0;
-}
-
-.orb-run-num {
-  font: 700 9px ui-monospace, Menlo, Consolas, monospace;
-  color: #f2d06b;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.9);
-  pointer-events: none;
-}
-
-/* The Bank of Aeloria. */
 #bank-panel {
   position: fixed;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  width: 460px;
+  width: 488px;
   max-height: 70vh;
   display: none;
   flex-direction: column;
-  gap: 10px;
-  padding: 12px 14px;
-  background: rgba(14, 12, 8, 0.92);
-  border: 2px solid rgba(190, 160, 90, 0.65);
-  border-radius: 10px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.65);
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--stone);
+  border: 2px solid var(--edge-dark);
+  box-shadow: inset 1px 1px 0 var(--edge-light), 0 10px 40px rgba(0, 0, 0, 0.65);
   z-index: 15;
   user-select: none;
 }
 
 .bank-title {
   text-align: center;
-  font: 700 16px ui-monospace, Menlo, Consolas, monospace;
-  letter-spacing: 0.05em;
-  color: #f2d06b;
-  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+  font-weight: 700;
+  font-size: 15px;
+  color: var(--orange);
+  text-shadow: var(--shadow);
 }
 
 .bank-grid {
   display: grid;
   grid-template-columns: repeat(8, 1fr);
-  gap: 6px;
+  gap: 4px;
   overflow-y: auto;
-  padding: 2px;
-  min-height: 60px;
+  padding: 4px;
+  min-height: 70px;
+  background: var(--stone-dark);
+  border: 1px solid var(--edge-dark);
 }
 
 .bank-slot {
-  font-size: 16px;
+  height: 42px;
+  font-size: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -697,8 +991,9 @@ body {
   grid-column: 1 / -1;
   text-align: center;
   padding: 18px 0;
-  font: 600 12px ui-monospace, Menlo, Consolas, monospace;
-  color: #9fb4d8;
+  font-size: 12px;
+  color: var(--muted);
+  text-shadow: var(--shadow);
 }
 
 .bank-footer {
@@ -709,21 +1004,19 @@ body {
 .bank-btn {
   flex: 1;
   padding: 8px 0;
-  font: 600 12px ui-monospace, Menlo, Consolas, monospace;
-  color: #1a1408;
-  background: linear-gradient(180deg, #e8c873, #c79c4e);
-  border: 1px solid rgba(232, 200, 115, 0.8);
-  border-radius: 6px;
+  font-size: 12px;
+  color: var(--orange);
+  text-shadow: var(--shadow);
+  background: linear-gradient(180deg, var(--stone-light), var(--stone));
+  border: 1px solid var(--edge-dark);
   cursor: pointer;
 }
 
 .bank-btn:hover {
-  filter: brightness(1.08);
+  filter: brightness(1.12);
 }
 
 .bank-close {
   flex: 0 0 90px;
-  color: #cfe0ff;
-  background: rgba(40, 52, 70, 0.8);
-  border-color: rgba(120, 150, 200, 0.4);
+  color: var(--red);
 }

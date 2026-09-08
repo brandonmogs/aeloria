@@ -34,6 +34,9 @@ import { Hud } from './ui/Hud';
 import { Compass } from './ui/Compass';
 import { MiniMap } from './ui/MiniMap';
 import { InventoryPanel } from './ui/InventoryPanel';
+import { SidePanel } from './ui/SidePanel';
+import { SkillGuidePanel } from './ui/SkillGuidePanel';
+import { buildSettingsPane, buildMusicPane, buildLogoutPane, buildPlaceholderPane } from './ui/miscTabs';
 import { BankPanel } from './ui/BankPanel';
 import { MessageLog } from './ui/MessageLog';
 import { Orbs } from './ui/Orbs';
@@ -128,7 +131,7 @@ function runGame(): void {
   const sfx = new Sfx();
   const music = new Music();
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'm' || e.key === 'M') {
+    if ((e.key === 'm' || e.key === 'M') && !e.ctrlKey && !e.metaKey) {
       log.add(music.toggle() ? 'Music: on.' : 'Music: off.');
     }
   });
@@ -159,7 +162,10 @@ function runGame(): void {
     onDepositAll: () => commandQueue.push({ type: 'bankDepositAll', entityId: player.id }),
   });
 
-  const panel = new InventoryPanel(world, player, {
+  const sidePanel = new SidePanel();
+  const skillGuide = new SkillGuidePanel();
+  const panel = new InventoryPanel(world, player, sidePanel, {
+    onSkillClick: (skill) => skillGuide.open(skill, player.skills.levelOf(skill)),
     onItemMenu: (index, item, x, y) => menu.open(x, y, itemMenuOptions(index, item)),
     onItemQuick: (index, item) => {
       if (bankPanel.isOpen) {
@@ -181,6 +187,27 @@ function runGame(): void {
     onTogglePrayer: (prayerId) =>
       commandQueue.push({ type: 'togglePrayer', entityId: player.id, prayerId }),
   });
+
+  // The rest of the interface strip: settings, music, logout, and the social
+  // tabs a single-player world has no use for yet.
+  const musicCb = {
+    onToggleMusic: () => {
+      const on = music.toggle();
+      log.add(on ? 'Music: on.' : 'Music: off.');
+      return on;
+    },
+    musicOn: () => music.isOn,
+  };
+  sidePanel.register('settings', buildSettingsPane(musicCb));
+  sidePanel.register('music', buildMusicPane(musicCb));
+  sidePanel.register('logout', buildLogoutPane());
+  sidePanel.register('quests', buildPlaceholderPane('Quest List', 'No quests are available yet.'));
+  sidePanel.register('magic', buildPlaceholderPane('Magic', 'You have not learned any spells yet.'));
+  sidePanel.register('clan', buildPlaceholderPane('Clan Chat', 'Aeloria is single-player for now.'));
+  sidePanel.register('friends', buildPlaceholderPane('Friends List', 'Aeloria is single-player for now.'));
+  sidePanel.register('account', buildPlaceholderPane('Account Management', 'Nothing to manage yet.'));
+  sidePanel.register('emotes', buildPlaceholderPane('Emotes', 'No emotes yet.'));
+  sidePanel.select('inventory');
 
   const minimap = new MiniMap(map, world, player.id, renderer.camera, props, (target) => {
     commandQueue.push(moveCommand(player.id, target));
@@ -451,6 +478,7 @@ function runGame(): void {
       closeBankIfFar();
       panel.refresh(); // reflect XP/level/inventory changes from this tick
       bankPanel.refresh();
+      skillGuide.refresh((skill) => player.skills.levelOf(skill));
     },
     onRender: (alpha, dt) => {
       water.update(dt);

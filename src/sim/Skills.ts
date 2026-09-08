@@ -1,44 +1,75 @@
 /**
  * A character's skills: experience points per skill, with levels derived from
- * the classic RuneScape XP curve. Like {@link Inventory}, this is pure
- * simulation state — no UI — so it can move to an authoritative server later.
+ * the RuneScape XP curve. Like {@link Inventory}, this is pure simulation
+ * state — no UI — so it can move to an authoritative server later.
  *
- * More skills slot in by extending {@link SkillId} and {@link SKILL_IDS}.
+ * All twenty-three Old School skills are here even though only some are
+ * trainable in Aeloria so far: the stats tab, the total level, and the skill
+ * guides are the real thing, and content just has to catch up.
  */
 export type SkillId =
   | 'attack'
-  | 'strength'
-  | 'defense'
   | 'hitpoints'
-  | 'range'
-  | 'prayer'
-  | 'magic'
-  | 'woodcutting'
   | 'mining'
+  | 'strength'
+  | 'agility'
+  | 'smithing'
+  | 'defense'
+  | 'herblore'
   | 'fishing'
+  | 'range'
+  | 'thieving'
   | 'cooking'
-  | 'firemaking';
+  | 'prayer'
+  | 'crafting'
+  | 'firemaking'
+  | 'magic'
+  | 'fletching'
+  | 'woodcutting'
+  | 'runecraft'
+  | 'slayer'
+  | 'farming'
+  | 'construction'
+  | 'hunter';
 
-/** Display/storage order. */
+/**
+ * Display/storage order: the OSRS stats tab, read row by row across its
+ * three columns (Attack, Hitpoints, Mining / Strength, Agility, Smithing / …).
+ */
 export const SKILL_IDS: readonly SkillId[] = [
   'attack',
-  'strength',
-  'defense',
   'hitpoints',
-  'range',
-  'prayer',
-  'magic',
-  'woodcutting',
   'mining',
+  'strength',
+  'agility',
+  'smithing',
+  'defense',
+  'herblore',
   'fishing',
+  'range',
+  'thieving',
   'cooking',
+  'prayer',
+  'crafting',
   'firemaking',
+  'magic',
+  'fletching',
+  'woodcutting',
+  'runecraft',
+  'slayer',
+  'farming',
+  'construction',
+  'hunter',
 ];
 
 export const MAX_LEVEL = 99;
 
+/** The most experience a skill can hold — 200 million, as in OSRS. */
+export const MAX_XP = 200_000_000;
+
 // The RuneScape XP table: cumulative experience required to reach each level.
-// XP_TABLE[L] is the total XP needed for level L (so level 1 = 0).
+// XP_TABLE[L] is the total XP needed for level L (so level 1 = 0, level 2 = 83,
+// level 99 = 13,034,431) — the wiki's formula, floor(¼ Σ floor(ℓ + 300·2^(ℓ/7))).
 const XP_TABLE = ((): number[] => {
   const table: number[] = [0, 0];
   let sum = 0;
@@ -63,20 +94,9 @@ export function levelForXp(xp: number): number {
 
 export class Skills {
   // Hitpoints starts at level 10 like OSRS; everything else at level 1.
-  private readonly xp: Record<SkillId, number> = {
-    attack: 0,
-    strength: 0,
-    defense: 0,
-    hitpoints: xpForLevel(10),
-    range: 0,
-    prayer: 0,
-    magic: 0,
-    woodcutting: 0,
-    mining: 0,
-    fishing: 0,
-    cooking: 0,
-    firemaking: 0,
-  };
+  private readonly xp: Record<SkillId, number> = Object.fromEntries(
+    SKILL_IDS.map((id) => [id, id === 'hitpoints' ? xpForLevel(10) : 0]),
+  ) as Record<SkillId, number>;
 
   xpOf(id: SkillId): number {
     return this.xp[id];
@@ -86,16 +106,25 @@ export class Skills {
     return levelForXp(this.xp[id]);
   }
 
-  /** Award experience, capped at the XP for the max level. Returns levels gained. */
+  /**
+   * Award experience. OSRS tracks XP in tenths of a point (4.5 for burying
+   * bones, 1.33 per damage in combat), so totals are kept to one decimal and
+   * capped at 200M. Returns the number of levels gained.
+   */
   addXp(id: SkillId, amount: number): number {
     const before = this.levelOf(id);
-    this.xp[id] = Math.min(this.xp[id] + amount, xpForLevel(MAX_LEVEL));
+    this.xp[id] = Math.min(MAX_XP, Math.round((this.xp[id] + amount) * 10) / 10);
     return this.levelOf(id) - before;
   }
 
-  /** Sum of every skill's level — the headline "total level". */
+  /** Sum of every skill's level — the headline "total level" (32 for a new account). */
   totalLevel(): number {
     return SKILL_IDS.reduce((sum, id) => sum + this.levelOf(id), 0);
+  }
+
+  /** Sum of every skill's experience. */
+  totalXp(): number {
+    return SKILL_IDS.reduce((sum, id) => sum + this.xp[id], 0);
   }
 
   /** Progress through the current level toward the next, 0..1 (1 if maxed). */

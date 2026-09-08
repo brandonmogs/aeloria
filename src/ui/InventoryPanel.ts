@@ -6,16 +6,7 @@ import { WEAPON_STYLES } from '../sim/combat';
 import { PRAYERS } from '../sim/prayers';
 import { Player } from '../sim/Player';
 import { World } from '../sim/World';
-
-type Tab = 'combat' | 'skills' | 'inventory' | 'armour' | 'prayer';
-
-const TAB_META: ReadonlyArray<[Tab, string, string]> = [
-  ['combat', '⚔️', 'Combat options'],
-  ['skills', '📊', 'Skills'],
-  ['inventory', '🎒', 'Inventory'],
-  ['armour', '🛡️', 'Worn equipment'],
-  ['prayer', '✨', 'Prayer'],
-];
+import { SidePanel } from './SidePanel';
 
 /** Where each equipment slot sits on the 3-column paper-doll layout. */
 interface EquipCell {
@@ -26,22 +17,22 @@ interface EquipCell {
 }
 
 const EQUIP_LAYOUT: ReadonlyArray<EquipCell> = [
-  { slot: 'cape', label: 'Cape', col: 1, row: 1 },
-  { slot: 'helmet', label: 'Helmet', col: 2, row: 1 },
-  { slot: 'weapon', label: 'Weapon', col: 1, row: 2 },
-  { slot: 'chestplate', label: 'Chest', col: 2, row: 2 },
-  { slot: 'shield', label: 'Shield', col: 3, row: 2 },
-  { slot: 'legs', label: 'Legs', col: 2, row: 3 },
-  { slot: 'gloves', label: 'Gloves', col: 1, row: 4 },
-  { slot: 'boots', label: 'Boots', col: 2, row: 4 },
-  { slot: 'ring', label: 'Ring', col: 3, row: 4 },
+  { slot: 'helmet', label: 'Head', col: 2, row: 1 },
+  { slot: 'cape', label: 'Cape', col: 1, row: 2 },
+  { slot: 'weapon', label: 'Weapon', col: 1, row: 3 },
+  { slot: 'chestplate', label: 'Body', col: 2, row: 3 },
+  { slot: 'shield', label: 'Shield', col: 3, row: 3 },
+  { slot: 'legs', label: 'Legs', col: 2, row: 4 },
+  { slot: 'gloves', label: 'Hands', col: 1, row: 5 },
+  { slot: 'boots', label: 'Feet', col: 2, row: 5 },
+  { slot: 'ring', label: 'Ring', col: 3, row: 5 },
 ];
 
 /** Live elements for one skill cell, so XP gains can repaint just that cell. */
 interface SkillCell {
-  level: HTMLElement;
-  fill: HTMLElement;
   cell: HTMLElement;
+  current: HTMLElement;
+  base: HTMLElement;
 }
 
 /** How the panel asks the game to do things — every mutation goes upward. */
@@ -57,25 +48,28 @@ export interface PanelCallbacks {
   onSetStyle?: (index: number) => void;
   onSetAutoRetaliate?: (on: boolean) => void;
   onTogglePrayer?: (id: string) => void;
+  /** Click a skill on the stats tab: open its skill guide. */
+  onSkillClick?: (skill: SkillId) => void;
 }
 
 /**
- * The tabbed side panel on the middle-right — the OSRS interface strip:
- * combat options, skills, backpack, worn equipment, and the prayer book, all
- * driven by the player's sim state. The panel never mutates the model
- * directly; every action funnels through {@link PanelCallbacks} into the
- * command queue, and the panel repaints from state on {@link refresh}.
+ * The tabs of the OSRS interface strip that read the player: combat options,
+ * skills, backpack, worn equipment, and the prayer book. The panes are built
+ * here and handed to the {@link SidePanel}, which owns the tab buttons. The
+ * panel never mutates the model directly; every action funnels through
+ * {@link PanelCallbacks} into the command queue, and the panel repaints from
+ * state on {@link refresh}.
  */
 export class InventoryPanel {
-  private readonly root = document.createElement('div');
   private readonly combatPane = document.createElement('div');
+  private readonly invPane = document.createElement('div');
   private readonly invGrid = document.createElement('div');
   private readonly equipPane = document.createElement('div');
   private readonly equipGrid = document.createElement('div');
   private readonly equipStats = document.createElement('div');
-  private readonly skillsGrid = document.createElement('div');
+  private readonly skillsPane = document.createElement('div');
   private readonly prayerPane = document.createElement('div');
-  private readonly tabs = new Map<Tab, HTMLButtonElement>();
+  private readonly tooltip = document.createElement('div');
   private readonly equipSlots = new Map<EquipSlot, HTMLElement>();
   private readonly invSlots: HTMLElement[] = [];
   private readonly skillCells = new Map<SkillId, SkillCell>();
@@ -88,23 +82,24 @@ export class InventoryPanel {
   private retaliateBtn!: HTMLElement;
   private styleSig = '';
   private dragFrom: SlotRef | null = null;
+  private hoveredSkill: SkillId | null = null;
 
   constructor(
     private readonly world: World,
     private readonly player: Player,
+    sidePanel: SidePanel,
     private readonly cb: PanelCallbacks = {},
   ) {
-    this.root.id = 'inventory-panel';
-    this.root.appendChild(this.buildTabBar());
-
     this.buildCombatTab();
 
+    this.invPane.className = 'inv-pane';
     this.invGrid.className = 'inv-grid';
     for (let i = 0; i < INVENTORY_SIZE; i++) {
       const slot = this.makeSlot({ area: 'inventory', index: i });
       this.invSlots.push(slot);
       this.invGrid.appendChild(slot);
     }
+    this.invPane.appendChild(this.invGrid);
 
     this.equipPane.className = 'equip-pane';
     this.equipGrid.className = 'equip-grid';
@@ -122,14 +117,16 @@ export class InventoryPanel {
     this.buildSkillsTab();
     this.buildPrayerTab();
 
-    this.root.appendChild(this.combatPane);
-    this.root.appendChild(this.invGrid);
-    this.root.appendChild(this.equipPane);
-    this.root.appendChild(this.skillsGrid);
-    this.root.appendChild(this.prayerPane);
-    document.body.appendChild(this.root);
+    this.tooltip.id = 'skill-tip';
+    this.tooltip.hidden = true;
+    document.body.appendChild(this.tooltip);
 
-    this.select('inventory');
+    sidePanel.register('combat', this.combatPane);
+    sidePanel.register('skills', this.skillsPane);
+    sidePanel.register('inventory', this.invPane);
+    sidePanel.register('equipment', this.equipPane);
+    sidePanel.register('prayer', this.prayerPane);
+
     this.refresh();
   }
 
@@ -189,58 +186,126 @@ export class InventoryPanel {
       el.classList.toggle('active', i === active);
     });
 
-    this.retaliateBtn.textContent = `Auto retaliate: ${this.player.autoRetaliate ? 'On' : 'Off'}`;
+    this.retaliateBtn.textContent = `Auto Retaliate: ${this.player.autoRetaliate ? 'On' : 'Off'}`;
     this.retaliateBtn.classList.toggle('active', this.player.autoRetaliate);
   }
 
   // --- Skills tab -----------------------------------------------------------
 
+  /**
+   * The OSRS stats tab: three columns of skill cells showing "level/level"
+   * (current over base), the total level in the last cell, an XP tooltip on
+   * hover, and a click that opens the skill guide.
+   */
   private buildSkillsTab(): void {
-    this.skillsGrid.className = 'skills-grid';
+    this.skillsPane.className = 'skills-pane';
+    const grid = document.createElement('div');
+    grid.className = 'skills-grid';
     for (const id of SKILL_IDS) {
       const meta = SKILL_META[id];
       const cell = document.createElement('div');
       cell.className = 'skill';
-      cell.title = meta.label;
+      cell.dataset.skill = id;
 
       const icon = document.createElement('span');
       icon.className = 'skill-icon';
       icon.textContent = meta.icon;
 
-      const level = document.createElement('span');
-      level.className = 'skill-level';
+      const levels = document.createElement('span');
+      levels.className = 'skill-levels';
+      const current = document.createElement('span');
+      current.className = 'skill-cur';
+      const sep = document.createElement('span');
+      sep.className = 'skill-sep';
+      sep.textContent = '/';
+      const base = document.createElement('span');
+      base.className = 'skill-base';
+      levels.append(current, sep, base);
 
-      const bar = document.createElement('div');
-      bar.className = 'skill-bar';
-      const fill = document.createElement('div');
-      fill.className = 'skill-bar-fill';
-      fill.style.background = meta.color;
-      bar.appendChild(fill);
-
-      cell.append(icon, level, bar);
-      this.skillsGrid.appendChild(cell);
-      this.skillCells.set(id, { level, fill, cell });
+      cell.append(icon, levels);
+      cell.addEventListener('pointerenter', (e) => this.showSkillTip(id, e.clientX, e.clientY));
+      cell.addEventListener('pointermove', (e) => this.moveSkillTip(e.clientX, e.clientY));
+      cell.addEventListener('pointerleave', () => this.hideSkillTip());
+      cell.addEventListener('click', () => this.cb.onSkillClick?.(id));
+      grid.appendChild(cell);
+      this.skillCells.set(id, { cell, current, base });
     }
 
-    this.skillsTotal = document.createElement('div');
-    this.skillsTotal.className = 'skills-total';
-    this.skillsGrid.appendChild(this.skillsTotal);
+    const total = document.createElement('div');
+    total.className = 'skill skill-total';
+    total.title = 'Total level';
+    const label = document.createElement('span');
+    label.className = 'skill-total-label';
+    label.textContent = 'Total level:';
+    this.skillsTotal = document.createElement('span');
+    this.skillsTotal.className = 'skill-total-num';
+    total.append(label, this.skillsTotal);
+    total.addEventListener('pointerenter', (e) => this.showTotalTip(e.clientX, e.clientY));
+    total.addEventListener('pointermove', (e) => this.moveSkillTip(e.clientX, e.clientY));
+    total.addEventListener('pointerleave', () => this.hideSkillTip());
+    grid.appendChild(total);
+
+    this.skillsPane.appendChild(grid);
   }
 
   private renderSkills(): void {
     const skills = this.player.skills;
     for (const [id, cell] of this.skillCells) {
       const level = skills.levelOf(id);
-      cell.level.textContent = String(level);
-      cell.fill.style.width = `${Math.round(skills.progressOf(id) * 100)}%`;
-      const xp = Math.floor(skills.xpOf(id));
-      cell.cell.title =
-        level >= MAX_LEVEL
-          ? `${SKILL_META[id].label}: ${xp.toLocaleString()} xp (maxed)`
-          : `${SKILL_META[id].label}: ${xp.toLocaleString()} xp — ` +
-            `${(xpForLevel(level + 1) - xp).toLocaleString()} to level ${level + 1}`;
+      cell.current.textContent = String(level);
+      cell.base.textContent = String(level);
+      cell.cell.classList.toggle('maxed', level >= MAX_LEVEL);
     }
-    this.skillsTotal.textContent = `Total level: ${skills.totalLevel()}`;
+    this.skillsTotal.textContent = String(skills.totalLevel());
+    if (this.hoveredSkill) this.paintSkillTip(this.hoveredSkill);
+  }
+
+  private showSkillTip(id: SkillId, x: number, y: number): void {
+    this.hoveredSkill = id;
+    this.paintSkillTip(id);
+    this.tooltip.hidden = false;
+    this.moveSkillTip(x, y);
+  }
+
+  private showTotalTip(x: number, y: number): void {
+    this.hoveredSkill = null;
+    const skills = this.player.skills;
+    this.tooltip.innerHTML =
+      `<div>Total level: <span>${skills.totalLevel().toLocaleString()}</span></div>` +
+      `<div>Total XP: <span>${Math.floor(skills.totalXp()).toLocaleString()}</span></div>`;
+    this.tooltip.hidden = false;
+    this.moveSkillTip(x, y);
+  }
+
+  /** The OSRS hover box: current XP, the next level's threshold, what's left. */
+  private paintSkillTip(id: SkillId): void {
+    const skills = this.player.skills;
+    const level = skills.levelOf(id);
+    const xp = Math.floor(skills.xpOf(id));
+    const label = SKILL_META[id].label;
+    if (level >= MAX_LEVEL) {
+      this.tooltip.innerHTML =
+        `<div>${label} XP: <span>${xp.toLocaleString()}</span></div>` +
+        `<div>Skill mastery — level ${MAX_LEVEL}</div>`;
+      return;
+    }
+    const next = xpForLevel(level + 1);
+    this.tooltip.innerHTML =
+      `<div>${label} XP: <span>${xp.toLocaleString()}</span></div>` +
+      `<div>Next level at: <span>${next.toLocaleString()}</span></div>` +
+      `<div>Remaining XP: <span>${(next - xp).toLocaleString()}</span></div>`;
+  }
+
+  private moveSkillTip(x: number, y: number): void {
+    // Sit to the left of the cursor so the box never hides the cell under it.
+    const rect = this.tooltip.getBoundingClientRect();
+    this.tooltip.style.left = `${Math.max(4, x - rect.width - 14)}px`;
+    this.tooltip.style.top = `${Math.min(window.innerHeight - rect.height - 4, y + 12)}px`;
+  }
+
+  private hideSkillTip(): void {
+    this.hoveredSkill = null;
+    this.tooltip.hidden = true;
   }
 
   // --- Prayer tab -----------------------------------------------------------
@@ -286,30 +351,6 @@ export class InventoryPanel {
       `<div>Attack ${fmtBonus(bonus.attack)} · Strength ${fmtBonus(bonus.strength)}</div>` +
       `<div>Defence ${fmtBonus(bonus.defense)} · Prayer ${fmtBonus(bonus.prayer)}</div>` +
       `<div class="equip-weight">Weight: ${weight.toFixed(1)} kg</div>`;
-  }
-
-  private buildTabBar(): HTMLElement {
-    const bar = document.createElement('div');
-    bar.className = 'inv-tabs';
-    for (const [tab, icon, tip] of TAB_META) {
-      const btn = document.createElement('button');
-      btn.className = 'inv-tab';
-      btn.textContent = icon;
-      btn.title = tip;
-      btn.addEventListener('click', () => this.select(tab));
-      this.tabs.set(tab, btn);
-      bar.appendChild(btn);
-    }
-    return bar;
-  }
-
-  private select(tab: Tab): void {
-    for (const [name, btn] of this.tabs) btn.classList.toggle('active', name === tab);
-    this.combatPane.style.display = tab === 'combat' ? 'block' : 'none';
-    this.invGrid.style.display = tab === 'inventory' ? 'grid' : 'none';
-    this.equipPane.style.display = tab === 'armour' ? 'block' : 'none';
-    this.skillsGrid.style.display = tab === 'skills' ? 'grid' : 'none';
-    this.prayerPane.style.display = tab === 'prayer' ? 'block' : 'none';
   }
 
   /** Create a slot element wired for click + drag-and-drop against `ref`. */
