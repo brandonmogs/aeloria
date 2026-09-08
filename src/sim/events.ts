@@ -10,7 +10,9 @@ export type SfxName =
   | 'prayerOn'
   | 'prayerOff'
   | 'recharge'
-  | 'coins';
+  | 'coins'
+  | 'bow'
+  | 'cast';
 
 /**
  * Things that happened during a tick that the UI wants to announce: XP drops,

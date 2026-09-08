@@ -10,10 +10,10 @@ import { Bonuses } from './items';
  * by changing these.
  */
 
-export type AttackStyle = 'accurate' | 'aggressive' | 'defensive' | 'controlled';
+export type AttackStyle = 'accurate' | 'aggressive' | 'defensive' | 'controlled' | 'rapid' | 'longrange';
 
-/** Which of the defender's three melee defence bonuses an attack tests. */
-export type AttackType = 'stab' | 'slash' | 'crush';
+/** Which of the defender's defence bonuses an attack tests. */
+export type AttackType = 'stab' | 'slash' | 'crush' | 'ranged' | 'magic';
 
 /** The attack-style sets weapons expose, mirroring OSRS combat-tab layouts. */
 export type WeaponType =
@@ -27,7 +27,9 @@ export type WeaponType =
   | 'battleaxe'
   | '2h'
   | 'axe'
-  | 'pickaxe';
+  | 'pickaxe'
+  | 'bow'
+  | 'staff';
 
 export interface StyleOption {
   /** Button label ("Chop", "Slash", "Punch"...). */
@@ -51,6 +53,8 @@ export const WEAPON_STYLES: Record<WeaponType, readonly StyleOption[]> = {
   '2h': [opt('Chop', 'accurate', 'slash'), opt('Slash', 'aggressive', 'slash'), opt('Smash', 'aggressive', 'crush'), opt('Block', 'defensive', 'slash')],
   axe: [opt('Chop', 'accurate', 'slash'), opt('Hack', 'aggressive', 'slash'), opt('Smash', 'aggressive', 'crush'), opt('Block', 'defensive', 'slash')],
   pickaxe: [opt('Spike', 'accurate', 'stab'), opt('Impale', 'aggressive', 'stab'), opt('Smash', 'aggressive', 'crush'), opt('Block', 'defensive', 'stab')],
+  bow: [opt('Accurate', 'accurate', 'ranged'), opt('Rapid', 'rapid', 'ranged'), opt('Longrange', 'longrange', 'ranged')],
+  staff: [opt('Bash', 'accurate', 'crush'), opt('Pound', 'aggressive', 'crush'), opt('Focus', 'defensive', 'crush')],
 };
 
 export interface CombatProfile {
@@ -93,11 +97,12 @@ export function combatLevel(
   return Math.max(1, Math.floor(base + Math.max(melee, range, mage)));
 }
 
-/** The skills an attack trains with a given style (controlled trains three). */
+/** The skills a melee attack trains with a given style (controlled trains three). */
 export function styleSkills(style: AttackStyle): readonly SkillId[] {
   if (style === 'aggressive') return ['strength'];
   if (style === 'defensive') return ['defense'];
   if (style === 'controlled') return ['attack', 'strength', 'defense'];
+  if (style === 'rapid' || style === 'longrange') return ['range'];
   return ['attack'];
 }
 
@@ -124,11 +129,26 @@ function attackRoll(p: CombatProfile): number {
   return eff * (bonus + 64);
 }
 
+/** The defender's melee defence bonus against an attack type. */
+export function defenceBonusAgainst(b: Bonuses, against: AttackType): number {
+  switch (against) {
+    case 'stab':
+      return b.dstab;
+    case 'slash':
+      return b.dslash;
+    case 'ranged':
+      return b.drange;
+    case 'magic':
+      return b.dmagic;
+    default:
+      return b.dcrush;
+  }
+}
+
 /** The defender's roll uses its defence bonus against the attacker's type. */
 function defenseRoll(p: CombatProfile, against: AttackType): number {
   const eff = effective(p.defense, p.prayerDefense, styleBonus(p.style, 'defensive'));
-  const bonus = against === 'stab' ? p.bonuses.dstab : against === 'slash' ? p.bonuses.dslash : p.bonuses.dcrush;
-  return eff * (bonus + 64);
+  return eff * (defenceBonusAgainst(p.bonuses, against) + 64);
 }
 
 /** Probability in [0, 1] that an attack lands against a defender. */

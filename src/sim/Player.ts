@@ -85,6 +85,12 @@ export class Player extends Entity {
   /** Index into the current weapon's style list (see WEAPON_STYLES). */
   styleIndex = 0;
 
+  /** The spell a wielded staff casts in place of a melee swing, or null. */
+  autocastSpell: string | null = null;
+
+  /** A single spell queued by clicking it on a target; cleared once cast. */
+  castOnce: string | null = null;
+
   /** Fight back automatically when attacked (the OSRS combat-tab toggle). */
   autoRetaliate = true;
 

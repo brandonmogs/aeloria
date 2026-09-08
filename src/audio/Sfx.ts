@@ -120,6 +120,18 @@ export class Sfx {
     this.tone({ freq: 660, to: 440, dur: 0.14, type: 'triangle', gain: 0.24 });
   }
 
+  /** A bowstring twang. */
+  bow(): void {
+    this.tone({ freq: 380, to: 120, dur: 0.12, type: 'triangle', gain: 0.3 });
+    this.noise({ dur: 0.05, freq: 2400, q: 1.2, gain: 0.15 });
+  }
+
+  /** A rising whoosh — a spell leaving the caster's hands. */
+  cast(): void {
+    this.noise({ dur: 0.22, freq: 900, q: 0.5, gain: 0.3 });
+    this.tone({ freq: 300, to: 900, dur: 0.2, type: 'sine', gain: 0.2 });
+  }
+
   /** A bright clink of coins changing hands. */
   coins(): void {
     this.tone({ freq: 2200, to: 1800, dur: 0.06, type: 'triangle', gain: 0.22 });

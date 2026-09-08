@@ -37,11 +37,16 @@ RSMod) for engine structure.
   stats tab is the OSRS one (current/base cells, total level, hover XP box),
   and clicking a skill opens its **skill guide**: every unlock by level,
   straight from the wiki's level-up tables.
-- **Combat** — OSRS melee maths with typed attack bonuses, four combat
-  options per weapon category (dagger, sword, scimitar, longsword, mace,
-  warhammer, battleaxe, 2h, axe, pickaxe), style-routed XP, weapon speeds,
-  two-handed rules, auto-retaliate, single-way combat, hitsplats, and the
-  full combat-level formula. Monsters carry their wiki stats and bonuses.
+- **Combat** — all three styles with OSRS maths. Melee with typed attack
+  bonuses and four combat options per weapon category (dagger, sword,
+  scimitar, longsword, mace, warhammer, battleaxe, 2h, axe, pickaxe). Ranged
+  with a shortbow and arrows in the ammo slot (Accurate / Rapid / Longrange,
+  arrows mostly recoverable). Magic with the standard spellbook: click a spell
+  then a monster to cast, or autocast through a staff (the staff of air
+  supplies air runes). Projectiles fly and land a tick or two later like the
+  real thing. Style-routed XP, weapon speeds, two-handed rules,
+  auto-retaliate, single-way combat, hitsplats, and the full combat-level
+  formula. Monsters carry their wiki stats and bonuses.
 - **Equipment** — bronze through rune weapon and armour sets, leather, the
   amulet slot, and an Equipment Stats sheet listing every bonus.
 - **Skilling loops** — woodcutting (regular, oak, willow), mining (copper,
@@ -62,7 +67,7 @@ RSMod) for engine structure.
 - **Prayer** — the full 29-prayer book with wiki drain rates; melee stat
   prayers, Protect from Melee, Rapid Heal, and Protect Item do their jobs.
 - **Magic** — the standard spellbook laid out with levels, runes, and max
-  hits (casting arrives with magic combat).
+  hits; the strike, bolt, blast, wave, and surge spells cast for real.
 - **Bank, run energy, death** — booths in the courtyard; the wiki's energy
   drain and regen; three (four with Protect Item) most valuable items kept.
 - **Map** — a rotating, player-centred minimap with NPC and item dots and
@@ -82,7 +87,7 @@ npm run dev      # starts Vite on http://localhost:2006 and opens the game
 
 Other scripts: `npm run build` (typecheck + bundle), `npm run typecheck`,
 `npm test` (boots a dev server and drives the game in headless Edge through
-eighteen end-to-end scenarios), `node scripts/build-items.mjs` and
+nineteen end-to-end scenarios), `node scripts/build-items.mjs` and
 `node scripts/build-skill-guides.mjs` (refresh the wiki-derived data).
 
 **Controls** — left-click to act (attack / talk / take / chop / mine / net /
@@ -122,7 +127,6 @@ the whole game's load-bearing decision.
 
 ## Roadmap
 
-Ranged and magic combat (the spellbook and rune drops are already in place),
-more of the map (a village outside the walls, a second mine), crafting and
-fletching, a bigger quest with a real villain, and then the authoritative
-server split.
+More of the map (a village outside the walls, a second mine), crafting and
+fletching, utility and teleport spells, a bigger quest with a real villain,
+saving progress, and then the authoritative server split.

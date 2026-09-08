@@ -4,6 +4,7 @@ import { SkillId, SKILL_IDS, xpForLevel, MAX_LEVEL } from '../sim/Skills';
 import { SKILL_META } from './skillMeta';
 import { WEAPON_STYLES } from '../sim/combat';
 import { PRAYERS } from '../sim/prayers';
+import { SPELLS } from '../sim/spells';
 import { Player } from '../sim/Player';
 import { World } from '../sim/World';
 import { SidePanel } from './SidePanel';
@@ -20,6 +21,7 @@ const EQUIP_LAYOUT: ReadonlyArray<EquipCell> = [
   { slot: 'helmet', label: 'Head', col: 2, row: 1 },
   { slot: 'cape', label: 'Cape', col: 1, row: 2 },
   { slot: 'amulet', label: 'Neck', col: 2, row: 2 },
+  { slot: 'ammo', label: 'Ammo', col: 3, row: 2 },
   { slot: 'weapon', label: 'Weapon', col: 1, row: 3 },
   { slot: 'chestplate', label: 'Body', col: 2, row: 3 },
   { slot: 'shield', label: 'Shield', col: 3, row: 3 },
@@ -51,6 +53,8 @@ export interface PanelCallbacks {
   onTogglePrayer?: (id: string) => void;
   /** Click a skill on the stats tab: open its skill guide. */
   onSkillClick?: (skill: SkillId) => void;
+  /** The combat tab's Autocast button (only shown with a staff wielded). */
+  onAutocastClick?: () => void;
 }
 
 /**
@@ -81,6 +85,7 @@ export class InventoryPanel {
   private combatLevel!: HTMLElement;
   private styleRow!: HTMLElement;
   private retaliateBtn!: HTMLElement;
+  private autocastBtn!: HTMLElement;
   private styleSig = '';
   private dragFrom: SlotRef | null = null;
   private hoveredSkill: SkillId | null = null;
@@ -159,7 +164,11 @@ export class InventoryPanel {
     this.retaliateBtn.addEventListener('click', () => {
       this.cb.onSetAutoRetaliate?.(!this.player.autoRetaliate);
     });
-    this.combatPane.append(this.combatWeapon, this.combatLevel, this.styleRow, this.retaliateBtn);
+    this.autocastBtn = document.createElement('button');
+    this.autocastBtn.className = 'retaliate-btn autocast-btn';
+    this.autocastBtn.hidden = true;
+    this.autocastBtn.addEventListener('click', () => this.cb.onAutocastClick?.());
+    this.combatPane.append(this.combatWeapon, this.combatLevel, this.styleRow, this.autocastBtn, this.retaliateBtn);
   }
 
   private renderCombat(): void {
@@ -189,6 +198,12 @@ export class InventoryPanel {
 
     this.retaliateBtn.textContent = `Auto Retaliate: ${this.player.autoRetaliate ? 'On' : 'Off'}`;
     this.retaliateBtn.classList.toggle('active', this.player.autoRetaliate);
+
+    // Staves offer autocast, like the real combat tab.
+    this.autocastBtn.hidden = type !== 'staff';
+    const autocast = SPELLS.find((s) => s.id === this.player.autocastSpell);
+    this.autocastBtn.textContent = `Autocast: ${autocast ? autocast.name : 'None'}`;
+    this.autocastBtn.classList.toggle('active', autocast !== undefined);
   }
 
   // --- Skills tab -----------------------------------------------------------

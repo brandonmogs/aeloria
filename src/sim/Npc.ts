@@ -31,6 +31,8 @@ export interface NpcConfig {
   attack: number;
   strength: number;
   defense: number;
+  /** Magic level, for its defence against spells (defaults to 1). */
+  magic?: number;
   maxHitpoints: number;
   /** Ticks between attacks (4 ≈ a standard weapon). */
   attackSpeed: number;
@@ -71,6 +73,7 @@ export class Npc extends Entity {
   readonly attack: number;
   readonly strength: number;
   readonly defense: number;
+  readonly magic: number;
   readonly attackSpeed: number;
   readonly attackType: AttackType;
   readonly bonuses: Partial<Bonuses>;
@@ -103,6 +106,7 @@ export class Npc extends Entity {
     this.attack = config.attack;
     this.strength = config.strength;
     this.defense = config.defense;
+    this.magic = config.magic ?? 1;
     this.attackSpeed = config.attackSpeed;
     this.attackType = config.attackType ?? 'crush';
     this.bonuses = config.bonuses ?? {};

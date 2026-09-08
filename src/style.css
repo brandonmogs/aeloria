@@ -1557,3 +1557,25 @@ button {
   font-size: 10px;
   line-height: 1.3;
 }
+
+/* Spell selection and autocast marks on the spellbook. */
+.spell.selected {
+  box-shadow: inset 0 0 0 2px var(--yellow);
+}
+
+.spell.autocast {
+  box-shadow: inset 0 0 0 2px #6fb4cc;
+}
+
+.magic-hint {
+  min-height: 16px;
+  margin-bottom: 4px;
+  text-align: center;
+  color: var(--yellow);
+  font-size: 11px;
+  text-shadow: var(--shadow);
+}
+
+.autocast-btn {
+  margin-top: 6px;
+}

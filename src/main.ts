@@ -33,6 +33,7 @@ import { EntityView } from './render/EntityView';
 import { GroundItemView } from './render/GroundItemView';
 import { FireView } from './render/FireView';
 import { FishingSpotView } from './render/FishingSpotView';
+import { ProjectileView } from './render/ProjectileView';
 import { InputController } from './input/InputController';
 import { xpForLevel } from './sim/Skills';
 import { ItemStack, itemDef } from './sim/items';
@@ -145,6 +146,7 @@ function runGame(): void {
   const groundView = new GroundItemView(renderer.scene, world, terrain);
   const fireView = new FireView(renderer.scene, world, terrain);
   const spotView = new FishingSpotView(renderer.scene, world);
+  const projectileView = new ProjectileView(renderer.scene, world, terrain);
   const hud = new Hud();
   const compass = new Compass(renderer.camera);
   const log = new MessageLog();
@@ -221,6 +223,15 @@ function runGame(): void {
 
   const panel = new InventoryPanel(world, player, sidePanel, {
     onSkillClick: (skill) => skillGuide.open(skill, player.skills.levelOf(skill)),
+    onAutocastClick: () => {
+      if (player.autocastSpell) {
+        commandQueue.push({ type: 'setAutocast', entityId: player.id, spellId: null });
+        return;
+      }
+      choosingAutocast = true;
+      magicTab.setHint('Choose a spell to autocast.');
+      sidePanel.select('magic');
+    },
     onItemMenu: (index, item, x, y) => menu.open(x, y, itemMenuOptions(index, item)),
     onItemQuick: (index, item) => {
       if (bankPanel.isOpen) {
@@ -261,8 +272,24 @@ function runGame(): void {
   sidePanel.register('settings', buildSettingsPane(musicCb));
   sidePanel.register('music', buildMusicPane(musicCb));
   sidePanel.register('logout', buildLogoutPane());
-  const magicTab = new MagicTab(player, sidePanel, () => {
-    log.add('You need runes to cast that, and magic combat has not reached Aeloria yet.');
+  // Clicking a combat spell arms it for the next click on a monster — or,
+  // while the combat tab is asking, sets it as the staff's autocast.
+  let choosingAutocast = false;
+  const magicTab = new MagicTab(player, sidePanel, (spell) => {
+    if (spell.maxHit === undefined) {
+      log.add(`${spell.name} isn't something you can cast in Aeloria yet.`);
+      return;
+    }
+    if (choosingAutocast) {
+      choosingAutocast = false;
+      commandQueue.push({ type: 'setAutocast', entityId: player.id, spellId: spell.id });
+      magicTab.setHint('');
+      sidePanel.select('combat');
+      return;
+    }
+    const armed = magicTab.selected?.id === spell.id ? null : spell.id;
+    magicTab.select(armed);
+    magicTab.setHint(armed ? `Cast ${spell.name}: click a monster.` : '');
   });
   const smithingPanel = new SmithingPanel(player, {
     onSmith: (item, count) => commandQueue.push({ type: 'smith', entityId: player.id, item, count }),
@@ -427,7 +454,12 @@ function runGame(): void {
       const node = world.resourceNodeAt(target);
       const object = world.interactableAt(target);
       if (npc) {
-        if (npc.attackable) commandQueue.push(attackCommand(player.id, npc.id));
+        const spell = magicTab.selected;
+        if (npc.attackable && spell) {
+          commandQueue.push({ type: 'castSpell', entityId: player.id, spellId: spell.id, targetId: npc.id });
+          magicTab.select(null);
+          magicTab.setHint('');
+        } else if (npc.attackable) commandQueue.push(attackCommand(player.id, npc.id));
         else if (npc.dialogue) commandQueue.push(talkCommand(player.id, npc.id));
         else if (npc.shopId) commandQueue.push({ type: 'trade', entityId: player.id, npcId: npc.id });
         tileView.showClickMarker(target, 'interact');
@@ -483,6 +515,19 @@ function runGame(): void {
       }
       if (npc.attackable) {
         const level = npc.combatLevel;
+        const spell = magicTab.selected;
+        if (spell) {
+          options.push({
+            verb: `Cast ${spell.name} →`,
+            target: `${npc.name} (level-${level})`,
+            targetColor: levelColor(level),
+            onSelect: () => {
+              commandQueue.push({ type: 'castSpell', entityId: player.id, spellId: spell.id, targetId: npc.id });
+              magicTab.select(null);
+              magicTab.setHint('');
+            },
+          });
+        }
         options.push({
           verb: 'Attack',
           target: `${npc.name} (level-${level})`,
@@ -691,6 +736,7 @@ function runGame(): void {
     onRender: (alpha, dt) => {
       water.update(dt);
       entityView.sync(alpha, dt);
+      projectileView.sync(alpha);
       groundView.sync(dt);
       fireView.sync(dt);
       spotView.sync(dt);

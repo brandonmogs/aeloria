@@ -46,6 +46,10 @@ export type Command =
   | { type: 'dialogueContinue'; entityId: number }
   /** Pick the n-th option in the dialogue box. */
   | { type: 'dialogueChoose'; entityId: number; index: number }
+  /** Cast one combat spell at an NPC (then keep fighting with the weapon). */
+  | { type: 'castSpell'; entityId: number; spellId: string; targetId: number }
+  /** Choose the spell a wielded staff autocasts (null turns it off). */
+  | { type: 'setAutocast'; entityId: number; spellId: string | null }
   | { type: 'shopBuy'; entityId: number; itemId: string; qty: number }
   /** Sell `qty` of the item in backpack `slot` to the open shop. */
   | { type: 'shopSell'; entityId: number; slot: number; qty: number };

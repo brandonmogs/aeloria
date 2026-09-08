@@ -16,6 +16,7 @@ export type EquipSlot =
   | 'helmet'
   | 'cape'
   | 'amulet'
+  | 'ammo'
   | 'chestplate'
   | 'legs'
   | 'boots'
@@ -28,6 +29,7 @@ export const EQUIP_SLOTS: readonly EquipSlot[] = [
   'helmet',
   'cape',
   'amulet',
+  'ammo',
   'chestplate',
   'legs',
   'boots',
@@ -54,6 +56,7 @@ export class Inventory {
     helmet: null,
     cape: null,
     amulet: null,
+    ammo: null,
     chestplate: null,
     legs: null,
     boots: null,
@@ -181,7 +184,14 @@ export class Inventory {
     if (from.area === 'inventory' && to.area === 'equipment') {
       const item = this.slots[from.index];
       if (!item || itemDef(item.id).equip !== to.slot) return false;
-      this.slots[from.index] = this.equipment[to.slot]; // swap any worn item back
+      const worn = this.equipment[to.slot];
+      if (worn && worn.id === item.id && itemDef(item.id).stackable) {
+        // Topping up a worn stack (more arrows into the quiver).
+        worn.qty += item.qty;
+        this.slots[from.index] = null;
+        return true;
+      }
+      this.slots[from.index] = worn; // swap any worn item back
       this.equipment[to.slot] = item;
       return true;
     }

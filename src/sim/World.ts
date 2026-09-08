@@ -40,7 +40,18 @@ import {
   variantOf,
 } from './gathering';
 import { SMELTING, SMITHING } from './smithing';
+import { Projectile, flightTicks } from './projectiles';
+import { SPELLS, SpellDef } from './spells';
+import { DefenderProfile, MagicProfile, RangedProfile, rollRanged, rollSpell } from './combatRanged';
 import { WALK_SPEED, RUN_SPEED } from '../engine/constants';
+
+/** How an attacker is fighting right now. */
+type AttackMode = 'melee' | 'ranged' | 'magic';
+
+/** Standard spells reach ten tiles. */
+const SPELL_RANGE = 10;
+/** Casting takes five ticks whatever the staff. */
+const CAST_SPEED = 5;
 
 /** A usable world object the player can walk to: a bank booth, altar, furnace, or anvil. */
 export interface Interactable {
@@ -102,6 +113,9 @@ export class World {
   /** Every shop's live stock, keyed by shop id. */
   readonly shops = new Map<string, ShopState>();
 
+  /** Arrows and spells in flight, keyed by projectile id. */
+  readonly projectiles = new Map<number, Projectile>();
+
   /** The script each player is currently conversing through, by player id. */
   private readonly scripts = new Map<number, DialogueScript>();
 
@@ -109,6 +123,7 @@ export class World {
   private nextGroundItemId = 1;
   private nextNodeId = 1;
   private nextFireId = 1;
+  private nextProjectileId = 1;
   private playerSpawn: Tile | null = null;
   private readonly rng = mulberry32(0x9e3779b9);
 
@@ -137,6 +152,7 @@ export class World {
     this.applyCommands(commands);
     this.updateNpcAi();
     this.updateCombat();
+    this.updateProjectiles();
     this.moveEntities();
     this.updatePickups();
     this.updateGathering();
@@ -297,6 +313,46 @@ export class World {
             clearIntents();
             entity.targetId = cmd.targetId;
           }
+          break;
+        }
+        case 'castSpell': {
+          if (!(entity instanceof Player)) break;
+          const target = this.entities.get(cmd.targetId);
+          const spell = SPELLS.find((s) => s.id === cmd.spellId);
+          if (!spell || spell.maxHit === undefined) break;
+          if (!(target instanceof Npc) || !target.attackable || !target.isAlive) {
+            this.say("You can't cast that there.");
+            break;
+          }
+          if (!this.canEngage(entity, target)) {
+            this.refuseEngagement(entity, target);
+            break;
+          }
+          if (!this.canCast(entity, spell)) break;
+          clearIntents();
+          entity.targetId = target.id;
+          entity.castOnce = spell.id;
+          break;
+        }
+        case 'setAutocast': {
+          if (!(entity instanceof Player)) break;
+          if (cmd.spellId === null) {
+            entity.autocastSpell = null;
+            this.say('Autocast switched off.');
+            break;
+          }
+          const spell = SPELLS.find((s) => s.id === cmd.spellId);
+          if (!spell || spell.maxHit === undefined) break;
+          if (this.weaponTypeOf(entity) !== 'staff') {
+            this.say('You need to be wielding a staff to autocast.');
+            break;
+          }
+          if (entity.skills.levelOf('magic') < spell.level) {
+            this.say('Your Magic level is not high enough for this spell.');
+            break;
+          }
+          entity.autocastSpell = spell.id;
+          this.say(`Autocast: ${spell.name}.`);
           break;
         }
         case 'pickup': {
@@ -765,7 +821,10 @@ export class World {
 
   // --- Combat --------------------------------------------------------------
 
-  /** Approach-and-strike: each fighter closes to melee range, then trades blows. */
+  /**
+   * Approach-and-strike: each fighter closes to range — adjacent for melee,
+   * a few tiles for a bow or a spell — then attacks on its weapon's cadence.
+   */
   private updateCombat(): void {
     for (const entity of this.entities.values()) {
       if (entity.attackCooldown > 0) entity.attackCooldown--;
@@ -775,6 +834,7 @@ export class World {
       const target = this.entities.get(entity.targetId);
       if (!target || !target.isAlive) {
         entity.targetId = null;
+        if (entity instanceof Player) entity.castOnce = null;
         continue;
       }
 
@@ -787,17 +847,200 @@ export class World {
         continue;
       }
 
-      if (orthogonallyAdjacent(entity.position, target.position)) {
+      const mode = this.attackModeOf(entity);
+      if (!mode) {
+        entity.targetId = null; // an archer with an empty quiver
+        entity.path.length = 0;
+        continue;
+      }
+      const dist = chebyshev(entity.position, target.position);
+      const inRange =
+        mode === 'melee'
+          ? orthogonallyAdjacent(entity.position, target.position)
+          : dist <= this.attackRangeOf(entity, mode);
+
+      if (inRange) {
         entity.path.length = 0; // in range — stand and fight
         if (entity.attackCooldown <= 0) {
-          this.performAttack(entity, target);
-          entity.attackCooldown = this.attackSpeedOf(entity);
+          this.performAttack(entity, target, mode);
+          entity.attackCooldown = this.attackSpeedOf(entity, mode);
         }
-      } else {
+      } else if (mode === 'melee') {
         const dest = this.adjacentDestination(entity.position, target.position);
         entity.path = dest ? this.pathfinder.findPath(entity.position, dest) : [];
+      } else {
+        // Close the distance; the range check next tick stops the walk.
+        entity.path = this.pathfinder.findPath(entity.position, target.position);
       }
     }
+  }
+
+  /** Melee, ranged, or magic — or null when a bow has nothing to fire. */
+  private attackModeOf(entity: Entity): AttackMode | null {
+    if (!(entity instanceof Player)) return 'melee';
+    if (entity.castOnce) return 'magic';
+    const type = this.weaponTypeOf(entity);
+    if (type === 'bow') {
+      const ammo = entity.inventory.equipment.ammo;
+      if (!ammo || !itemDef(ammo.id).ammoFor) {
+        this.say('There is no ammo left in your quiver.');
+        return null;
+      }
+      return 'ranged';
+    }
+    if (type === 'staff' && entity.autocastSpell) return 'magic';
+    return 'melee';
+  }
+
+  private attackRangeOf(entity: Entity, mode: AttackMode): number {
+    if (mode === 'magic') return SPELL_RANGE;
+    if (!(entity instanceof Player)) return 1;
+    const weapon = entity.inventory.equipment.weapon;
+    const base = (weapon && itemDef(weapon.id).attackRange) || 7;
+    return this.styleOf(entity).style === 'longrange' ? base + 2 : base;
+  }
+
+  /** Whether the player has the level and runes for a spell (with a message if not). */
+  private canCast(player: Player, spell: SpellDef): boolean {
+    if (player.skills.levelOf('magic') < spell.level) {
+      this.say('Your Magic level is not high enough for this spell.');
+      return false;
+    }
+    const weapon = player.inventory.equipment.weapon;
+    const free = new Set((weapon && itemDef(weapon.id).staffRunes) || []);
+    for (const [rune, n] of spell.runes) {
+      if (free.has(rune)) continue;
+      if (player.inventory.countOf(rune) < n) {
+        this.say(`You don't have enough ${itemDef(rune).name.toLowerCase()}s to cast this spell.`);
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private consumeRunes(player: Player, spell: SpellDef): void {
+    const weapon = player.inventory.equipment.weapon;
+    const free = new Set((weapon && itemDef(weapon.id).staffRunes) || []);
+    for (const [rune, n] of spell.runes) {
+      if (!free.has(rune)) player.inventory.removeById(rune, n);
+    }
+  }
+
+  /** Loose an arrow: consume ammo, roll the hit now, land it after the flight. */
+  private fireArrow(attacker: Player, defender: Entity): void {
+    const ammo = attacker.inventory.equipment.ammo;
+    if (!ammo) return;
+    const dist = chebyshev(attacker.position, defender.position);
+    const damage = rollRanged(this.rangedProfileOf(attacker), this.defenderProfileOf(defender), this.rng);
+    this.launch('arrow', ammo.id, attacker, defender, damage, dist);
+    ammo.qty--;
+    if (ammo.qty <= 0) attacker.inventory.equipment.ammo = null;
+    attacker.swingQueue.push(defender.id);
+    this.eventQueue.push({ type: 'sfx', name: 'bow' });
+  }
+
+  /** Cast a combat spell: runes now, base XP now, the hit when it lands. */
+  private castAt(attacker: Player, defender: Entity, spell: SpellDef): void {
+    if (!this.canCast(attacker, spell)) {
+      attacker.castOnce = null;
+      attacker.targetId = null;
+      return;
+    }
+    this.consumeRunes(attacker, spell);
+    const dist = chebyshev(attacker.position, defender.position);
+    const profile = this.magicProfileOf(attacker, attacker.autocastSpell === spell.id && !attacker.castOnce);
+    const damage = rollSpell(profile, this.defenderProfileOf(defender), spell.maxHit ?? 0, this.rng);
+    this.launch('spell', spell.id, attacker, defender, damage, dist);
+    this.grantXp(attacker, 'magic', spell.xp);
+    attacker.swingQueue.push(defender.id);
+    this.eventQueue.push({ type: 'sfx', name: 'cast' });
+  }
+
+  private launch(kind: Projectile['kind'], itemId: string, attacker: Entity, defender: Entity, damage: number, dist: number): void {
+    // Both sides are locked to each other for the single-way window.
+    attacker.lastCombatTick = this.tickCount;
+    attacker.lastCombatPartnerId = defender.id;
+    defender.lastCombatTick = this.tickCount;
+    defender.lastCombatPartnerId = attacker.id;
+    const p: Projectile = {
+      id: this.nextProjectileId++,
+      kind,
+      itemId,
+      attackerId: attacker.id,
+      targetId: defender.id,
+      from: { ...attacker.position },
+      launchedAtTick: this.tickCount,
+      landsAtTick: this.tickCount + flightTicks(dist),
+      damage,
+    };
+    this.projectiles.set(p.id, p);
+  }
+
+  /** Land every projectile whose flight is over. */
+  private updateProjectiles(): void {
+    for (const [id, p] of this.projectiles) {
+      if (this.tickCount < p.landsAtTick) continue;
+      this.projectiles.delete(id);
+      const attacker = this.entities.get(p.attackerId);
+      const defender = this.entities.get(p.targetId);
+      if (!attacker || !defender || !defender.isAlive) continue;
+
+      // Spent arrows mostly survive to be picked up again, like OSRS.
+      if (p.kind === 'arrow' && this.rng() < 0.8) this.dropItem(stackOf(p.itemId, 1), defender.position);
+
+      this.applyDamage(attacker, defender, p.damage, (damage) => {
+        if (!(attacker instanceof Player)) return;
+        if (p.kind === 'arrow') {
+          if (this.styleOf(attacker).style === 'longrange') {
+            this.grantXp(attacker, 'range', damage * 2);
+            this.grantXp(attacker, 'defense', damage * 2);
+          } else {
+            this.grantXp(attacker, 'range', damage * 4);
+          }
+        } else {
+          this.grantXp(attacker, 'magic', damage * 2);
+        }
+        this.grantXp(attacker, 'hitpoints', (damage * 4) / 3);
+      });
+    }
+  }
+
+  private rangedProfileOf(player: Player): RangedProfile {
+    const style = this.styleOf(player).style;
+    return {
+      ranged: player.skills.levelOf('range'),
+      bonuses: player.inventory.equipmentBonuses(),
+      style: style === 'rapid' || style === 'longrange' ? style : 'accurate',
+    };
+  }
+
+  private magicProfileOf(player: Player, autocast: boolean): MagicProfile {
+    return {
+      magic: player.skills.levelOf('magic'),
+      bonuses: player.inventory.equipmentBonuses(),
+      autocast,
+    };
+  }
+
+  private defenderProfileOf(entity: Entity): DefenderProfile {
+    if (entity instanceof Player) {
+      let prayerDefense: number | undefined;
+      for (const id of entity.activePrayers) {
+        const d = prayerDef(id).boosts?.defense;
+        if (d) prayerDefense = d;
+      }
+      return {
+        defense: entity.skills.levelOf('defense'),
+        magic: entity.skills.levelOf('magic'),
+        bonuses: entity.inventory.equipmentBonuses(),
+        prayerDefense,
+        npc: false,
+      };
+    }
+    if (entity instanceof Npc) {
+      return { defense: entity.defense, magic: entity.magic, bonuses: { ...ZERO_BONUSES, ...entity.bonuses }, npc: true };
+    }
+    return { defense: 1, magic: 1, bonuses: ZERO_BONUSES, npc: true };
   }
 
   /** Who `entity` is currently locked to in single-way combat, if anyone. */
@@ -826,7 +1069,19 @@ export class World {
     );
   }
 
-  private performAttack(attacker: Entity, defender: Entity): void {
+  private performAttack(attacker: Entity, defender: Entity, mode: AttackMode): void {
+    if (attacker instanceof Player && mode === 'ranged') {
+      this.fireArrow(attacker, defender);
+      return;
+    }
+    if (attacker instanceof Player && mode === 'magic') {
+      const spellId = attacker.castOnce ?? attacker.autocastSpell;
+      const spell = SPELLS.find((s) => s.id === spellId);
+      attacker.castOnce = null;
+      if (spell) this.castAt(attacker, defender, spell);
+      return;
+    }
+
     // Both sides are now locked to each other for the single-way window.
     attacker.lastCombatTick = this.tickCount;
     attacker.lastCombatPartnerId = defender.id;
@@ -845,21 +1100,29 @@ export class World {
       damage = 0;
     }
 
-    defender.hitpoints = Math.max(0, defender.hitpoints - damage);
-    defender.splatQueue.push(damage);
     attacker.swingQueue.push(defender.id);
-    this.eventQueue.push({ type: 'hit', entityId: defender.id, damage });
-
-    // Combat XP, OSRS-style: 4 × damage to the style skill (or 1.33 × damage
-    // to each of attack/strength/defence on controlled), plus 1.33 × damage
-    // to Hitpoints.
-    if (attacker instanceof Player && damage > 0) {
+    this.applyDamage(attacker, defender, damage, (dealt) => {
+      // Combat XP, OSRS-style: 4 × damage to the style skill (or 1.33 × damage
+      // to each of attack/strength/defence on controlled), plus 1.33 × damage
+      // to Hitpoints.
+      if (!(attacker instanceof Player)) return;
       const style = this.styleOf(attacker).style;
       const skills = styleSkills(style);
-      const per = style === 'controlled' ? (damage * 4) / 3 : damage * 4;
+      const per = style === 'controlled' ? (dealt * 4) / 3 : dealt * 4;
       for (const skill of skills) this.grantXp(attacker, skill, per);
-      this.grantXp(attacker, 'hitpoints', (damage * 4) / 3);
-    }
+      this.grantXp(attacker, 'hitpoints', (dealt * 4) / 3);
+    });
+  }
+
+  /**
+   * Land a hit: hitpoints, hitsplat, XP for the attacker, retaliation, and
+   * death. Shared by melee swings and landing projectiles.
+   */
+  private applyDamage(attacker: Entity, defender: Entity, damage: number, xp: (damage: number) => void): void {
+    defender.hitpoints = Math.max(0, defender.hitpoints - damage);
+    defender.splatQueue.push(damage);
+    this.eventQueue.push({ type: 'hit', entityId: defender.id, damage });
+    if (damage > 0) xp(damage);
 
     // Auto-retaliate: an idle defender turns on its attacker (players can turn
     // this off on the combat tab). Retaliating interrupts skilling/looting.
@@ -931,6 +1194,7 @@ export class World {
       victim.pickupTarget = null;
       victim.objectTarget = null;
       victim.talkTarget = null;
+      victim.castOnce = null;
       this.closeDialogue(victim);
       this.closeShop(victim);
       if (this.playerSpawn) {
@@ -1038,9 +1302,12 @@ export class World {
       player.inventory.unequip(displaced);
     }
     if (player.inventory.equip(slot)) {
-      // Weapon categories carry different style lists; keep the index valid.
-      const styles = WEAPON_STYLES[this.weaponTypeOf(player)];
+      // Weapon categories carry different style lists; keep the index valid,
+      // and a spell can only autocast through a staff.
+      const type = this.weaponTypeOf(player);
+      const styles = WEAPON_STYLES[type];
       if (player.styleIndex >= styles.length) player.styleIndex = 0;
+      if (type !== 'staff') player.autocastSpell = null;
     }
   }
 
@@ -1739,11 +2006,14 @@ export class World {
     };
   }
 
-  private attackSpeedOf(entity: Entity): number {
+  private attackSpeedOf(entity: Entity, mode: AttackMode): number {
     if (entity instanceof Npc) return entity.attackSpeed;
     if (entity instanceof Player) {
+      if (mode === 'magic') return CAST_SPEED;
       const weapon = entity.inventory.equipment.weapon;
-      return (weapon && itemDef(weapon.id).speed) || 4; // unarmed swings at 4
+      const speed = (weapon && itemDef(weapon.id).speed) || 4; // unarmed swings at 4
+      // Rapid shaves a tick off a bow's draw.
+      return mode === 'ranged' && this.styleOf(entity).style === 'rapid' ? Math.max(1, speed - 1) : speed;
     }
     return 4;
   }

@@ -65,6 +65,14 @@ export interface ItemDef {
   readonly weaponType?: WeaponType;
   /** Two-handed weapons occupy the shield slot as well. */
   readonly twoHanded?: boolean;
+  /** Bows: how many tiles away a target may be (longrange adds two). */
+  readonly attackRange?: number;
+  /** Staves: the runes this staff supplies without end. */
+  readonly staffRunes?: readonly string[];
+  /** Ammunition this launcher fires (item id prefix match: "arrow"). */
+  readonly ammoKind?: string;
+  /** For ammunition: which launcher family fires it. */
+  readonly ammoFor?: string;
 
   // --- Consumables & skilling --------------------------------------------
   /** Hitpoints restored when eaten; presence marks the item as food. */
@@ -155,6 +163,7 @@ const SLOT_BY_WIKI: Record<string, EquipSlot> = {
   ring: 'ring',
   cape: 'cape',
   neck: 'amulet',
+  ammo: 'ammo',
 };
 
 // --- Metal tiers -------------------------------------------------------------
@@ -244,7 +253,12 @@ wiki('bones', { icon: '🦴', buryXp: 4.5 });
 wiki('big_bones', { icon: '🦴', buryXp: 15 });
 wiki('ashes', { icon: '🌫️' });
 
-// --- Runes (drops and shop goods until magic combat arrives) ---------------------
+// --- Ranged and magic weapons ------------------------------------------------------
+wiki('shortbow', { icon: '🏹', weaponType: 'bow', attackRange: 7, ammoKind: 'arrow' });
+wiki('bronze_arrow', { icon: '➶', ammoFor: 'arrow' });
+wiki('staff_of_air', { icon: '🪄', weaponType: 'staff', staffRunes: ['air_rune'] });
+
+// --- Runes ---------------------------------------------------------------------------
 wiki('air_rune', { icon: '🌬️' });
 wiki('mind_rune', { icon: '🧠' });
 wiki('water_rune', { icon: '💧' });
