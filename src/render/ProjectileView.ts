@@ -19,8 +19,8 @@ const SPELL_COLORS: Record<string, number> = {
 export class ProjectileView {
   private readonly live = new Map<number, THREE.Object3D>();
   private readonly arrowGeo = new THREE.CylinderGeometry(0.012, 0.012, 0.7, 4);
-  private readonly arrowMat = new THREE.MeshLambertMaterial({ color: 0x8a6a3a });
-  private readonly headMat = new THREE.MeshLambertMaterial({ color: 0xb4b8bf });
+  private readonly arrowMat = new THREE.MeshStandardMaterial({ roughness: 0.9, envMapIntensity: 0.5, color: 0x8a6a3a });
+  private readonly headMat = new THREE.MeshStandardMaterial({ roughness: 0.9, envMapIntensity: 0.5, color: 0xb4b8bf });
 
   constructor(
     private readonly scene: THREE.Scene,

@@ -26,6 +26,7 @@ import { Interactable } from './sim/World';
 import { GameLoop } from './engine/GameLoop';
 import { Renderer } from './render/Renderer';
 import { Terrain } from './render/Terrain';
+import { loadPhotoLibrary } from './render/assets';
 import { TileGridView } from './render/TileGridView';
 import { SceneryView } from './render/SceneryView';
 import { WaterView } from './render/WaterView';
@@ -84,18 +85,16 @@ function start(): void {
     return;
   }
 
-  try {
-    runGame();
-  } catch (err) {
+  runGame().catch((err: unknown) => {
     showFatal(
       'Aeloria failed to start',
       err instanceof Error ? (err.stack ?? err.message) : String(err),
     );
     throw err;
-  }
+  });
 }
 
-function runGame(): void {
+async function runGame(): Promise<void> {
   // --- Simulation ----------------------------------------------------------
   const map = new TileMap(MAP_W, MAP_H);
   const { props, spawn, moat, fishingSpotGroups, terrain: terrainSpec } = buildStartingWorld(map);
@@ -136,11 +135,12 @@ function runGame(): void {
   // --- Rendering -----------------------------------------------------------
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const renderer = new Renderer(canvas);
-  const terrain = new Terrain(map, props, terrainSpec);
+  // Scanned CC0 textures load before the world is built; anything missing falls back to procedural.
+  const photos = await loadPhotoLibrary();
+  const terrain = new Terrain(map, props, terrainSpec, photos);
   renderer.scene.add(terrain.mesh);
-  renderer.frameShadows(MAP_W / 2, MAP_H / 2, 36);
   const tileView = new TileGridView(renderer.scene, terrain);
-  const scenery = new SceneryView(renderer.scene, props, terrain);
+  const scenery = new SceneryView(renderer.scene, props, terrain, photos);
   const water = new WaterView(renderer.scene, moat);
   const entityView = new EntityView(renderer.scene, world, terrain);
   const groundView = new GroundItemView(renderer.scene, world, terrain);
@@ -734,12 +734,14 @@ function runGame(): void {
       }
     },
     onRender: (alpha, dt) => {
+      renderer.lights.begin();
       water.update(dt);
       entityView.sync(alpha, dt);
       projectileView.sync(alpha);
       groundView.sync(dt);
       fireView.sync(dt);
       spotView.sync(dt);
+      scenery.update(dt);
       scenery.sync(world);
 
       const followTarget = entityView.positionOf(player.id);
@@ -747,6 +749,7 @@ function runGame(): void {
       renderer.camera.update(dt);
 
       tileView.update(input.hoverTile, dt);
+      renderer.lights.end(renderer.camera.focus);
       renderer.render();
       hud.update(world, player, dt);
       compass.update();

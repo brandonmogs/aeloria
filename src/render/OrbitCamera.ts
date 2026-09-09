@@ -79,6 +79,11 @@ export class OrbitCamera {
     this.camera.lookAt(this.focus);
   }
 
+  /** Unit XZ direction the camera looks along, for framing shadows ahead of the view. */
+  forward(out: THREE.Vector3): THREE.Vector3 {
+    return out.set(-Math.sin(this.yaw), 0, -Math.cos(this.yaw));
+  }
+
   private bindEvents(): void {
     this.canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 

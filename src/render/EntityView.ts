@@ -506,10 +506,11 @@ function makeOverheadSprite(): THREE.Sprite {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
+    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false }),
   );
   sprite.scale.set(0.42, 0.42, 1);
   sprite.renderOrder = 11;
+  sprite.userData.noAO = true;
   return sprite;
 }
 
@@ -580,11 +581,12 @@ function attachHealthBar(
   tex.colorSpace = THREE.SRGBColorSpace; // canvas pixels are sRGB, not linear
   tex.magFilter = THREE.NearestFilter;
   const sprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
+    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false }),
   );
   sprite.scale.set(0.8, 0.125, 1);
   sprite.position.set(0, barHeight, 0);
   sprite.renderOrder = 11;
+  sprite.userData.noAO = true;
   sprite.visible = false;
   group.add(sprite);
   return { sprite, canvas, tex };
@@ -633,15 +635,16 @@ function makeSplatSprite(damage: number): THREE.Sprite {
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace; // canvas pixels are sRGB, not linear
   const sprite = new THREE.Sprite(
-    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false }),
+    new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, toneMapped: false }),
   );
   sprite.scale.set(0.55, 0.55, 1);
   sprite.renderOrder = 12;
+  sprite.userData.noAO = true;
   return sprite;
 }
 
-function makeCapeMaterial(): THREE.MeshLambertMaterial {
-  return new THREE.MeshLambertMaterial({
+function makeCapeMaterial(): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ roughness: 0.9, envMapIntensity: 0.5,
     vertexColors: true,
     side: THREE.DoubleSide,
   });

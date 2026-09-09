@@ -4,7 +4,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { Prop } from '../sim/Scenery';
 import { World } from '../sim/World';
 import { Terrain } from './Terrain';
-import { flat, seedAt, seededRandom } from './lowpoly';
+import { seedAt, seededRandom } from './lowpoly';
 import {
   CastleMaterials,
   buildAltar,
@@ -19,6 +19,9 @@ import {
   finishCastleMesh,
   makeCastleMaterials,
 } from './castle';
+import { LeafKind, barkTextures, leafTexture, rockTextures } from './foliageTextures';
+import { projectUvs } from './textures';
+import { PhotoLibrary, applyPbr } from './assets';
 
 /** Where a gatherable prop's instances live, so the sim can hide/show them. */
 interface ResourceVisual {
@@ -30,107 +33,102 @@ interface ResourceVisual {
   isDepleted: boolean;
 }
 
-/** Canopy lump layout: [x, y-above-base, z, radius]. */
-type Lumps = ReadonlyArray<readonly [number, number, number, number]>;
+/** Leaf clusters: [x, y, z, size] relative to the trunk base, in tree units. */
+type Clusters = ReadonlyArray<readonly [number, number, number, number]>;
 
 /** The three tree silhouettes in the clearing. */
 interface TreeStyle {
-  lumps: Lumps;
-  /** Pyramid spikes poking out of the canopy: [x, y-above-base, z, length, tilt]. */
-  spikes: ReadonlyArray<readonly [number, number, number, number, number]>;
-  base: number;
+  clusters: Clusters;
+  /** Hanging strand cards for willows: [x, y-top, z, width, height]. */
+  strands: ReadonlyArray<readonly [number, number, number, number, number]>;
+  /** The point the canopy's lighting normals radiate from. */
+  canopy: readonly [number, number, number];
   trunkScale: number;
-  leaf: THREE.Color;
-  leafAlt: THREE.Color;
-  squash: number;
-  /** Willows hang their spikes downward. */
-  droop: boolean;
+  leaf: LeafKind;
+  tint: THREE.Color;
+  tintAlt: THREE.Color;
 }
 
 const TREE_STYLES: Record<'regular' | 'oak' | 'willow', TreeStyle> = {
   regular: {
-    lumps: [
-      [0, 0, 0, 0.7],
-      [0.38, 0.18, 0.2, 0.48],
-      [-0.34, 0.14, -0.22, 0.5],
-      [0.04, 0.5, -0.06, 0.46],
-      [-0.06, -0.1, 0.4, 0.4],
+    clusters: [
+      [0, 1.85, 0, 1.7],
+      [0.5, 1.6, 0.3, 1.35],
+      [-0.5, 1.65, -0.25, 1.4],
+      [0.1, 2.3, -0.1, 1.3],
+      [-0.1, 1.55, 0.55, 1.2],
     ],
-    spikes: [
-      [0.55, 0.1, 0.3, 0.55, 0.9],
-      [-0.5, 0.05, -0.35, 0.5, -0.9],
-      [0.1, 0.75, 0.05, 0.55, 0.1],
-      [-0.2, 0.2, 0.55, 0.45, 0.7],
-    ],
-    base: 1.4,
+    strands: [],
+    canopy: [0, 1.8, 0],
     trunkScale: 1,
-    leaf: new THREE.Color(0x3f7f34),
-    leafAlt: new THREE.Color(0x5a9a3e),
-    squash: 1,
-    droop: false,
+    leaf: 'broad',
+    tint: new THREE.Color(1.0, 1.0, 0.92),
+    tintAlt: new THREE.Color(0.86, 1.0, 0.8),
   },
   oak: {
-    lumps: [
-      [0, 0.1, 0, 0.92],
-      [0.62, 0.2, 0.3, 0.6],
-      [-0.6, 0.1, -0.3, 0.62],
-      [0.1, 0.72, -0.1, 0.58],
-      [-0.2, 0.05, 0.62, 0.52],
-      [0.3, -0.05, -0.6, 0.48],
+    clusters: [
+      [0, 2.2, 0, 2.2],
+      [0.8, 1.9, 0.4, 1.7],
+      [-0.8, 2.0, -0.4, 1.7],
+      [0.2, 2.8, -0.2, 1.6],
+      [-0.3, 1.8, 0.8, 1.5],
+      [0.4, 1.9, -0.9, 1.5],
     ],
-    spikes: [
-      [0.9, 0.25, 0.4, 0.6, 1.0],
-      [-0.85, 0.15, -0.4, 0.6, -1.0],
-      [0.15, 1.05, 0.0, 0.6, 0.05],
-      [-0.3, 0.3, 0.85, 0.5, 0.8],
-      [0.5, 0.2, -0.85, 0.5, -0.6],
-    ],
-    base: 1.6,
-    trunkScale: 1.25,
-    leaf: new THREE.Color(0x2f6a2a),
-    leafAlt: new THREE.Color(0x477f33),
-    squash: 0.92,
-    droop: false,
+    strands: [],
+    canopy: [0, 2.15, 0],
+    trunkScale: 1.35,
+    leaf: 'oak',
+    tint: new THREE.Color(0.9, 0.95, 0.8),
+    tintAlt: new THREE.Color(0.8, 0.9, 0.7),
   },
   willow: {
-    lumps: [
-      [0, 0.1, 0, 0.78],
-      [0.5, -0.15, 0.25, 0.52],
-      [-0.5, -0.2, -0.2, 0.52],
-      [0.05, 0.5, -0.05, 0.48],
-      [-0.1, -0.3, 0.55, 0.42],
+    clusters: [
+      [0, 2.4, 0, 1.9],
+      [0.6, 2.2, 0.4, 1.4],
+      [-0.6, 2.25, -0.4, 1.4],
+      [0, 2.85, 0, 1.3],
     ],
-    spikes: [
-      [0.75, -0.3, 0.35, 0.9, 0],
-      [-0.7, -0.35, -0.3, 0.9, 0],
-      [0.1, -0.4, 0.8, 0.85, 0],
-      [-0.2, -0.35, -0.75, 0.8, 0],
-      [0.6, -0.3, -0.5, 0.8, 0],
+    strands: [
+      [0.9, 2.5, 0.3, 0.9, 1.9],
+      [-0.9, 2.5, -0.3, 0.9, 1.9],
+      [0.3, 2.5, -0.9, 0.9, 1.8],
+      [-0.3, 2.5, 0.9, 0.9, 1.8],
+      [0.75, 2.4, -0.7, 0.8, 1.7],
+      [-0.75, 2.4, 0.7, 0.8, 1.7],
     ],
-    base: 1.95,
-    trunkScale: 1.5,
-    leaf: new THREE.Color(0x7aa650),
-    leafAlt: new THREE.Color(0x93b85f),
-    squash: 1.2,
-    droop: true,
+    canopy: [0, 2.3, 0],
+    trunkScale: 1.55,
+    leaf: 'broad',
+    tint: new THREE.Color(1.05, 1.05, 0.75),
+    tintAlt: new THREE.Color(1.0, 1.02, 0.7),
   },
 };
+
+/** Cards per leaf cluster: two crossed uprights and a tilted lid. */
+const CARDS_PER_CLUSTER = 3;
 
 /**
  * Renders the static, decorative world: trees, boulders, and the castle.
  *
- * Draw-call budget is the whole design here. The castle — hundreds of wall
- * blocks and merlons — is baked into ONE merged mesh per material, with the
+ * Trees are built the way RuneScape's always were: a textured trunk with a few
+ * branches under a canopy of alpha-tested leaf-cluster cards. Each cluster is
+ * three crossed quads so it reads from every angle, the cards' lighting
+ * normals radiate from the canopy's centre so the whole crown shades like one
+ * mass rather than a fan of flat planes, and a vertex-shader breeze sways them.
+ *
+ * Draw-call budget is the whole design here. The castle, hundreds of wall
+ * blocks and merlons, is baked into ONE merged mesh per material with the
  * stone texture projected across the result. Trees and rocks, which must be
- * hidden individually when the sim depletes them, are drawn with a handful
- * of InstancedMeshes; a depleted node just zeroes its instance matrices and
- * shows a small stump or rubble mesh instead.
+ * hidden individually when the sim depletes them, are drawn with a handful of
+ * InstancedMeshes; a depleted node just zeroes its instance matrices and shows
+ * a small stump or rubble mesh instead.
  */
 export class SceneryView {
   private readonly root = new THREE.Group();
+  private readonly leafTime = { value: 0 };
   private readonly geo = makeGeometries();
-  private readonly mat = makeMaterials();
-  private readonly castleMat: CastleMaterials = makeCastleMaterials();
+  private readonly mat: ReturnType<typeof makeMaterials>;
+  private readonly castleMat: CastleMaterials;
   /** Gatherable props keyed by "x,y". */
   private readonly resources = new Map<string, ResourceVisual>();
   private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -139,7 +137,10 @@ export class SceneryView {
     scene: THREE.Scene,
     props: ReadonlyArray<Prop>,
     private readonly terrain: Terrain,
+    photos?: PhotoLibrary,
   ) {
+    this.mat = makeMaterials(this.leafTime, photos);
+    this.castleMat = makeCastleMaterials(photos);
     const trees = props.filter((p) => p.kind === 'tree');
     const rocks = props.filter((p) => p.kind === 'rock');
     const castle = props.filter(
@@ -150,6 +151,11 @@ export class SceneryView {
     this.buildTreesInstanced(trees);
     this.buildRocksInstanced(rocks);
     scene.add(this.root);
+  }
+
+  /** Advance the breeze. */
+  update(dt: number): void {
+    this.leafTime.value += dt;
   }
 
   /** Swap gatherable props between intact and depleted to match the sim. */
@@ -248,20 +254,23 @@ export class SceneryView {
     }
   }
 
-  // --- Trees: three instanced meshes for the whole forest -------------------
+  // --- Trees: a trunk mesh and a card mesh per leaf texture ------------------
 
   private buildTreesInstanced(trees: ReadonlyArray<Prop>): void {
-    let lumpTotal = 0;
-    let spikeTotal = 0;
+    const cardCounts = { broad: 0, oak: 0, willow: 0 };
     for (const t of trees) {
       const style = TREE_STYLES[this.treeStyleOf(t)];
-      lumpTotal += style.lumps.length;
-      spikeTotal += style.spikes.length;
+      cardCounts[style.leaf] += style.clusters.length * CARDS_PER_CLUSTER;
+      cardCounts.willow += style.strands.length;
     }
 
     const trunks = this.instanced(this.geo.trunk, this.mat.bark, Math.max(1, trees.length));
-    const canopy = this.instanced(this.geo.canopy, this.mat.leaf, Math.max(1, lumpTotal));
-    const spikes = this.instanced(this.geo.spike, this.mat.leaf, Math.max(1, spikeTotal));
+    const cards = {
+      broad: this.cardMesh(this.geo.card, this.mat.leafBroad, cardCounts.broad),
+      oak: this.cardMesh(this.geo.card, this.mat.leafOak, cardCounts.oak),
+      willow: this.cardMesh(this.geo.strand, this.mat.leafWillow, cardCounts.willow),
+    };
+    const next = { broad: 0, oak: 0, willow: 0 };
 
     const pos = new THREE.Vector3();
     const quat = new THREE.Quaternion();
@@ -270,11 +279,9 @@ export class SceneryView {
     const tint = new THREE.Color();
     const barkTint = new THREE.Color();
     const euler = new THREE.Euler();
+    const canopy = new THREE.Vector3();
 
     let trunkI = 0;
-    let lumpI = 0;
-    let spikeI = 0;
-
     for (const tree of trees) {
       const style = TREE_STYLES[this.treeStyleOf(tree)];
       const seed = tree.seed;
@@ -282,54 +289,55 @@ export class SceneryView {
       const yaw = seed * Math.PI * 2;
       const ground = this.terrain.tileHeight(tree.tile);
       const slots: ResourceVisual['slots'] = [];
+      const base = new THREE.Vector3(tree.tile.x, ground, tree.tile.y);
 
-      // Trunk: a tapered six-sided post sunk a little into the ground.
+      // Trunk: textured, branching, sunk a little into the ground.
       quat.setFromAxisAngle(UP, yaw);
-      pos.set(tree.tile.x, ground + 0.55 * s * style.trunkScale, tree.tile.y);
+      pos.set(base.x, base.y - 0.05, base.z);
       scl.set(s, s * style.trunkScale, s);
       m.compose(pos, quat, scl);
       trunks.setMatrixAt(trunkI, m);
-      barkTint.setHex(0x6b4a2f).offsetHSL(0, 0, (seedAt(seed, 2) - 0.5) * 0.08);
+      barkTint.setRGB(1, 1, 1).offsetHSL(0, 0, (seedAt(seed, 2) - 0.5) * 0.12);
       trunks.setColorAt(trunkI, barkTint);
       slots.push({ mesh: trunks, index: trunkI, matrix: m.clone() });
       trunkI++;
 
-      const base = style.base + seedAt(seed, 3) * 0.3;
-      style.lumps.forEach(([bx, by, bz, r], li) => {
-        pos.set(bx, base + by, bz).multiplyScalar(s).applyQuaternion(quat);
-        pos.x += tree.tile.x;
-        pos.y += ground;
-        pos.z += tree.tile.y;
-        // Each lump gets its own tumble so the facets don't line up.
-        quat.setFromEuler(euler.set(seedAt(seed, li + 10) * 3, seedAt(seed, li + 20) * 6, seedAt(seed, li + 30) * 3));
-        scl.set(r * s, r * s * style.squash, r * s);
-        m.compose(pos, quat, scl);
-        canopy.setMatrixAt(lumpI, m);
-        tint.copy(style.leaf).lerp(style.leafAlt, seedAt(seed, li + 40));
-        canopy.setColorAt(lumpI, tint);
-        slots.push({ mesh: canopy, index: lumpI, matrix: m.clone() });
-        lumpI++;
-        quat.setFromAxisAngle(UP, yaw);
-      });
+      canopy.set(style.canopy[0], style.canopy[1], style.canopy[2]).multiplyScalar(s).add(base);
+      tint.copy(style.tint).lerp(style.tintAlt, seedAt(seed, 4));
 
-      // Spikes: pyramids jutting from the canopy give the jagged RuneScape outline.
-      style.spikes.forEach(([bx, by, bz, len, tilt], si) => {
-        pos.set(bx, base + by, bz).multiplyScalar(s).applyQuaternion(quat);
-        pos.x += tree.tile.x;
-        pos.y += ground;
-        pos.z += tree.tile.y;
-        const outward = Math.atan2(bx, bz) + yaw; // lean away from the trunk
-        if (style.droop) euler.set(Math.PI, seedAt(seed, si + 50) * 6, 0);
-        else euler.set(Math.cos(outward) * tilt, 0, -Math.sin(outward) * tilt, 'YXZ');
+      const placeCard = (
+        mesh: THREE.InstancedMesh,
+        kind: 'broad' | 'oak' | 'willow',
+        x: number,
+        y: number,
+        z: number,
+        w: number,
+        h: number,
+        yawC: number,
+        tilt: number,
+      ): void => {
+        const index = next[kind]++;
+        pos.set(x, y, z).multiplyScalar(s).applyAxisAngle(UP, yaw).add(base);
+        euler.set(tilt, yawC + yaw, 0, 'YXZ');
         quat.setFromEuler(euler);
-        scl.set(0.45 * s, len * s, 0.45 * s);
+        scl.set(w * s, h * s, 1);
         m.compose(pos, quat, scl);
-        spikes.setMatrixAt(spikeI, m);
-        tint.copy(style.leafAlt).lerp(style.leaf, seedAt(seed, si + 60));
-        spikes.setColorAt(spikeI, tint);
-        slots.push({ mesh: spikes, index: spikeI, matrix: m.clone() });
-        spikeI++;
-        quat.setFromAxisAngle(UP, yaw);
+        mesh.setMatrixAt(index, m);
+        mesh.setColorAt(index, tint);
+        const centre = mesh.geometry.getAttribute('canopyCenter') as THREE.InstancedBufferAttribute;
+        centre.setXYZ(index, canopy.x, canopy.y, canopy.z);
+        slots.push({ mesh, index, matrix: m.clone() });
+      };
+
+      style.clusters.forEach(([cx, cy, cz, size], ci) => {
+        const spin = seedAt(seed, ci + 10) * Math.PI;
+        const mesh = cards[style.leaf];
+        placeCard(mesh, style.leaf, cx, cy, cz, size, size, spin, 0);
+        placeCard(mesh, style.leaf, cx, cy, cz, size, size, spin + Math.PI / 2, 0);
+        placeCard(mesh, style.leaf, cx, cy + size * 0.1, cz, size * 0.95, size * 0.95, spin + seedAt(seed, ci + 20) * 3, Math.PI / 2 - 0.35);
+      });
+      style.strands.forEach(([sx, sy, sz, w, h], si) => {
+        placeCard(cards.willow, 'willow', sx, sy, sz, w, h, Math.atan2(sx, sz) + seedAt(seed, si + 30) * 0.6, 0);
       });
 
       this.resources.set(`${tree.tile.x},${tree.tile.y}`, {
@@ -339,10 +347,25 @@ export class SceneryView {
       });
     }
 
-    for (const mesh of [trunks, canopy, spikes]) {
+    for (const mesh of [trunks, cards.broad, cards.oak, cards.willow]) {
       mesh.instanceMatrix.needsUpdate = true;
       if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+      const centre = mesh.geometry.getAttribute('canopyCenter');
+      if (centre) centre.needsUpdate = true;
     }
+  }
+
+  /** An instanced leaf-card mesh with a per-instance canopy centre for lighting. */
+  private cardMesh(base: THREE.BufferGeometry, material: THREE.Material, count: number): THREE.InstancedMesh {
+    const geo = base.clone();
+    const n = Math.max(1, count);
+    geo.setAttribute('canopyCenter', new THREE.InstancedBufferAttribute(new Float32Array(n * 3), 3));
+    const mesh = new THREE.InstancedMesh(geo, material, n);
+    mesh.castShadow = true;
+    mesh.receiveShadow = false;
+    mesh.userData.noAO = true; // alpha-tested quads would smear the AO buffer
+    this.root.add(mesh);
+    return mesh;
   }
 
   // --- Rocks: one instanced mesh per boulder variant -------------------------
@@ -378,9 +401,9 @@ export class SceneryView {
         euler.set(s * 3, s * 6, s * 2);
         quat.setFromEuler(euler);
         // Grey stone, veined with the ore it holds: copper-brown, tin-silver, iron-rust.
-        const color = new THREE.Color(0x8a857b).offsetHSL(0, 0, (seedAt(seed, i + 12) - 0.5) * 0.12);
-        const vein = rock.variant === 'tin' ? 0xc9ccd4 : rock.variant === 'iron' ? 0x8a4a2a : 0xb3703c;
-        if (seedAt(seed, i + 15) < 0.5) color.lerp(new THREE.Color(vein), 0.5);
+        const color = new THREE.Color(1, 1, 1).offsetHSL(0, 0, (seedAt(seed, i + 12) - 0.5) * 0.12);
+        const vein = rock.variant === 'tin' ? 0xd8dce4 : rock.variant === 'iron' ? 0xa0583a : 0xc98450;
+        if (seedAt(seed, i + 15) < 0.5) color.lerp(new THREE.Color(vein), 0.55);
         boulders.push({
           variant,
           matrix: new THREE.Matrix4().compose(pos, quat, scl),
@@ -437,7 +460,7 @@ export class SceneryView {
   /** What's left after a tree is felled: a low cut trunk. */
   private buildStump(tree: Prop): THREE.Object3D {
     const g = new THREE.Group();
-    const stump = new THREE.Mesh(this.geo.stump, this.mat.barkPlain);
+    const stump = new THREE.Mesh(this.geo.stump, this.mat.bark);
     stump.position.y = 0.14;
     stump.castShadow = true;
     g.add(stump);
@@ -468,20 +491,56 @@ export class SceneryView {
 const UP = new THREE.Vector3(0, 1, 0);
 
 function makeGeometries() {
-  const trunk = new THREE.CylinderGeometry(0.11, 0.2, 1.3, 6);
   return {
-    trunk,
+    trunk: makeTrunk(),
     stump: new THREE.CylinderGeometry(0.17, 0.21, 0.28, 6),
-    canopy: new THREE.IcosahedronGeometry(1, 0),
-    spike: new THREE.ConeGeometry(1, 1, 4),
+    card: makeCard(false),
+    strand: makeCard(true),
     rocks: [0, 1, 2].map((i) => makeBoulder(i)),
   };
 }
 
+/** A tapered trunk with a root flare and three branches reaching into the canopy. */
+function makeTrunk(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const trunk = new THREE.CylinderGeometry(0.1, 0.19, 1.3, 7);
+  trunk.translate(0, 0.65, 0);
+  parts.push(trunk);
+  const flare = new THREE.CylinderGeometry(0.19, 0.29, 0.16, 7);
+  flare.translate(0, 0.08, 0);
+  parts.push(flare);
+  for (const [ang, lean] of [
+    [0.4, 0.65],
+    [2.5, 0.7],
+    [4.4, 0.6],
+  ]) {
+    const b = new THREE.CylinderGeometry(0.035, 0.07, 0.75, 5);
+    b.translate(0, 0.375, 0);
+    b.rotateZ(lean);
+    b.rotateY(ang);
+    b.translate(Math.sin(ang) * 0.06, 1.05, Math.cos(ang) * 0.06);
+    parts.push(b);
+  }
+  return mergeGeometries(parts);
+}
+
+/**
+ * A leaf card: a unit quad drawn from both sides (two windings, so the
+ * canopy shader's outward normals apply to either face). Strands hang from
+ * their top edge; cluster cards pivot at their centre.
+ */
+function makeCard(topPivot: boolean): THREE.BufferGeometry {
+  const front = new THREE.PlaneGeometry(1, 1);
+  if (topPivot) front.translate(0, -0.5, 0);
+  const back = front.clone();
+  back.rotateY(Math.PI);
+  return mergeGeometries([front, back]);
+}
+
 /**
  * A boulder: a dodecahedron with its vertices pushed around by noise so each
- * variant has lumps and creases, but with the facets left hard so it lights
- * like a chunk of RuneScape scenery rather than a pebble.
+ * variant has lumps and creases, with the facets left hard so it lights like
+ * a chunk of RuneScape scenery rather than a pebble.
  */
 function makeBoulder(variant: number): THREE.BufferGeometry {
   const geo = new THREE.DodecahedronGeometry(1, 0);
@@ -496,17 +555,71 @@ function makeBoulder(variant: number): THREE.BufferGeometry {
     pos.setXYZ(i, v.x, v.y, v.z);
   }
   geo.computeVertexNormals();
+  projectUvs(geo, 0.9);
   return geo;
 }
 
-function makeMaterials() {
+function makeMaterials(leafTime: { value: number }, photos?: PhotoLibrary) {
+  const bark = barkTextures();
+  const rock = rockTextures();
   return {
-    bark: new THREE.MeshLambertMaterial({ color: 0xffffff }), // smooth-shaded, tinted per instance
-    barkPlain: new THREE.MeshLambertMaterial({ color: 0x6b4a2f }),
-    leaf: flat(0xffffff), // faceted, tinted per instance
-    rock: flat(0xffffff), // faceted, tinted per instance
-    rubble: flat(0x5c5a55),
-    iron: new THREE.MeshLambertMaterial({ color: 0x555a63 }),
-    ember: new THREE.MeshBasicMaterial({ color: 0xff7a1a }),
+    bark: applyPbr(new THREE.MeshStandardMaterial({ map: bark.albedo, normalMap: bark.normal, roughness: 0.95, envMapIntensity: 0.5 }), photos?.bark),
+    rock: applyPbr(new THREE.MeshStandardMaterial({ map: rock.albedo, normalMap: rock.normal, roughness: 0.9, flatShading: true, envMapIntensity: 0.5 }), photos?.rock),
+    rubble: applyPbr(new THREE.MeshStandardMaterial({ map: rock.albedo, normalMap: rock.normal, color: 0x8a8a8a, roughness: 0.95, flatShading: true }), photos?.rock),
+    iron: new THREE.MeshStandardMaterial({ color: 0x555a63, roughness: 0.5, metalness: 0.7 }),
+    // Well past white so the furnace mouth blooms.
+    ember: new THREE.MeshBasicMaterial({ color: new THREE.Color(4, 1.4, 0.3) }),
+    leafBroad: makeLeafMaterial(leafTexture('broad', 1), leafTime, false),
+    leafOak: makeLeafMaterial(leafTexture('oak', 2), leafTime, false),
+    leafWillow: makeLeafMaterial(leafTexture('willow', 3), leafTime, true),
   };
 }
+
+/**
+ * The canopy material: alpha-tested leaf clusters whose lighting normals point
+ * away from the tree's canopy centre (so the crown shades as one rounded mass)
+ * and which sway in a vertex-shader breeze. Alpha-to-coverage feathers the
+ * leaf edges against the MSAA buffer.
+ */
+function makeLeafMaterial(map: THREE.Texture, time: { value: number }, hanging: boolean): THREE.MeshStandardMaterial {
+  const mat = new THREE.MeshStandardMaterial({
+    map,
+    alphaTest: 0.45,
+    alphaToCoverage: true,
+    side: THREE.FrontSide,
+    roughness: 0.9,
+    metalness: 0,
+    envMapIntensity: 0.6,
+  });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.time = time;
+    shader.uniforms.swayAtTop = { value: hanging ? 0 : 1 };
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nattribute vec3 canopyCenter;\nuniform float time;\nuniform float swayAtTop;')
+      .replace('#include <beginnormal_vertex>', LEAF_BEGIN_NORMAL)
+      .replace('#include <defaultnormal_vertex>', LEAF_DEFAULT_NORMAL)
+      .replace('#include <begin_vertex>', LEAF_BEGIN_VERTEX);
+  };
+  mat.customProgramCacheKey = () => `aeloria-leaf-${hanging ? 'hang' : 'card'}`;
+  return mat;
+}
+
+const LEAF_BEGIN_NORMAL = /* glsl */ `
+vec3 objectNormal = vec3(normal);
+vec3 leafWorld = (instanceMatrix * vec4(position, 1.0)).xyz;
+`;
+
+const LEAF_DEFAULT_NORMAL = /* glsl */ `
+vec3 transformedNormal = normalMatrix * normalize(leafWorld - canopyCenter + vec3(0.0, 0.35, 0.0));
+`;
+
+const LEAF_BEGIN_VERTEX = /* glsl */ `
+vec3 transformed = vec3(position);
+float swayWeight = mix(1.0 - uv.y, uv.y, swayAtTop) + 0.3;
+vec3 sway = vec3(
+  sin(time * 1.3 + leafWorld.x * 0.6 + leafWorld.z * 0.4),
+  0.0,
+  cos(time * 1.0 + leafWorld.z * 0.5 + leafWorld.x * 0.3)
+) * 0.04 * swayWeight;
+transformed += inverse(mat3(instanceMatrix)) * sway;
+`;

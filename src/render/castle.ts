@@ -1,44 +1,60 @@
 import * as THREE from 'three';
-import { stoneTexture, woodTexture, slateTexture, projectUvs } from './textures';
+import { stoneTextures, woodTextures, slateTextures, projectUvs } from './textures';
+import { PhotoLibrary, applyPbr } from './assets';
 
 /**
  * The castle's pieces, built to read as a medieval keep rather than a pile of
  * blocks: stone-textured walls with a walkway and slim merlons, octagonal
  * corner towers with parapets, a keep whose tower rises to a slate spire,
  * and a pointed gate arch. Pieces are merged per material by SceneryView;
- * {@link finishCastleMesh} projects the stone texture across the merged
- * result so blocks tile continuously.
+ * {@link finishCastleMesh} projects the textures across the merged result so
+ * blocks tile continuously.
  */
 
 export interface CastleMaterials {
-  stone: THREE.MeshLambertMaterial;
-  /** Textured lighter stone for tops and caps. */
-  stoneLight: THREE.MeshLambertMaterial;
+  stone: THREE.MeshStandardMaterial;
+  /** Lighter dressed stone for tops and caps. */
+  stoneLight: THREE.MeshStandardMaterial;
   /** Plain dressed stone for merlons and copings, where bricks would look busy. */
-  stonePlain: THREE.MeshLambertMaterial;
-  slate: THREE.MeshLambertMaterial;
-  wood: THREE.MeshLambertMaterial;
-  dark: THREE.MeshLambertMaterial;
-  gold: THREE.MeshLambertMaterial;
-  flag: THREE.MeshLambertMaterial;
+  stonePlain: THREE.MeshStandardMaterial;
+  slate: THREE.MeshStandardMaterial;
+  wood: THREE.MeshStandardMaterial;
+  dark: THREE.MeshStandardMaterial;
+  gold: THREE.MeshStandardMaterial;
+  flag: THREE.MeshStandardMaterial;
 }
 
-export function makeCastleMaterials(): CastleMaterials {
+/**
+ * Procedural stone, slate and planking by default; the scanned Poly Haven
+ * sets take over wherever they loaded.
+ */
+export function makeCastleMaterials(photos?: PhotoLibrary): CastleMaterials {
+  const stone = stoneTextures('#9a968a', 3);
+  const stoneLight = stoneTextures('#aeaa9c', 5);
+  const slate = slateTextures('#4a4f5c', 7);
+  const wood = woodTextures('#7a5632', 11);
+  const textured = (t: { albedo: THREE.Texture; normal: THREE.Texture }, roughness: number): THREE.MeshStandardMaterial =>
+    new THREE.MeshStandardMaterial({ map: t.albedo, normalMap: t.normal, roughness, metalness: 0, envMapIntensity: 0.5 });
+  const light = applyPbr(textured(stoneLight, 0.9), photos?.wall);
+  if (photos?.wall) light.color.setHex(0xd6d2c6);
   return {
-    stone: new THREE.MeshLambertMaterial({ map: stoneTexture('#a9a496', 3) }),
-    stoneLight: new THREE.MeshLambertMaterial({ map: stoneTexture('#c2bdae', 5) }),
-    stonePlain: new THREE.MeshLambertMaterial({ color: 0xc6c1b2 }),
-    slate: new THREE.MeshLambertMaterial({ map: slateTexture('#4a4f5c', 7) }),
-    wood: new THREE.MeshLambertMaterial({ map: woodTexture('#7a5632', 11) }),
-    dark: new THREE.MeshLambertMaterial({ color: 0x1e1a15 }),
-    gold: new THREE.MeshLambertMaterial({ color: 0xd8b24a }),
-    flag: new THREE.MeshLambertMaterial({ color: 0xb83232, side: THREE.DoubleSide }),
+    stone: applyPbr(textured(stone, 0.92), photos?.wall),
+    stoneLight: light,
+    stonePlain: applyPbr(
+      new THREE.MeshStandardMaterial({ color: photos?.wall ? 0xdad6cb : 0xa8a396, roughness: 0.88, envMapIntensity: 0.5 }),
+      photos?.wall,
+    ),
+    slate: applyPbr(textured(slate, 0.7), photos?.roof),
+    wood: applyPbr(textured(wood, 0.85), photos?.planks),
+    dark: new THREE.MeshStandardMaterial({ color: 0x1e1a15, roughness: 0.8, envMapIntensity: 0.3 }),
+    gold: new THREE.MeshStandardMaterial({ color: 0xd8b24a, roughness: 0.35, metalness: 0.85, envMapIntensity: 1 }),
+    flag: new THREE.MeshStandardMaterial({ color: 0xb83232, roughness: 0.7, side: THREE.DoubleSide, envMapIntensity: 0.4 }),
   };
 }
 
 /** Textured materials need world-space UVs after merging. */
 export function finishCastleMesh(geo: THREE.BufferGeometry, material: THREE.Material): void {
-  if ((material as THREE.MeshLambertMaterial).map) projectUvs(geo, 0.5);
+  if ((material as THREE.MeshStandardMaterial).map) projectUvs(geo, 0.5);
 }
 
 function mesh(geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0, z = 0): THREE.Mesh {

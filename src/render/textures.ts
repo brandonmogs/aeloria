@@ -1,123 +1,182 @@
 import * as THREE from 'three';
+import { TextureSet, fillPixels, finishSet, gray, heightOf, hsl, hslBytes, makeCanvas, seeded, tileableNoise } from './texgen';
 
 /**
- * Procedural textures in the spirit of RuneScape's 128×128 tiles: coarse,
- * hand-drawn-looking stone, timber, and thatch, generated on a canvas so the
- * game still ships no image assets. Nearest-neighbour magnification keeps the
- * texels crisp up close, the way the old client drew them.
+ * Building materials for the castle: dressed stone in a running bond, oak
+ * planking, and roof slates, each with a normal map cut from its own height
+ * field so the mortar lines and plank gaps catch the sun. One texture tile
+ * spans two world units (see {@link projectUvs}).
  */
 
-function seeded(seed: number): () => number {
-  let s = seed >>> 0 || 1;
-  return () => {
-    s = (s * 1664525 + 1013904223) >>> 0;
-    return s / 4294967296;
-  };
-}
+/** Grey ashlar blocks with dark mortar, chipped edges, and a bevelled lip. */
+export function stoneTextures(base = '#9a968a', seed = 3, size = 512): TextureSet {
+  const [, ctx] = makeCanvas(size);
+  const [, hctx] = makeCanvas(size);
+  const grit = tileableNoise(size, 5, seed, 8);
+  const rnd = seeded(seed * 13 + 1);
+  const b = new THREE.Color(base);
+  const hslOf = { h: 0, s: 0, l: 0 };
+  b.getHSL(hslOf, THREE.SRGBColorSpace);
+  const hue = hslOf.h * 360;
+  const sat = hslOf.s * 100;
+  const light = hslOf.l * 100;
 
-function finish(canvas: HTMLCanvasElement, repeat = 1): THREE.CanvasTexture {
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.colorSpace = THREE.SRGBColorSpace;
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(repeat, repeat);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.LinearMipmapLinearFilter;
-  tex.anisotropy = 4;
-  return tex;
-}
+  // Mortar.
+  fillPixels(ctx, size, (i) => hslBytes(hue, sat * 0.6, light * 0.45 + grit[i] * 8));
+  fillPixels(hctx, size, (i) => {
+    const v = Math.round((0.16 + grit[i] * 0.08) * 255);
+    return [v, v, v];
+  });
 
-/** Grey ashlar blocks in a running bond with dark mortar; one tile ≈ 2 world units. */
-export function stoneTexture(base = '#a9a496', seed = 3): THREE.CanvasTexture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const rnd = seeded(seed);
-  ctx.fillStyle = '#5c584f'; // mortar
-  ctx.fillRect(0, 0, size, size);
-
-  const rows = 6;
+  const rows = 8;
   const cols = 4;
   const bh = size / rows;
   const bw = size / cols;
-  const b = new THREE.Color(base);
+  const gap = 3;
   for (let r = 0; r < rows; r++) {
     const offset = r % 2 === 0 ? 0 : bw / 2;
     for (let c = -1; c <= cols; c++) {
       const x = c * bw + offset;
       const y = r * bh;
-      const tint = b.clone().offsetHSL(0, 0, (rnd() - 0.5) * 0.12);
-      ctx.fillStyle = `#${tint.getHexString()}`;
-      ctx.fillRect(x + 2, y + 2, bw - 3, bh - 3);
-      // A lighter top edge and a darker bottom edge give each block a bevel.
-      ctx.fillStyle = 'rgba(255,255,255,0.14)';
-      ctx.fillRect(x + 2, y + 2, bw - 3, 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx.fillRect(x + 2, y + bh - 3, bw - 3, 2);
-      // Speckle.
-      for (let i = 0; i < 6; i++) {
-        ctx.fillStyle = rnd() < 0.5 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.1)';
-        ctx.fillRect(x + 3 + rnd() * (bw - 6), y + 3 + rnd() * (bh - 6), 2, 2);
+      const tint = light + (rnd() - 0.5) * 14;
+      const h = 0.7 + (rnd() - 0.5) * 0.12;
+      // Face, then a lighter top/left bevel and a darker bottom/right edge.
+      ctx.fillStyle = hsl(hue + (rnd() - 0.5) * 6, sat, tint);
+      ctx.fillRect(x + gap, y + gap, bw - gap * 2, bh - gap * 2);
+      ctx.fillStyle = hsl(hue, sat, tint + 12);
+      ctx.fillRect(x + gap, y + gap, bw - gap * 2, 2);
+      ctx.fillRect(x + gap, y + gap, 2, bh - gap * 2);
+      ctx.fillStyle = hsl(hue, sat, tint - 14);
+      ctx.fillRect(x + gap, y + bh - gap - 2, bw - gap * 2, 2);
+      ctx.fillRect(x + bw - gap - 2, y + gap, 2, bh - gap * 2);
+      hctx.fillStyle = gray(h);
+      hctx.fillRect(x + gap, y + gap, bw - gap * 2, bh - gap * 2);
+      hctx.fillStyle = gray(h + 0.12);
+      hctx.fillRect(x + gap + 2, y + gap + 2, bw - gap * 2 - 4, bh - gap * 2 - 4);
+      // Chips and stains.
+      for (let i = 0; i < 5; i++) {
+        const px = x + gap + 3 + rnd() * (bw - gap * 2 - 6);
+        const py = y + gap + 3 + rnd() * (bh - gap * 2 - 6);
+        const pr = 1 + rnd() * 3;
+        ctx.fillStyle = rnd() < 0.5 ? 'rgba(0, 0, 0, 0.14)' : 'rgba(255, 255, 255, 0.1)';
+        ctx.beginPath();
+        ctx.ellipse(px, py, pr * 1.6, pr, rnd() * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
   }
-  return finish(canvas);
+
+  // Weathering across the whole face.
+  const img = ctx.getImageData(0, 0, size, size);
+  const d = img.data;
+  for (let i = 0; i < size * size; i++) {
+    const g = (grit[i] - 0.5) * 30;
+    d[i * 4] = Math.max(0, Math.min(255, d[i * 4] + g));
+    d[i * 4 + 1] = Math.max(0, Math.min(255, d[i * 4 + 1] + g));
+    d[i * 4 + 2] = Math.max(0, Math.min(255, d[i * 4 + 2] + g));
+  }
+  ctx.putImageData(img, 0, 0);
+  const height = heightOf(hctx, size);
+  for (let i = 0; i < height.length; i++) height[i] = Math.min(1, height[i] + (grit[i] - 0.5) * 0.1);
+
+  return finishSet(ctx, height, size, 3.0, false);
 }
 
-/** Vertical planks with grain lines and nail heads. */
-export function woodTexture(base = '#7a5632', seed = 11): THREE.CanvasTexture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const rnd = seeded(seed);
+/** Vertical oak planks with wandering grain and nail heads. */
+export function woodTextures(base = '#7a5632', seed = 11, size = 256): TextureSet {
+  const [, ctx] = makeCanvas(size);
+  const [, hctx] = makeCanvas(size);
+  const rnd = seeded(seed * 7 + 3);
   const b = new THREE.Color(base);
+  const hslOf = { h: 0, s: 0, l: 0 };
+  b.getHSL(hslOf, THREE.SRGBColorSpace);
+  const hue = hslOf.h * 360;
+  const sat = hslOf.s * 100;
+  const light = hslOf.l * 100;
   const planks = 4;
   const pw = size / planks;
+
+  hctx.fillStyle = gray(0.2);
+  hctx.fillRect(0, 0, size, size);
   for (let p = 0; p < planks; p++) {
-    const tint = b.clone().offsetHSL(0, 0, (rnd() - 0.5) * 0.1);
-    ctx.fillStyle = `#${tint.getHexString()}`;
+    const tint = light + (rnd() - 0.5) * 10;
+    ctx.fillStyle = hsl(hue, sat, tint);
     ctx.fillRect(p * pw, 0, pw, size);
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.fillRect(p * pw, 0, 2, size);
-    for (let g = 0; g < 5; g++) {
-      ctx.fillStyle = rnd() < 0.5 ? 'rgba(0,0,0,0.12)' : 'rgba(255,255,255,0.08)';
+    hctx.fillStyle = gray(0.7);
+    hctx.fillRect(p * pw + 2, 0, pw - 4, size);
+    // Grain: wavy lines the length of the plank, periodic so they tile.
+    for (let g = 0; g < 9; g++) {
       const gx = p * pw + 4 + rnd() * (pw - 8);
-      ctx.fillRect(gx, 0, 1, size);
+      const amp = 1 + rnd() * 2.5;
+      const waves = 1 + Math.floor(rnd() * 3);
+      const phase = rnd() * Math.PI * 2;
+      const dark = rnd() < 0.6;
+      for (const [target, style, w] of [
+        [ctx, dark ? 'rgba(0, 0, 0, 0.18)' : 'rgba(255, 220, 180, 0.12)', 1 + rnd()],
+        [hctx, gray(dark ? 0.55 : 0.8), 1.2],
+      ] as const) {
+        target.strokeStyle = style;
+        target.lineWidth = w;
+        target.beginPath();
+        for (let y = 0; y <= size; y += 6) {
+          const px = gx + Math.sin((y / size) * Math.PI * 2 * waves + phase) * amp;
+          if (y === 0) target.moveTo(px, y);
+          else target.lineTo(px, y);
+        }
+        target.stroke();
+      }
     }
-    ctx.fillStyle = '#2d2117';
-    ctx.fillRect(p * pw + pw / 2 - 1, 10, 3, 3);
-    ctx.fillRect(p * pw + pw / 2 - 1, size - 14, 3, 3);
+    // Plank edge and nails.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.fillRect(p * pw, 0, 2, size);
+    for (const ny of [14, size - 18]) {
+      ctx.fillStyle = '#2d2117';
+      ctx.fillRect(p * pw + pw / 2 - 2, ny, 4, 4);
+      hctx.fillStyle = gray(0.9);
+      hctx.fillRect(p * pw + pw / 2 - 2, ny, 4, 4);
+    }
   }
-  return finish(canvas);
+
+  return finishSet(ctx, heightOf(hctx, size), size, 2.0, false);
 }
 
-/** Rough thatch/slate for roofs: diagonal strokes. */
-export function slateTexture(base = '#4a4f5c', seed = 7): THREE.CanvasTexture {
-  const size = 128;
-  const canvas = document.createElement('canvas');
-  canvas.width = size;
-  canvas.height = size;
-  const ctx = canvas.getContext('2d')!;
-  const rnd = seeded(seed);
+/** Roof slates in staggered rows, each a slightly different shade. */
+export function slateTextures(base = '#4a4f5c', seed = 7, size = 256): TextureSet {
+  const [, ctx] = makeCanvas(size);
+  const [, hctx] = makeCanvas(size);
+  const rnd = seeded(seed * 5 + 9);
   const b = new THREE.Color(base);
-  ctx.fillStyle = `#${b.getHexString()}`;
+  const hslOf = { h: 0, s: 0, l: 0 };
+  b.getHSL(hslOf, THREE.SRGBColorSpace);
+  const hue = hslOf.h * 360;
+  const sat = hslOf.s * 100;
+  const light = hslOf.l * 100;
+
+  ctx.fillStyle = hsl(hue, sat, light * 0.6);
   ctx.fillRect(0, 0, size, size);
+  hctx.fillStyle = gray(0.25);
+  hctx.fillRect(0, 0, size, size);
   const rows = 8;
   const rh = size / rows;
+  const tw = rh * 2;
   for (let r = 0; r < rows; r++) {
     const offset = r % 2 === 0 ? 0 : rh;
     for (let c = -1; c < rows + 1; c++) {
-      const tint = b.clone().offsetHSL(0, 0, (rnd() - 0.5) * 0.14);
-      ctx.fillStyle = `#${tint.getHexString()}`;
-      ctx.fillRect(c * rh * 2 + offset + 1, r * rh + 1, rh * 2 - 2, rh - 2);
-      ctx.fillStyle = 'rgba(0,0,0,0.25)';
-      ctx.fillRect(c * rh * 2 + offset + 1, r * rh + rh - 2, rh * 2 - 2, 2);
+      const x = c * tw + offset;
+      const y = r * rh;
+      const tint = light + (rnd() - 0.5) * 16;
+      ctx.fillStyle = hsl(hue + (rnd() - 0.5) * 8, sat, tint);
+      ctx.fillRect(x + 1, y + 1, tw - 2, rh - 2);
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+      ctx.fillRect(x + 1, y + rh - 3, tw - 2, 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+      ctx.fillRect(x + 1, y + 1, tw - 2, 1);
+      hctx.fillStyle = gray(0.7 + (rnd() - 0.5) * 0.1);
+      hctx.fillRect(x + 1, y + 1, tw - 2, rh - 3);
     }
   }
-  return finish(canvas);
+
+  return finishSet(ctx, heightOf(hctx, size), size, 2.2, false);
 }
 
 /**

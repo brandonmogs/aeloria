@@ -24,14 +24,14 @@ export interface Rig {
 
 // --- Materials & geometry helpers ------------------------------------------------
 
-const materialCache = new Map<string, THREE.MeshLambertMaterial>();
+const materialCache = new Map<string, THREE.MeshStandardMaterial>();
 
 /** A smooth-shaded matte material with vertex colours enabled, cached by colour. */
-export function smooth(color: number): THREE.MeshLambertMaterial {
+export function smooth(color: number): THREE.MeshStandardMaterial {
   const key = `s${color}`;
   let m = materialCache.get(key);
   if (!m) {
-    m = new THREE.MeshLambertMaterial({ color, vertexColors: true });
+    m = new THREE.MeshStandardMaterial({ color, vertexColors: true, roughness: 0.82, metalness: 0, envMapIntensity: 0.55 });
     materialCache.set(key, m);
   }
   return m;

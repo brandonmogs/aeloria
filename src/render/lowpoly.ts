@@ -10,9 +10,9 @@ import * as THREE from 'three';
 /** A flat-shaded matte material — the one shading model the whole game uses. */
 export function flat(
   color: number,
-  extra: THREE.MeshLambertMaterialParameters = {},
-): THREE.MeshLambertMaterial {
-  return new THREE.MeshLambertMaterial({ color, flatShading: true, ...extra });
+  extra: THREE.MeshStandardMaterialParameters = {},
+): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({ color, flatShading: true, roughness: 0.9, metalness: 0, envMapIntensity: 0.5, ...extra });
 }
 
 /** A box whose top face is scaled by `topX`/`topZ` (below 1 pinches, above flares). */

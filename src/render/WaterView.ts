@@ -15,7 +15,7 @@ export class WaterView {
   constructor(scene: THREE.Scene, moat: MoatLayout) {
     this.texture = makeWaterTexture();
     const geo = buildRingGeometry(moat, 0.5); // overhang the banks so the waterline is the terrain's
-    const mat = new THREE.MeshLambertMaterial({
+    const mat = new THREE.MeshStandardMaterial({ roughness: 0.9, envMapIntensity: 0.5,
       map: this.texture,
       color: 0xffffff,
       transparent: true,
