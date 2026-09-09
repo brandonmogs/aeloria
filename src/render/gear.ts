@@ -1,0 +1,337 @@
+import * as THREE from 'three';
+import { ItemStack, itemDef } from '../sim/items';
+import { Rig, lathe, material, put, shade } from './characters';
+
+/**
+ * Worn equipment and NPC costume pieces, sized against the rig they attach
+ * to. Each builder returns an object positioned in the local space of the
+ * socket it belongs on (see {@link Rig.sockets}): helmets on the head, body
+ * armour on the torso, guards on the thighs and shins, boots on the feet,
+ * gloves and weapons on the hands, shields on the off hand.
+ */
+
+function metalColor(id: string): number {
+  if (id.includes('bronze')) return 0xb07a45;
+  if (id.includes('iron')) return 0x7a7c80;
+  if (id.includes('steel')) return 0xc2c6cc;
+  if (id.includes('black')) return 0x2e2e33;
+  if (id.includes('mithril')) return 0x4d5aa8;
+  if (id.includes('adamant')) return 0x3f8a52;
+  if (id.includes('rune')) return 0x46b0c4;
+  if (id.includes('gold') || id.includes('holy')) return 0xe2bf55;
+  if (id.includes('leather')) return 0x7a5533;
+  if (id.includes('goblin')) return 0x6b4a2f;
+  if (id.includes('wood') || id.includes('oak') || id.includes('willow')) return 0x8a5a2e;
+  return 0x8a8f99;
+}
+
+function finishOf(id: string): 'metal' | 'leather' {
+  return id.includes('leather') || id.includes('cowl') || id.includes('goblin') ? 'leather' : 'metal';
+}
+
+function box(w: number, h: number, d: number): THREE.BufferGeometry {
+  return shade(new THREE.BoxGeometry(w, h, d), 1.02, 0.94);
+}
+
+/** A tapered box (feet, wedges, blade tips): the top face scaled by `topX`/`topZ`. */
+export function wedge(w: number, h: number, d: number, topX: number, topZ = topX): THREE.BufferGeometry {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) > 0) {
+      pos.setX(i, pos.getX(i) * topX);
+      pos.setZ(i, pos.getZ(i) * topZ);
+    }
+  }
+  geo.computeVertexNormals();
+  return shade(geo);
+}
+
+function prism(rTop: number, rBottom: number, height: number, sides = 8): THREE.BufferGeometry {
+  return shade(new THREE.CylinderGeometry(rTop, rBottom, height, sides));
+}
+
+// --- Head ---------------------------------------------------------------------------
+
+/** A steel skull-cap with a nose guard. */
+export function skullCap(rig: Rig, color: number, finish: 'metal' | 'leather' = 'metal'): THREE.Object3D {
+  const hr = rig.dims.headR;
+  const g = new THREE.Group();
+  const m = material(color, finish);
+  g.add(put(lathe([[1.02 * hr, 1.15 * hr], [1.08 * hr, 1.6 * hr], [0.92 * hr, 1.98 * hr], [0.42 * hr, 2.26 * hr], [0, 2.3 * hr]], 14, 0.93), m));
+  g.add(put(box(0.14 * hr, 0.7 * hr, 0.1 * hr), m, 0, 1.0 * hr, 1.0 * hr));
+  return g;
+}
+
+export function buildHelmet(item: ItemStack, rig: Rig): THREE.Object3D {
+  const hr = rig.dims.headR;
+  const c = metalColor(item.id);
+  if (item.id.includes('full_helm')) {
+    // The whole head boxed in, with a T-shaped face slit.
+    const g = new THREE.Group();
+    const m = material(c, 'metal');
+    g.add(put(lathe([[0.85 * hr, 0.02 * hr], [1.06 * hr, 0.7 * hr], [1.08 * hr, 1.5 * hr], [0.92 * hr, 1.98 * hr], [0.42 * hr, 2.28 * hr], [0, 2.32 * hr]], 14, 0.94), m));
+    const dark = material(0x14120f, 'dark');
+    g.add(put(box(0.16 * hr, 0.8 * hr, 0.1 * hr), dark, 0, 1.05 * hr, 1.03 * hr));
+    g.add(put(box(0.9 * hr, 0.14 * hr, 0.1 * hr), dark, 0, 1.3 * hr, 1.02 * hr));
+    return g;
+  }
+  if (item.id.includes('cowl')) {
+    const g = new THREE.Group();
+    g.add(put(lathe([[1.02 * hr, 0.55 * hr], [1.1 * hr, 1.3 * hr], [0.95 * hr, 1.95 * hr], [0.42 * hr, 2.26 * hr], [0, 2.3 * hr]], 12, 0.94), material(c, 'leather')));
+    return g;
+  }
+  return skullCap(rig, c, finishOf(item.id));
+}
+
+/** A tall white chef's hat. */
+export function toque(rig: Rig): THREE.Object3D {
+  const hr = rig.dims.headR;
+  const white = material(0xf4f1ea, 'cloth');
+  const g = new THREE.Group();
+  g.add(put(lathe([[1.0 * hr, 1.5 * hr], [1.02 * hr, 1.9 * hr], [1.15 * hr, 2.6 * hr], [1.25 * hr, 3.3 * hr], [0.9 * hr, 3.7 * hr], [0, 3.8 * hr]], 12), white));
+  return g;
+}
+
+/** A wide-brimmed straw hat. */
+export function strawHat(rig: Rig): THREE.Object3D {
+  const hr = rig.dims.headR;
+  const straw = material(0xc9b26a, 'cloth');
+  const g = new THREE.Group();
+  g.add(put(lathe([[0, 1.7 * hr], [2.1 * hr, 1.72 * hr], [2.15 * hr, 1.85 * hr], [1.05 * hr, 1.9 * hr], [1.0 * hr, 2.6 * hr], [0.7 * hr, 2.85 * hr], [0, 2.9 * hr]], 14), straw));
+  return g;
+}
+
+/** A red officer's plume rising from the crown. */
+export function plume(rig: Rig): THREE.Object3D {
+  const hr = rig.dims.headR;
+  return put(wedge(0.2 * hr, 1.4 * hr, 0.9 * hr, 0.6, 1.1), material(0xc0332a, 'cloth'), 0, 2.9 * hr, -0.2 * hr);
+}
+
+/** A full beard hanging from the jaw. */
+export function beard(rig: Rig, color: number): THREE.Object3D {
+  const hr = rig.dims.headR;
+  return put(lathe([[0.55 * hr, -0.55 * hr], [0.72 * hr, 0.1 * hr], [0.85 * hr, 0.7 * hr], [0.75 * hr, 0.95 * hr], [0, 1.0 * hr]], 10, 0.65), material(color, 'hair'), 0, 0, 0.62 * hr);
+}
+
+// --- Body ---------------------------------------------------------------------------
+
+export function buildChest(item: ItemStack, rig: Rig): THREE.Object3D {
+  const s = rig.dims.scale;
+  const c = metalColor(item.id);
+  const plate = item.id.includes('platebody');
+  const finish = finishOf(item.id);
+  const m = material(c, finish);
+  const g = new THREE.Group();
+  g.add(
+    put(
+      lathe(
+        [
+          [0.14 * s, -0.02 * s],
+          [0.152 * s, 0.1 * s],
+          [0.152 * s, 0.24 * s],
+          [0.178 * s, 0.38 * s],
+          [0.188 * s, 0.45 * s],
+          [0.14 * s, 0.505 * s],
+          [0.07 * s, 0.52 * s],
+        ],
+        plate ? 14 : 12,
+        0.66,
+      ),
+      m,
+    ),
+  );
+  if (plate) {
+    // Pauldrons over the shoulders.
+    for (const sx of [-1, 1]) {
+      const p = put(shade(new THREE.SphereGeometry(0.085 * s, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55)), m, sx * rig.dims.shoulderHalf, rig.dims.torso - 0.03 * s, 0);
+      p.scale.set(1, 0.8, 1);
+      g.add(p);
+    }
+  }
+  return g;
+}
+
+/** A leather work apron over the front of the torso. */
+export function apron(rig: Rig): THREE.Object3D {
+  const s = rig.dims.scale;
+  return put(wedge(0.3 * s, 0.5 * s, 0.03 * s, 1.15, 1), material(0xd8cfa8, 'cloth'), 0, 0.1 * s, 0.135 * s);
+}
+
+// --- Legs, feet, hands --------------------------------------------------------------
+
+/** Guards for one leg: returns [thigh piece, shin piece]. */
+export function buildLegGuard(item: ItemStack, rig: Rig): [THREE.Object3D, THREE.Object3D] {
+  const s = rig.dims.scale;
+  const m = material(metalColor(item.id), finishOf(item.id));
+  const thigh = put(prism(0.088 * s, 0.072 * s, rig.dims.thigh * 0.96, 10), m, 0, -rig.dims.thigh / 2, 0);
+  const shin = put(prism(0.066 * s, 0.056 * s, rig.dims.shin * 0.92, 10), m, 0, -rig.dims.shin / 2 - 0.01 * s, 0);
+  return [thigh, shin];
+}
+
+export function buildBoot(item: ItemStack, rig: Rig): THREE.Object3D {
+  const s = rig.dims.scale;
+  return put(wedge(0.12 * s, 0.1 * s, 0.29 * s, 0.85, 0.9), material(metalColor(item.id), finishOf(item.id)), 0, -0.03 * s, 0.055 * s);
+}
+
+export function buildGlove(item: ItemStack, rig: Rig): THREE.Object3D {
+  const s = rig.dims.scale;
+  return put(box(0.085 * s, 0.17 * s, 0.05 * s), material(metalColor(item.id), finishOf(item.id)), 0, -0.075 * s, 0);
+}
+
+// --- Weapons and shields ------------------------------------------------------------
+
+/**
+ * Weapons, by family, held in the right hand with the blade running up the
+ * forearm and tipped a little forward, the way a swordsman rests a sword.
+ */
+export function buildWeapon(item: ItemStack, rig: Rig): THREE.Object3D {
+  const s = rig.dims.scale;
+  const def = itemDef(item.id);
+  const g = new THREE.Group();
+  const metal = material(metalColor(item.id), 'metal');
+  const grip = material(0x3a2a1c, 'leather');
+  const gold = material(0xc9a23a, 'metal');
+  const wood = material(0x6e4a2a, 'leather');
+  const type = def.weaponType ?? 'sword';
+
+  const hilt = (): void => {
+    g.add(put(prism(0.02, 0.022, 0.12, 8), grip, 0, -0.04, 0));
+    g.add(put(lathe([[0.02, 0], [0.035, 0.02], [0.02, 0.045], [0, 0.05]], 8), gold, 0, -0.12, 0));
+  };
+
+  switch (type) {
+    case 'dagger':
+      g.add(put(wedge(0.05, 0.3, 0.014, 0.15, 0.6), metal, 0, 0.17, 0));
+      g.add(put(wedge(0.14, 0.03, 0.04, 0.8), gold, 0, 0.02, 0));
+      hilt();
+      break;
+    case 'sword':
+      g.add(put(wedge(0.06, 0.5, 0.016, 0.2, 0.6), metal, 0, 0.27, 0));
+      g.add(put(wedge(0.2, 0.035, 0.04, 0.8), gold, 0, 0.02, 0));
+      hilt();
+      break;
+    case 'longsword':
+      g.add(put(wedge(0.065, 0.66, 0.016, 0.2, 0.6), metal, 0, 0.35, 0));
+      g.add(put(wedge(0.24, 0.035, 0.04, 0.8), gold, 0, 0.02, 0));
+      hilt();
+      break;
+    case '2h':
+      g.add(put(wedge(0.08, 0.9, 0.018, 0.18, 0.6), metal, 0, 0.47, 0));
+      g.add(put(wedge(0.3, 0.04, 0.05, 0.8), gold, 0, 0.02, 0));
+      g.add(put(prism(0.022, 0.024, 0.22, 8), grip, 0, -0.09, 0));
+      g.add(put(lathe([[0.025, 0], [0.04, 0.025], [0, 0.05]], 8), gold, 0, -0.22, 0));
+      break;
+    case 'scimitar': {
+      g.add(put(wedge(0.055, 0.32, 0.014, 0.9, 0.7), metal, 0, 0.18, 0));
+      const tip = put(wedge(0.05, 0.26, 0.012, 0.15, 0.6), metal, 0.06, 0.46, 0);
+      tip.rotation.z = -0.35;
+      g.add(tip);
+      g.add(put(wedge(0.16, 0.035, 0.04, 0.8), gold, 0, 0.02, 0));
+      hilt();
+      break;
+    }
+    case 'mace':
+      g.add(put(prism(0.02, 0.024, 0.5, 8), grip, 0, 0.2, 0));
+      g.add(put(lathe([[0.03, 0], [0.09, 0.06], [0.09, 0.14], [0.03, 0.2], [0, 0.21]], 8), metal, 0, 0.44, 0));
+      break;
+    case 'warhammer':
+      g.add(put(prism(0.022, 0.026, 0.5, 8), grip, 0, 0.2, 0));
+      g.add(put(wedge(0.26, 0.14, 0.12, 0.9), metal, 0, 0.5, 0));
+      break;
+    case 'battleaxe': {
+      g.add(put(prism(0.022, 0.026, 0.62, 8), wood, 0, 0.26, 0));
+      for (const side of [-1, 1]) {
+        const blade = put(wedge(0.06, 0.28, 0.24, 1, 1.5), metal, side * 0.12, 0.5, 0);
+        blade.rotation.z = (side * Math.PI) / 2;
+        g.add(blade);
+      }
+      break;
+    }
+    case 'axe': {
+      g.add(put(prism(0.02, 0.026, 0.72, 8), wood, 0, 0.3, 0));
+      const head = put(wedge(0.06, 0.24, 0.2, 1, 1.5), metal, 0.11, 0.58, 0);
+      head.rotation.z = Math.PI / 2;
+      g.add(head);
+      break;
+    }
+    case 'pickaxe': {
+      g.add(put(prism(0.02, 0.026, 0.74, 8), wood, 0, 0.3, 0));
+      const spike = put(shade(new THREE.ConeGeometry(0.035, 0.42, 6)), metal, 0, 0.64, 0.14);
+      spike.rotation.x = Math.PI / 2;
+      g.add(spike);
+      g.add(put(wedge(0.05, 0.06, 0.16, 0.9), metal, 0, 0.64, -0.06));
+      break;
+    }
+    case 'bow': {
+      // A recurve stave bent about the grip, strung between its tips.
+      const curve = new THREE.QuadraticBezierCurve3(
+        new THREE.Vector3(0, -0.55, 0.02),
+        new THREE.Vector3(0, 0, 0.2),
+        new THREE.Vector3(0, 0.55, 0.02),
+      );
+      g.add(put(shade(new THREE.TubeGeometry(curve, 16, 0.014, 6, false)), wood));
+      g.add(put(prism(0.018, 0.018, 0.14, 6), grip, 0, 0, 0.1));
+      const string = put(prism(0.003, 0.003, 1.1, 4), material(0xe8e2d0, 'dark'), 0, 0, 0.02);
+      g.add(string);
+      break;
+    }
+    case 'staff': {
+      g.add(put(prism(0.02, 0.026, 1.3, 8), wood, 0, 0.35, 0));
+      g.add(put(lathe([[0.03, 0], [0.06, 0.03], [0.065, 0.1], [0.03, 0.16], [0, 0.17]], 10), gold, 0, 0.98, 0));
+      const orb = put(shade(new THREE.SphereGeometry(0.055, 12, 10)), material(0x77c4ff, 'metal'), 0, 1.12, 0);
+      g.add(orb);
+      break;
+    }
+    default:
+      g.add(put(wedge(0.06, 0.5, 0.016, 0.2, 0.6), metal, 0, 0.27, 0));
+      hilt();
+  }
+
+  g.scale.setScalar(s);
+  if (type === 'bow') {
+    // Held out in front of the fist, limbs vertical.
+    g.position.set(0, -0.075 * s, 0.05 * s);
+    g.rotation.set(0, 0, 0);
+  } else {
+    g.position.set(0, -0.075 * s, 0.03 * s); // in the fist
+    g.rotation.set(0.3, 0, -0.08); // up the forearm, tipped a little forward
+  }
+  return g;
+}
+
+/** Whether a weapon is carried in the off (left) hand. */
+export function weaponInOffHand(item: ItemStack): boolean {
+  return itemDef(item.id).weaponType === 'bow';
+}
+
+/** Shields: a round wooden one, a bevelled square, or a pointed kite, strapped to the left forearm. */
+export function buildShield(item: ItemStack, rig: Rig): THREE.Object3D {
+  const s = rig.dims.scale;
+  const g = new THREE.Group();
+  const m = material(metalColor(item.id), finishOf(item.id));
+  if (item.id.includes('kiteshield')) {
+    const shape = new THREE.Shape();
+    shape.moveTo(-0.17, 0.2);
+    shape.lineTo(0.17, 0.2);
+    shape.lineTo(0.19, 0.02);
+    shape.lineTo(0.0, -0.3);
+    shape.lineTo(-0.19, 0.02);
+    shape.closePath();
+    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.015, bevelSegments: 2 });
+    geo.computeVertexNormals();
+    g.add(put(shade(geo), m));
+  } else if (item.id.includes('sq_shield')) {
+    const sq = put(wedge(0.34, 0.06, 0.38, 0.85), m);
+    sq.rotation.x = Math.PI / 2;
+    g.add(sq);
+  } else {
+    const disc = put(lathe([[0, 0], [0.2, 0], [0.2, 0.04], [0.08, 0.07], [0, 0.07]], 14), m);
+    disc.rotation.x = Math.PI / 2;
+    g.add(disc);
+  }
+  g.scale.setScalar(s);
+  g.position.set(0.06 * s, 0.02 * s, 0.03 * s);
+  g.rotation.y = 0.35;
+  return g;
+}

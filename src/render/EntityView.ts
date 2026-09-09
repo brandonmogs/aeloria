@@ -4,27 +4,25 @@ import { Entity } from '../sim/Entity';
 import { Player } from '../sim/Player';
 import { Npc } from '../sim/Npc';
 import { EquipSlot, EQUIP_SLOTS } from '../sim/Inventory';
-import { ItemStack } from '../sim/items';
+import { ItemStack, itemDef } from '../sim/items';
 import { Terrain } from './Terrain';
+import { ACTION_DURATION, ActionKind, Animator, Rig, buildHumanoid, buildRat, lathe, material, put, shade } from './characters';
 import {
-  Rig,
-  addHelm,
+  apron,
+  beard,
   buildBoot,
   buildChest,
   buildGlove,
-  buildGoblin,
   buildHelmet,
-  buildHuman,
   buildLegGuard,
-  buildRat,
   buildShield,
   buildWeapon,
-  lathe,
-  prism,
-  put,
-  shade,
-  wedge,
-} from './models';
+  plume,
+  skullCap,
+  strawHat,
+  toque,
+  weaponInOffHand,
+} from './gear';
 
 /** Cloth geometry plus its undeformed positions, so it can be re-billowed. */
 interface Cape {
@@ -33,17 +31,14 @@ interface Cape {
 }
 
 /** A rig plus everything the animator and HUD hang off it. */
-interface Avatar extends Rig {
-  /** Eased 0..1 gait weight: 0 standing, 1 walking. */
-  gait: number;
-  /** Seconds left of the attack-swing animation (0 = not swinging). */
-  swingT: number;
-  /** Seconds left of the hit-flinch animation (0 = not flinching). */
-  flinchT: number;
-  /** Seconds left of the death animation; -1 when alive. */
-  deathT: number;
-  /** Whether the entity was alive last frame, to detect the death transition. */
+interface Avatar {
+  rig: Rig;
+  anim: Animator;
+  /** Where the avatar stood last frame, to measure distance travelled. */
+  lastPos: THREE.Vector3;
   wasAlive: boolean;
+  /** Seconds since the death clip started; -1 while alive. */
+  deadFor: number;
   /** Currently worn gear meshes, torn down and rebuilt when equipment changes. */
   gear: THREE.Object3D[];
   /** Signature of the rendered equipment, to detect when a rebuild is needed. */
@@ -66,31 +61,28 @@ interface Splat {
 }
 
 const CAPE_HEIGHT = 0.8;
-
-/** Attack swing duration in seconds — snappy, well inside one game tick. */
-const SWING_TIME = 0.38;
-/** Hit-flinch duration in seconds. */
-const FLINCH_TIME = 0.28;
-/** Death fall duration in seconds. */
-const DEATH_TIME = 0.7;
-/** How long a hitsplat stays up — OSRS shows them for roughly a tick and a half. */
+/** How long a hitsplat stays up: OSRS shows them for roughly a tick and a half. */
 const SPLAT_TIME = 1.0;
 
 /**
- * Renders entities as low-poly RuneScape figures and — crucially — makes their
- * tile-by-tile movement look smooth. The sim teleports an entity from one
- * tile to the next on each tick; here we interpolate between
+ * Renders entities as articulated, realistically proportioned figures and
+ * makes their tile-by-tile movement look like walking. The sim teleports an
+ * entity from one tile to the next on each tick; here we interpolate between
  * `previousPosition` and `position` using the loop's `alpha`, so the figure
  * glides across the grid while the underlying logic stays a clean
- * 1-tile-per-tick, and we drop it onto the terrain's height at every frame.
- * On top of that we swing the arms and legs whenever the figure is actually
- * moving. Avatars are created and destroyed lazily as entities come and go.
+ * 1-tile-per-tick, drop it onto the terrain's height every frame, ease its
+ * heading round to the direction of travel, and drive a distance-phased
+ * walk or run cycle so the feet plant instead of sliding. Combat swings,
+ * skilling, flinches and deaths come from the sim's queues and play as
+ * layered clips. Avatars are created and destroyed lazily as entities come
+ * and go.
  */
 export class EntityView {
   private readonly avatars = new Map<number, Avatar>();
   private readonly splats: Splat[] = [];
   private readonly prev = new THREE.Vector3();
   private readonly curr = new THREE.Vector3();
+  private readonly pos = new THREE.Vector3();
   private clock = 0;
 
   constructor(
@@ -107,20 +99,25 @@ export class EntityView {
       if (!avatar) {
         avatar = this.createAvatar(entity);
         this.avatars.set(entity.id, avatar);
-        this.scene.add(avatar.group);
+        this.scene.add(avatar.rig.group);
       }
+      const rig = avatar.rig;
+      const anim = avatar.anim;
 
-      // Death: play a fall-over animation on the tick an NPC dies, then hide
-      // it until it respawns.
+      // Death: play the fall on the tick an NPC dies, hold it a moment, then
+      // hide the body until it respawns.
       const dead = entity instanceof Npc && entity.isDead;
-      if (dead && avatar.wasAlive) avatar.deathT = DEATH_TIME;
+      if (dead && avatar.wasAlive) {
+        anim.play('death');
+        avatar.deadFor = 0;
+      }
       if (!dead && !avatar.wasAlive) {
-        // Respawned: stand back up.
-        avatar.deathT = -1;
-        avatar.group.rotation.x = 0;
+        anim.reset();
+        avatar.deadFor = -1;
       }
       avatar.wasAlive = !dead;
-      avatar.group.visible = !dead || avatar.deathT > 0;
+      if (dead) avatar.deadFor += dt;
+      rig.group.visible = !dead || avatar.deadFor < ACTION_DURATION.death + 0.4;
 
       // Reflect equipment changes: rebuild the worn gear when it differs from
       // what's currently drawn. Cheap to check every frame; only rebuilds on a
@@ -133,62 +130,32 @@ export class EntityView {
         }
       }
 
+      // Position: glide between the last two tick positions.
       this.prev.set(entity.previousPosition.x, 0, entity.previousPosition.y);
       this.curr.set(entity.position.x, 0, entity.position.y);
-      avatar.group.position.lerpVectors(this.prev, this.curr, alpha);
-      const ground = this.terrain.heightAt(avatar.group.position.x, avatar.group.position.z);
-
+      const pos = this.pos.lerpVectors(this.prev, this.curr, alpha);
+      const ground = this.terrain.heightAt(pos.x, pos.z);
       const moving = !this.prev.equals(this.curr);
-      const partner = this.dialoguePartnerOf(entity);
-      if (moving) {
-        avatar.group.rotation.y = Math.atan2(this.curr.x - this.prev.x, this.curr.z - this.prev.z);
-      } else if (partner) {
-        // Talking: the two face each other.
-        const dx = partner.position.x - entity.position.x;
-        const dz = partner.position.y - entity.position.y;
-        if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
-      } else if (entity.targetId !== null && entity.isAlive) {
-        // Standing in combat: square up to the opponent.
-        const foe = this.world.entities.get(entity.targetId);
-        if (foe) {
-          const dx = foe.position.x - entity.position.x;
-          const dz = foe.position.y - entity.position.y;
-          if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
-        }
-      } else if (entity instanceof Player && entity.gatherTarget !== null) {
-        // Working a tree or rock: face it.
-        const node = this.world.resourceNodes.get(entity.gatherTarget);
-        if (node) {
-          const dx = node.tile.x - entity.position.x;
-          const dz = node.tile.y - entity.position.y;
-          if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
-        }
-      } else if (entity instanceof Player && entity.action && 'tile' in entity.action) {
-        // Smelting or smithing: face the furnace or anvil.
-        const dx = entity.action.tile.x - entity.position.x;
-        const dz = entity.action.tile.y - entity.position.y;
-        if (dx !== 0 || dz !== 0) avatar.group.rotation.y = Math.atan2(dx, dz);
-      }
+      const tilesThisTick = Math.max(Math.abs(this.curr.x - this.prev.x), Math.abs(this.curr.z - this.prev.z));
+      const running = tilesThisTick >= 2;
+      const firstFrame = avatar.lastPos.x === Infinity;
+      const moved = firstFrame ? 0 : Math.hypot(pos.x - avatar.lastPos.x, pos.z - avatar.lastPos.z);
+      avatar.lastPos.set(pos.x, 0, pos.z);
 
-      // Drain sim combat events into animation timers.
-      if (entity.swingQueue.length > 0) {
-        avatar.swingT = SWING_TIME;
-        entity.swingQueue.length = 0;
-      }
-      // Working a node (or a tinderbox/fire/anvil): keep the swing cycling
-      // even between the sim's spaced-out rolls.
-      if (
-        entity instanceof Player &&
-        (entity.gatherTarget !== null || entity.action !== null) &&
-        !moving &&
-        avatar.swingT <= 0
-      ) {
-        avatar.swingT = SWING_TIME;
-      }
-      this.animate(avatar, moving, dt, ground);
+      // Heading: the direction of travel, else whatever the entity is engaged with.
+      const heading = this.headingFor(entity, moving);
+      if (heading !== null) anim.face(heading, dt, firstFrame);
+
+      // Actions from the sim: attacks, skilling, crafting, flinches.
+      this.driveActions(avatar, entity, moving);
+
+      anim.update({ moved, moving, running, time: this.clock + entity.id * 1.7 }, dt);
+      rig.group.position.set(pos.x, ground + anim.rootOffset, pos.z);
+
       this.updateHealthBar(avatar, entity);
       this.updateOverhead(avatar, entity);
       this.spawnSplats(avatar, entity);
+      if (avatar.cape) this.billowCape(avatar.cape, moving ? (running ? 1 : 0.6) : 0);
     }
 
     this.updateSplats(dt);
@@ -196,10 +163,70 @@ export class EntityView {
     // Drop avatars for entities that no longer exist.
     for (const [id, avatar] of this.avatars) {
       if (!this.world.entities.has(id)) {
-        this.scene.remove(avatar.group);
+        this.scene.remove(avatar.rig.group);
         this.avatars.delete(id);
       }
     }
+  }
+
+  /** Live world-space position of an entity's avatar, or null if not yet built. */
+  positionOf(id: number): THREE.Vector3 | null {
+    return this.avatars.get(id)?.rig.group.position ?? null;
+  }
+
+  /** Which way the entity should face, in radians about y, or null to keep its heading. */
+  private headingFor(entity: Entity, moving: boolean): number | null {
+    if (moving) return Math.atan2(this.curr.x - this.prev.x, this.curr.z - this.prev.z);
+    const at = (x: number, y: number): number | null => {
+      const dx = x - entity.position.x;
+      const dz = y - entity.position.y;
+      return dx !== 0 || dz !== 0 ? Math.atan2(dx, dz) : null;
+    };
+    const partner = this.dialoguePartnerOf(entity);
+    if (partner) return at(partner.position.x, partner.position.y);
+    if (entity.targetId !== null && entity.isAlive) {
+      const foe = this.world.entities.get(entity.targetId);
+      if (foe) return at(foe.position.x, foe.position.y);
+    }
+    if (entity instanceof Player) {
+      if (entity.gatherTarget !== null) {
+        const node = this.world.resourceNodes.get(entity.gatherTarget);
+        if (node) return at(node.tile.x, node.tile.y);
+      }
+      if (entity.action && 'tile' in entity.action) return at(entity.action.tile.x, entity.action.tile.y);
+    }
+    return null;
+  }
+
+  /** Translate the sim's queues and state into clips on the animator. */
+  private driveActions(avatar: Avatar, entity: Entity, moving: boolean): void {
+    const anim = avatar.anim;
+    if (anim.playing === 'death') return;
+
+    // A looping work clip while gathering or crafting, stopped when it ends.
+    let work: ActionKind | null = null;
+    if (entity instanceof Player && !moving) {
+      if (entity.gatherTarget !== null) {
+        const node = this.world.resourceNodes.get(entity.gatherTarget);
+        work = node?.kind === 'tree' ? 'chop' : node?.kind === 'rock' ? 'mine' : node ? 'fish' : null;
+      } else if (entity.action) {
+        work = entity.action.type === 'smith' ? 'hammer' : entity.action.type === 'smelt' ? 'fish' : 'crouch';
+      }
+    }
+    if (work) {
+      entity.swingQueue.length = 0; // the loop is the swing
+      anim.play(work, true);
+      return;
+    }
+    if (anim.playing && ACTION_DURATION[anim.playing] >= 0.8 && anim.playing !== 'flinch') anim.stopAction();
+
+    if (entity.swingQueue.length > 0) {
+      entity.swingQueue.length = 0;
+      anim.play(attackClipFor(entity));
+      return;
+    }
+    // Recoil from a real hit, unless mid-swing.
+    if (entity.splatQueue.some((d) => d > 0) && !anim.playing) anim.play('flinch');
   }
 
   private updateHealthBar(avatar: Avatar, entity: Entity): void {
@@ -222,8 +249,8 @@ export class EntityView {
     }
     if (!avatar.overhead) {
       avatar.overhead = makeOverheadSprite();
-      avatar.overhead.position.set(0, avatar.barHeight + 0.42, 0);
-      avatar.group.add(avatar.overhead);
+      avatar.overhead.position.set(0, avatar.rig.barHeight + 0.42, 0);
+      avatar.rig.group.add(avatar.overhead);
     }
     avatar.overhead.visible = true;
   }
@@ -231,13 +258,12 @@ export class EntityView {
   /** Drain the sim's hit queue into hitsplats on the entity. */
   private spawnSplats(avatar: Avatar, entity: Entity): void {
     if (entity.splatQueue.length === 0) return;
-    const p = avatar.group.position;
+    const p = avatar.rig.group.position;
     for (const damage of entity.splatQueue) {
       const sprite = makeSplatSprite(damage);
-      sprite.position.set(p.x, p.y + avatar.barHeight * 0.55, p.z);
+      sprite.position.set(p.x, p.y + avatar.rig.barHeight * 0.55, p.z);
       this.scene.add(sprite);
       this.splats.push({ sprite, life: SPLAT_TIME });
-      if (damage > 0) avatar.flinchT = FLINCH_TIME; // recoil from a real hit
     }
     entity.splatQueue.length = 0;
   }
@@ -257,11 +283,6 @@ export class EntityView {
     }
   }
 
-  /** Live world-space position of an entity's avatar, or null if not yet built. */
-  positionOf(id: number): THREE.Vector3 | null {
-    return this.avatars.get(id)?.group.position ?? null;
-  }
-
   /** Whoever this entity is mid-conversation with, if anyone. */
   private dialoguePartnerOf(entity: Entity): Entity | null {
     if (entity instanceof Player) {
@@ -271,52 +292,6 @@ export class EntityView {
       if (other instanceof Player && other.dialogue?.npcId === entity.id) return other;
     }
     return null;
-  }
-
-  /** Swing limbs and add a gentle bob while walking; ease back to rest at a stop. */
-  private animate(avatar: Avatar, moving: boolean, dt: number, ground: number): void {
-    const target = moving ? 1 : 0;
-    avatar.gait += (target - avatar.gait) * Math.min(1, dt * 10);
-
-    const swing = Math.sin(this.clock * 9) * 0.7 * avatar.gait;
-    avatar.legL.rotation.x = swing;
-    avatar.legR.rotation.x = -swing;
-    avatar.armL.rotation.x = -swing;
-    avatar.armR.rotation.x = swing;
-    avatar.group.position.y = ground + Math.abs(Math.sin(this.clock * 9)) * 0.04 * avatar.gait;
-
-    // Attack: raise the weapon arm overhead, then snap it down, with a small
-    // lunge toward the facing direction at the moment of the strike.
-    if (avatar.swingT > 0) {
-      avatar.swingT = Math.max(0, avatar.swingT - dt);
-      const p = 1 - avatar.swingT / SWING_TIME; // 0 → 1 over the swing
-      const wind = Math.min(1, p / 0.45); // raise phase
-      const strike = p < 0.45 ? 0 : Math.min(1, (p - 0.45) / 0.3); // downswing
-      const raise = -2.3 * Math.sin((wind * Math.PI) / 2);
-      avatar.weaponArm.rotation.x = raise * (1 - strike) + 0.5 * strike;
-
-      const lunge = 0.22 * Math.sin(p * Math.PI);
-      avatar.group.position.x += Math.sin(avatar.group.rotation.y) * lunge;
-      avatar.group.position.z += Math.cos(avatar.group.rotation.y) * lunge;
-    }
-
-    // Flinch: a quick lean back after taking a real hit.
-    let lean = 0;
-    if (avatar.flinchT > 0) {
-      avatar.flinchT = Math.max(0, avatar.flinchT - dt);
-      lean = -0.22 * Math.sin((1 - avatar.flinchT / FLINCH_TIME) * Math.PI);
-    }
-
-    // Death: keel over backwards, then sink slightly before hiding.
-    if (avatar.deathT > 0) {
-      avatar.deathT = Math.max(0, avatar.deathT - dt);
-      const p = 1 - avatar.deathT / DEATH_TIME;
-      lean = (-Math.PI / 2) * Math.min(1, p * 1.4);
-      if (p > 0.7) avatar.group.position.y -= ((p - 0.7) / 0.3) * 0.15;
-    }
-    avatar.group.rotation.x = lean;
-
-    if (avatar.cape) this.billowCape(avatar.cape, avatar.gait);
   }
 
   /**
@@ -345,81 +320,14 @@ export class EntityView {
   }
 
   private createAvatar(entity: Entity): Avatar {
-    return this.finish(this.rigFor(entity));
-  }
-
-  /** Pick a rig for an entity: the monster models, or a dressed-up human. */
-  private rigFor(entity: Entity): Rig {
-    if (entity instanceof Npc) {
-      switch (entity.kind) {
-        case 'goblin':
-          return buildGoblin();
-        case 'rat':
-          return buildRat();
-        case 'guard':
-          // Castle guards: the human rig in chainmail and crimson, plus a helm.
-          return buildHuman(
-            { skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a, hair: 0x3a2a1a },
-            (g) => addHelm(g, 0xb4b8bf),
-          );
-        case 'captain':
-          // Same kit, redder, with an officer's plume.
-          return buildHuman(
-            { skin: 0xd8a06c, tunic: 0x8c93a3, trouser: 0x8b2b1f, boots: 0x2a2a2a, hair: 0x3a2a1a },
-            (g) => {
-              addHelm(g, 0xc9ccd2);
-              g.add(put(wedge(0.05, 0.22, 0.16, 0.6, 0.9), 0xc0332a, 0, 1.82, -0.04));
-            },
-          );
-        case 'cook':
-          return buildHuman(
-            { skin: 0xe0ac79, tunic: 0xf0ede4, trouser: 0x4a4a4a, boots: 0x2a2a2a, hair: 0x3a2a1a },
-            (g) => {
-              g.add(put(lathe([[0.16, 0], [0.18, 0.14], [0.2, 0.24], [0, 0.28]], 8), 0xffffff, 0, 1.66, 0)); // toque
-              g.add(put(prism(0.185, 0.185, 0.05, 8), 0xffffff, 0, 1.66, 0));
-            },
-          );
-        case 'woodsman':
-          return buildHuman(
-            { skin: 0xd9a06c, tunic: 0x6b8f3a, trouser: 0x5a4632, boots: 0x3b2a1c, hair: 0x8b5a2b },
-            (g, armL) => {
-              // A big beard and a felling axe in hand.
-              g.add(put(lathe([[0.12, 0], [0.13, 0.08], [0.06, 0.16], [0, 0.17]], 6, 0.6), 0x8b5a2b, 0, 1.26, 0.12));
-              armL.add(buildWeapon({ id: 'steel_axe', qty: 1 }));
-            },
-          );
-        case 'fisherman':
-          return buildHuman(
-            { skin: 0xd9a06c, tunic: 0x4f6f8f, trouser: 0x6b6b6b, boots: 0x3b2a1c, hair: 0xd0d0d0 },
-            (g) => {
-              const straw = 0xc9b26a;
-              g.add(put(lathe([[0.26, 0], [0.27, 0.03], [0.15, 0.04], [0.14, 0.18], [0, 0.2]], 8), straw, 0, 1.62, 0)); // wide-brimmed hat
-              g.add(put(lathe([[0.1, 0], [0.11, 0.08], [0.05, 0.15], [0, 0.16]], 6, 0.6), 0xd0d0d0, 0, 1.27, 0.12)); // grey beard
-            },
-          );
-        case 'shopkeeper':
-          return buildHuman(
-            { skin: 0xe0ac79, tunic: 0x7a4f8a, trouser: 0x3a3a4a, boots: 0x2a2a2a, hair: 0x2a1a0a },
-            (g) => g.add(put(wedge(0.3, 0.44, 0.03, 1.1, 1), 0xd8cfa8, 0, 0.86, 0.15)), // apron
-          );
-      }
-    }
-    return buildHuman({ skin: 0xe0ac79, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, hair: 0x4a2f16 });
-  }
-
-  /** Attach the health bar and animation state to a freshly built rig. */
-  private finish(rig: Rig): Avatar {
-    rig.group.traverse((o) => {
-      if (o instanceof THREE.Mesh) o.castShadow = true;
-    });
+    const rig = rigFor(entity);
     const hp = attachHealthBar(rig.group, rig.barHeight);
     return {
-      ...rig,
-      gait: 0,
-      swingT: 0,
-      flinchT: 0,
-      deathT: -1,
+      rig,
+      anim: new Animator(rig),
+      lastPos: new THREE.Vector3(Infinity, 0, Infinity),
       wasAlive: true,
+      deadFor: -1,
       gear: [],
       gearSig: '',
       hpBar: hp.sprite,
@@ -434,6 +342,8 @@ export class EntityView {
     for (const obj of avatar.gear) obj.parent?.remove(obj);
     avatar.gear = [];
     avatar.cape = undefined;
+    const rig = avatar.rig;
+    const s = rig.sockets;
 
     const add = (obj: THREE.Object3D, parent: THREE.Object3D): void => {
       obj.traverse((o) => {
@@ -443,46 +353,166 @@ export class EntityView {
       avatar.gear.push(obj);
     };
 
-    if (eq.helmet) add(buildHelmet(eq.helmet), avatar.group);
-    if (eq.chestplate) add(buildChest(eq.chestplate), avatar.group);
+    if (eq.helmet) add(buildHelmet(eq.helmet, rig), s.head);
+    if (eq.chestplate) add(buildChest(eq.chestplate, rig), s.torso);
     if (eq.legs) {
-      add(buildLegGuard(eq.legs), avatar.legL);
-      add(buildLegGuard(eq.legs), avatar.legR);
+      const [tl, sl] = buildLegGuard(eq.legs, rig);
+      const [tr, sr] = buildLegGuard(eq.legs, rig);
+      add(tl, s.thighL);
+      add(sl, s.shinL);
+      add(tr, s.thighR);
+      add(sr, s.shinR);
     }
     if (eq.boots) {
-      add(buildBoot(eq.boots), avatar.legL);
-      add(buildBoot(eq.boots), avatar.legR);
+      add(buildBoot(eq.boots, rig), s.footL);
+      add(buildBoot(eq.boots, rig), s.footR);
     }
     if (eq.gloves) {
-      add(buildGlove(eq.gloves), avatar.armL);
-      add(buildGlove(eq.gloves), avatar.armR);
+      add(buildGlove(eq.gloves, rig), s.handL);
+      add(buildGlove(eq.gloves, rig), s.handR);
     }
-    // armL sits on the body's right side as seen facing north, armR on the left.
-    if (eq.weapon) add(buildWeapon(eq.weapon), avatar.armL); // sword on the right
-    if (eq.shield) add(buildShield(eq.shield), avatar.armR); // shield on the left
+    if (eq.weapon) add(buildWeapon(eq.weapon, rig), weaponInOffHand(eq.weapon) ? s.handL : s.handR);
+    if (eq.shield) add(buildShield(eq.shield, rig), s.handL);
 
     if (eq.cape) {
-      const { cloth, clasp, cape } = this.createCape();
-      add(cloth, avatar.group);
-      add(clasp, avatar.group);
+      const { cloth, clasp, cape } = createCape(rig);
+      add(cloth, s.torso);
+      add(clasp, s.torso);
       avatar.cape = cape;
     }
   }
+}
 
-  /** Build the animated cape cloth plus its gold neck clasp. */
-  private createCape(): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cape } {
-    const cape = makeCape();
-    const cloth = new THREE.Mesh(cape.geo, makeCapeMaterial());
-    cloth.position.set(0, 1.23, -0.16); // off the back of the shoulders
-    cloth.rotation.x = 0.18;
-    const clasp = put(shade(new THREE.OctahedronGeometry(0.05, 0)), 0xe8c66a, 0, 1.26, -0.04);
-    return { cloth, clasp, cape };
+/** Which attack clip an entity's weapon calls for. */
+function attackClipFor(entity: Entity): ActionKind {
+  if (entity instanceof Npc) {
+    return entity.kind === 'goblin' ? 'crush' : entity.kind === 'rat' ? 'stab' : 'slash';
   }
+  if (entity instanceof Player) {
+    const weapon = entity.inventory.equipment.weapon;
+    const type = weapon ? itemDef(weapon.id).weaponType : undefined;
+    switch (type) {
+      case 'dagger':
+        return 'stab';
+      case 'mace':
+      case 'warhammer':
+      case 'pickaxe':
+        return 'crush';
+      case 'bow':
+        return 'bow';
+      case 'staff':
+        return entity.autocastSpell ? 'cast' : 'crush';
+      default:
+        return weapon ? 'slash' : 'stab'; // bare fists jab
+    }
+  }
+  return 'slash';
+}
+
+/** Pick a rig for an entity: the monster models, or a dressed-up person. */
+function rigFor(entity: Entity): Rig {
+  if (entity instanceof Npc) {
+    switch (entity.kind) {
+      case 'goblin':
+        return buildHumanoid({
+          height: 1.32,
+          headScale: 1.35,
+          armScale: 1.2,
+          legScale: 0.85,
+          belly: 1,
+          hunch: 0.3,
+          goblin: true,
+          hair: 'bald',
+          palette: { skin: 0x7d9c3c, hair: 0x2a2a1a, tunic: 0x7d9c3c, trouser: 0x6b4a2f, boots: 0x5a3d25 },
+          extras: (rig) => rig.sockets.handR.add(goblinClub(rig)),
+        });
+      case 'rat':
+        return buildRat();
+      case 'guard':
+        // Castle guards: chainmail and crimson, plus a helm.
+        return buildHumanoid({
+          height: 1.8,
+          palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a },
+          extras: (rig) => rig.sockets.head.add(skullCap(rig, 0xb4b8bf)),
+        });
+      case 'captain':
+        // Same kit, redder, with an officer's plume.
+        return buildHumanoid({
+          height: 1.82,
+          palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x8b2b1f, boots: 0x2a2a2a },
+          extras: (rig) => {
+            rig.sockets.head.add(skullCap(rig, 0xc9ccd2));
+            rig.sockets.head.add(plume(rig));
+          },
+        });
+      case 'cook':
+        return buildHumanoid({
+          height: 1.7,
+          belly: 0.6,
+          palette: { skin: 0xe0ac79, hair: 0x3a2a1a, tunic: 0xf0ede4, trouser: 0x4a4a4a, boots: 0x2a2a2a },
+          extras: (rig) => rig.sockets.head.add(toque(rig)),
+        });
+      case 'woodsman':
+        return buildHumanoid({
+          height: 1.85,
+          palette: { skin: 0xd9a06c, hair: 0x8b5a2b, tunic: 0x6b8f3a, trouser: 0x5a4632, boots: 0x3b2a1c },
+          extras: (rig) => {
+            rig.sockets.head.add(beard(rig, 0x8b5a2b));
+            rig.sockets.handR.add(buildWeapon({ id: 'steel_axe', qty: 1 }, rig));
+          },
+        });
+      case 'fisherman':
+        return buildHumanoid({
+          height: 1.72,
+          palette: { skin: 0xd9a06c, hair: 0xd0d0d0, tunic: 0x4f6f8f, trouser: 0x6b6b6b, boots: 0x3b2a1c },
+          extras: (rig) => {
+            rig.sockets.head.add(strawHat(rig));
+            rig.sockets.head.add(beard(rig, 0xd0d0d0));
+          },
+        });
+      case 'shopkeeper':
+        return buildHumanoid({
+          height: 1.74,
+          belly: 0.4,
+          palette: { skin: 0xe0ac79, hair: 0x2a1a0a, tunic: 0x7a4f8a, trouser: 0x3a3a4a, boots: 0x2a2a2a },
+          extras: (rig) => rig.sockets.torso.add(apron(rig)),
+        });
+    }
+  }
+  return buildHumanoid({
+    height: 1.75,
+    palette: { skin: 0xe0ac79, hair: 0x4a2f16, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c },
+  });
+}
+
+/** A goblin's crude club, gripped in the right hand. */
+function goblinClub(rig: Rig): THREE.Object3D {
+  const s = rig.dims.scale;
+  const club = new THREE.Group();
+  const wood = material(0x6b4a2f, 'leather');
+  club.add(put(shade(new THREE.CylinderGeometry(0.022, 0.028, 0.4, 7)), wood, 0, 0.18, 0));
+  club.add(put(lathe([[0.03, 0], [0.085, 0.07], [0.075, 0.18], [0, 0.22]], 8), material(0x7a5230, 'leather'), 0, 0.36, 0));
+  club.scale.setScalar(s);
+  club.position.set(0, -0.075 * s, 0.03 * s);
+  club.rotation.set(0.4, 0, -0.1);
+  return club;
 }
 
 /** Stable string of equipped item ids, so EntityView can spot a change cheaply. */
 function equipSignature(eq: Record<EquipSlot, ItemStack | null>): string {
   return EQUIP_SLOTS.map((s) => eq[s]?.id ?? '-').join('|');
+}
+
+/** Build the animated cape cloth plus its gold neck clasp, hung from the torso. */
+function createCape(rig: Rig): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cape } {
+  const s = rig.dims.scale;
+  const cape = makeCape();
+  const cloth = new THREE.Mesh(cape.geo, makeCapeMaterial());
+  cloth.scale.setScalar(s);
+  cloth.position.set(0, rig.dims.torso - 0.06 * s, -0.13 * s); // off the back of the shoulders
+  cloth.rotation.x = 0.18;
+  const clasp = put(shade(new THREE.OctahedronGeometry(0.05 * s, 0)), material(0xe8c66a, 'metal'), 0, rig.dims.torso - 0.04 * s, 0.1 * s);
+  return { cloth, clasp, cape };
 }
 
 /** The Protect from Melee overhead: crossed swords on a sky-blue disc. */
@@ -518,9 +548,9 @@ const CAPE_TOP_WIDTH = 0.34;
 
 /**
  * The max cape cloth: a panel that flares wider toward the hem and is coloured
- * like the OSRS max cape — a rich red body with a thin rainbow trim running down
- * both side edges and along the bottom. Built with vertex colours (no texture)
- * and recorded `base` positions so {@link EntityView.billowCape} can ripple it.
+ * like the OSRS max cape, a rich red body with a thin rainbow trim running
+ * down both side edges and along the bottom. Built with vertex colours and
+ * recorded `base` positions so {@link EntityView.billowCape} can ripple it.
  */
 function makeCape(): Cape {
   const geo = new THREE.PlaneGeometry(CAPE_TOP_WIDTH, CAPE_HEIGHT, 4, 8);
@@ -644,8 +674,10 @@ function makeSplatSprite(damage: number): THREE.Sprite {
 }
 
 function makeCapeMaterial(): THREE.MeshStandardMaterial {
-  return new THREE.MeshStandardMaterial({ roughness: 0.9, envMapIntensity: 0.5,
+  return new THREE.MeshStandardMaterial({
     vertexColors: true,
     side: THREE.DoubleSide,
+    roughness: 0.85,
+    envMapIntensity: 0.4,
   });
 }

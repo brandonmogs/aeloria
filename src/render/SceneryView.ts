@@ -22,6 +22,7 @@ import {
 import { LeafKind, barkTextures, leafTexture, rockTextures } from './foliageTextures';
 import { projectUvs } from './textures';
 import { PhotoLibrary, applyPbr } from './assets';
+import { LightPool } from './LightPool';
 
 /** Where a gatherable prop's instances live, so the sim can hide/show them. */
 interface ResourceVisual {
@@ -132,6 +133,9 @@ export class SceneryView {
   /** Gatherable props keyed by "x,y". */
   private readonly resources = new Map<string, ResourceVisual>();
   private readonly zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+  /** World positions of furnace mouths, lit each frame. */
+  private readonly furnaces: THREE.Vector3[] = [];
+  private clock = 0;
 
   constructor(
     scene: THREE.Scene,
@@ -153,9 +157,15 @@ export class SceneryView {
     scene.add(this.root);
   }
 
-  /** Advance the breeze. */
-  update(dt: number): void {
+  /** Advance the breeze and light the furnaces. */
+  update(dt: number, lights?: LightPool): void {
     this.leafTime.value += dt;
+    this.clock += dt;
+    if (!lights) return;
+    for (const f of this.furnaces) {
+      const flicker = 0.85 + 0.15 * Math.sin(this.clock * 11 + f.x);
+      lights.add(f.x, f.y + 0.5, f.z + 0.35, 0xff7a20, 4.5 * flicker, 4.5);
+    }
   }
 
   /** Swap gatherable props between intact and depleted to match the sim. */
@@ -214,6 +224,7 @@ export class SceneryView {
       const obj = this.buildCastlePiece(prop);
       if (!obj) continue;
       obj.position.set(prop.tile.x, this.terrain.tileHeight(prop.tile), prop.tile.y);
+      if (prop.kind === 'furnace') this.furnaces.push(obj.position.clone());
       collect(obj);
     }
 

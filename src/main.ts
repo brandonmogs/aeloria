@@ -29,6 +29,7 @@ import { Terrain } from './render/Terrain';
 import { loadPhotoLibrary } from './render/assets';
 import { TileGridView } from './render/TileGridView';
 import { SceneryView } from './render/SceneryView';
+import { GrassView } from './render/GrassView';
 import { WaterView } from './render/WaterView';
 import { EntityView } from './render/EntityView';
 import { GroundItemView } from './render/GroundItemView';
@@ -141,7 +142,8 @@ async function runGame(): Promise<void> {
   renderer.scene.add(terrain.mesh);
   const tileView = new TileGridView(renderer.scene, terrain);
   const scenery = new SceneryView(renderer.scene, props, terrain, photos);
-  const water = new WaterView(renderer.scene, moat);
+  const grass = new GrassView(renderer.scene, map, terrain);
+  const water = new WaterView(renderer, moat, photos);
   const entityView = new EntityView(renderer.scene, world, terrain);
   const groundView = new GroundItemView(renderer.scene, world, terrain);
   const fireView = new FireView(renderer.scene, world, terrain);
@@ -737,11 +739,12 @@ async function runGame(): Promise<void> {
       renderer.lights.begin();
       water.update(dt);
       entityView.sync(alpha, dt);
-      projectileView.sync(alpha);
+      projectileView.sync(alpha, renderer.lights);
       groundView.sync(dt);
-      fireView.sync(dt);
+      fireView.sync(dt, renderer.lights);
       spotView.sync(dt);
-      scenery.update(dt);
+      scenery.update(dt, renderer.lights);
+      grass.update(dt);
       scenery.sync(world);
 
       const followTarget = entityView.positionOf(player.id);

@@ -1,8 +1,10 @@
 # Aeloria
 
 An Old School RuneScape–style game built on the two things that make OSRS
-feel like OSRS — a **600ms game tick** and a **tile grid** — with modern WebGL
-(Three.js) drawing a low-poly, flat-lit world in the spirit of the 2007 client.
+feel like OSRS — a **600ms game tick** and a **tile grid** — with a modern WebGL
+(Three.js) renderer in the spirit of RuneLite's 117 HD: physically based
+materials, a real sky, soft shadows, reflective water, and articulated
+characters that walk.
 
 Every number that OSRS documents, Aeloria uses verbatim: the XP curve, the
 combat formulas, prayer drain, run energy, shop prices, burn levels, item
@@ -78,6 +80,39 @@ RSMod) for engine structure.
 - **Sound** — every effect and the music synthesized in WebAudio; no audio
   assets.
 
+## Graphics
+
+The renderer is built the way RuneLite's 117 HD builds its, then pushed
+toward realism:
+
+- **Light and sky** — a physically based atmospheric sky whose sun is
+  prefiltered into an environment map, so every surface is lit by the sky it
+  stands under; a warm directional sun with a 4096-texel shadow map that
+  follows the camera and snaps to texels; a pool of dynamic point lights for
+  fires, the furnace and spells; distance fog into the horizon haze.
+- **Frame** — an MSAA half-float HDR buffer through ambient occlusion (GTAO),
+  bloom on the sun, flames and spells, ACES tone mapping and a colour grade.
+  Still capped at OSRS's 50 fps.
+- **Ground** — a half-tile heightfield whose shader splat-blends grass, dirt
+  and flagstone with per-layer normal and roughness maps and height-aware
+  edges, so roads fray into the grass through the blades.
+- **Surfaces** — CC0 photographic PBR scans from Poly Haven (colour, normal,
+  roughness, occlusion) for ground, bark, boulders, walls, planks and slates,
+  under `public/textures` with attribution; procedural canvas textures stand
+  in for anything that fails to load.
+- **Trees and water** — branching textured trunks under alpha-tested
+  leaf-cluster cards whose lighting normals radiate from the canopy centre and
+  which sway in a vertex-shader breeze; a moat that mirrors the scene from a
+  planar reflection, rippled by scrolling normal maps, with Fresnel, a sun
+  glint and foam along a noisy shoreline.
+- **Characters** — articulated rigs with realistic proportions (two-segment
+  limbs, hands, feet, faces, hair) and pose-based animation: a
+  distance-phased walk and run so feet plant instead of sliding, eased
+  turning, weapon-specific attacks, chopping, mining, fishing, smithing,
+  fire-lighting, flinches and deaths, with equipment sized to each rig.
+- **Fires** — noise-eroded flame cards, drifting embers, smoke, and a
+  flickering light on everything nearby.
+
 ## Getting started
 
 ```bash
@@ -105,10 +140,11 @@ src/
 │             registry (over wiki data), prayers, spells, smithing recipes,
 │             resource nodes, fires, quests, dialogue, shops, commands, and the
 │             UI event queue.
-├── render/   Three.js: Renderer, heightfield Terrain, OrbitCamera, models
-│             (low-poly rigs and gear), castle pieces, procedural textures,
-│             views for scenery/entities/water/items/fires/fishing spots.
-│             Reads sim state every frame; never mutates it.
+├── render/   Three.js: Renderer (sky, shadows, post chain, light pool),
+│             textured Terrain, OrbitCamera, characters (rigs + animator) and
+│             gear, scenery (trees, rocks, castle), reflective water, fires,
+│             projectiles, ground items; procedural textures and the CC0 photo
+│             texture loader. Reads sim state every frame; never mutates it.
 ├── input/    Mouse → tile → Command. The future network boundary.
 ├── audio/    WebAudio-synthesized sound effects and music.
 ├── ui/       DOM overlays: the interface strip and its tabs, skill guide,

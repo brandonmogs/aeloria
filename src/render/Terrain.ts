@@ -48,6 +48,8 @@ export class Terrain {
   private readonly nx: number;
   private readonly nz: number;
   private readonly heights: Float32Array;
+  /** Per-vertex grass/dirt/stone blend weights, kept for scattering ground cover. */
+  private readonly splats: Float32Array;
 
   constructor(
     private readonly map: TileMap,
@@ -203,6 +205,7 @@ export class Terrain {
     geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
     geo.setAttribute('splat', new THREE.BufferAttribute(splats, 3));
+    this.splats = splats;
     geo.setIndex(new THREE.BufferAttribute(index, 1));
     geo.computeVertexNormals();
 
@@ -240,6 +243,19 @@ export class Terrain {
     return fv >= fu
       ? ha + (hd - hc) * fu + (hc - ha) * fv
       : ha + (hb - ha) * fu + (hd - hb) * fv;
+  }
+
+  /** Grass blend weight (0..1) at a world point, for scattering ground cover. */
+  grassWeightAt(x: number, z: number): number {
+    const cols = this.nx + 1;
+    const u = (x + MARGIN + 0.5) * SUB;
+    const v = (z + MARGIN + 0.5) * SUB;
+    const i = Math.max(0, Math.min(this.nx - 1, Math.floor(u)));
+    const j = Math.max(0, Math.min(this.nz - 1, Math.floor(v)));
+    const fu = Math.max(0, Math.min(1, u - i));
+    const fv = Math.max(0, Math.min(1, v - j));
+    const g = (ii: number, jj: number): number => this.splats[(jj * cols + ii) * 3];
+    return (g(i, j) * (1 - fu) + g(i + 1, j) * fu) * (1 - fv) + (g(i, j + 1) * (1 - fu) + g(i + 1, j + 1) * fu) * fv;
   }
 
   /** Ground height at the centre of a tile. */
