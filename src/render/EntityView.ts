@@ -424,7 +424,7 @@ function rigFor(entity: Entity): Rig {
           hunch: 0.3,
           goblin: true,
           hair: 'bald',
-          palette: { skin: 0x7d9c3c, hair: 0x2a2a1a, tunic: 0x7d9c3c, trouser: 0x6b4a2f, boots: 0x5a3d25 },
+          palette: { skin: 0x7d9c3c, hair: 0x2a2a1a, tunic: 0x7d9c3c, trouser: 0x6b4a2f, boots: 0x5a3d25, eyes: 0xd9a13a },
           extras: (rig) => rig.sockets.handR.add(goblinClub(rig)),
         });
       case 'rat':
@@ -488,7 +488,7 @@ function rigFor(entity: Entity): Rig {
   return buildHumanoid({
     height: 1.75,
     bulk: 1.05,
-    palette: { skin: 0xe0ac79, hair: 0x4a2f16, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c },
+    palette: { skin: 0xe0ac79, hair: 0x4a2f16, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, eyes: 0x4f7fa8 },
   });
 }
 

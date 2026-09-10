@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { normalMap, tileableNoise, toTexture } from './texgen';
+import { clothDetail, faceTexture, hairDetail, leatherDetail, skinDetail } from './characterTextures';
 
 /**
  * Characters: articulated rigs with realistic proportions and a small
@@ -147,59 +147,100 @@ export interface RigDims {
 type Finish = 'skin' | 'cloth' | 'leather' | 'metal' | 'hair' | 'dark';
 
 const materialCache = new Map<string, THREE.MeshStandardMaterial>();
-let fabricTexture: THREE.DataTexture | null = null;
 
-/** A fine woven weave as a normal map, so cloth catches light like cloth. */
-function fabric(): THREE.DataTexture {
-  if (!fabricTexture) {
-    const size = 128;
-    const h = new Float32Array(size * size);
-    const n = tileableNoise(size, 3, 77, 8);
-    for (let y = 0; y < size; y++) {
-      for (let x = 0; x < size; x++) {
-        const weave = ((x >> 1) + (y >> 1)) % 2 === 0 ? 0.6 : 0.4;
-        h[y * size + x] = weave * 0.7 + n[y * size + x] * 0.3;
-      }
-    }
-    fabricTexture = toTexture(normalMap(h, size, 1.2), size, false);
-    fabricTexture.repeat.set(6, 6);
-  }
-  return fabricTexture;
-}
-
-/** A smooth-shaded material with vertex colours enabled, cached by colour and finish. */
+/**
+ * A smooth-shaded PBR material with vertex colours enabled, cached by colour
+ * and finish. Skin, cloth, leather and hair carry fine detail maps (pores,
+ * weave and fibre, grain, strands) so the revolved bodies read as materials
+ * rather than plastic.
+ */
 export function material(color: number, finish: Finish): THREE.MeshStandardMaterial {
   const key = `${finish}:${color}`;
   let m = materialCache.get(key);
   if (m) return m;
   switch (finish) {
-    case 'skin':
-      m = new THREE.MeshStandardMaterial({ color, vertexColors: true, roughness: 0.62, metalness: 0, envMapIntensity: 0.55 });
-      break;
-    case 'cloth':
+    case 'skin': {
+      const d = skinDetail();
       m = new THREE.MeshStandardMaterial({
         color,
         vertexColors: true,
-        roughness: 0.92,
+        roughness: 0.58,
+        metalness: 0,
+        envMapIntensity: 0.5,
+        map: d.albedo,
+        normalMap: d.normal,
+        normalScale: new THREE.Vector2(0.25, 0.25),
+      });
+      break;
+    }
+    case 'cloth': {
+      const d = clothDetail();
+      m = new THREE.MeshStandardMaterial({
+        color,
+        vertexColors: true,
+        roughness: 0.9,
         metalness: 0,
         envMapIntensity: 0.4,
-        normalMap: fabric(),
+        map: d.albedo,
+        normalMap: d.normal,
         normalScale: new THREE.Vector2(0.35, 0.35),
       });
       break;
-    case 'leather':
-      m = new THREE.MeshStandardMaterial({ color, vertexColors: true, roughness: 0.55, metalness: 0.05, envMapIntensity: 0.6 });
+    }
+    case 'leather': {
+      const d = leatherDetail();
+      m = new THREE.MeshStandardMaterial({
+        color,
+        vertexColors: true,
+        roughness: 0.6,
+        metalness: 0.03,
+        envMapIntensity: 0.55,
+        map: d.albedo,
+        normalMap: d.normal,
+        normalScale: new THREE.Vector2(0.7, 0.7),
+      });
       break;
+    }
     case 'metal':
-      m = new THREE.MeshStandardMaterial({ color, vertexColors: true, roughness: 0.5, metalness: 0.8, envMapIntensity: 0.8 });
+      m = new THREE.MeshStandardMaterial({ color, vertexColors: true, roughness: 0.45, metalness: 0.85, envMapIntensity: 0.9 });
       break;
-    case 'hair':
-      m = new THREE.MeshStandardMaterial({ color, vertexColors: true, roughness: 0.7, metalness: 0, envMapIntensity: 0.45 });
+    case 'hair': {
+      const d = hairDetail();
+      m = new THREE.MeshStandardMaterial({
+        color,
+        vertexColors: true,
+        roughness: 0.5,
+        metalness: 0,
+        envMapIntensity: 0.5,
+        map: d.albedo,
+        normalMap: d.normal,
+        normalScale: new THREE.Vector2(0.6, 0.6),
+      });
       break;
+    }
     case 'dark':
       m = new THREE.MeshStandardMaterial({ color, vertexColors: true, roughness: 0.5, metalness: 0, envMapIntensity: 0.3 });
       break;
   }
+  materialCache.set(key, m);
+  return m;
+}
+
+/** The head's skin with the face painted on, cached per look. */
+export function faceMaterial(skin: number, hair: number, eyes: number, goblin: boolean): THREE.MeshStandardMaterial {
+  const key = `face:${skin}:${hair}:${eyes}:${goblin ? 1 : 0}`;
+  let m = materialCache.get(key);
+  if (m) return m;
+  m = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    vertexColors: true,
+    roughness: 0.56,
+    metalness: 0,
+    envMapIntensity: 0.5,
+    map: faceTexture(skin, hair, eyes, goblin),
+    normalMap: skinDetail().normal,
+    normalScale: new THREE.Vector2(0.2, 0.2),
+  });
   materialCache.set(key, m);
   return m;
 }
@@ -406,21 +447,25 @@ function headGeometry(hr: number, flattenZ: number): THREE.BufferGeometry {
 /** Hair: a cap over the crown, a mane down the back and sides, and a fringe over the brow. */
 function addHair(head: THREE.Object3D, hr: number, flatten: number, style: 'short' | 'long', mat: THREE.Material): void {
   const hrs = (pts: ReadonlyArray<readonly [number, number]>): Array<readonly [number, number]> => pts.map(([r, y]) => [r * hr, y * hr] as const);
-  head.add(put(lathe(hrs([[1.0, 1.28], [1.06, 1.6], [0.95, 1.92], [0.62, 2.13], [0, 2.19]]), 24, flatten), mat));
+  // Crown, from the hairline up.
+  head.add(put(lathe(hrs([[0.99, 1.6], [1.05, 1.8], [0.94, 1.98], [0.62, 2.13], [0, 2.19]]), 24, flatten), mat));
+  // Back and sides down to the nape (the shoulders when long), open over the face and temples.
+  const low = style === 'long' ? -0.45 : 0.88;
   const mane = new THREE.LatheGeometry(
-    hrs([[0.98, style === 'long' ? -0.45 : 0.55], [1.06, 0.9], [1.07, 1.35], [1.02, 1.7]]).map(([r, y]) => new THREE.Vector2(r, y)),
-    14,
-    Math.PI * 0.3, // the gap faces +z: the face stays open
-    Math.PI * 1.4,
+    hrs([[0.96, low], [1.05, low + 0.35], [1.07, 1.3], [1.06, 1.62], [1.0, 1.85]]).map(([r, y]) => new THREE.Vector2(r, y)),
+    16,
+    Math.PI * 0.36, // the gap faces +z: the face stays open
+    Math.PI * 1.28,
   );
   mane.scale(1, 1, flatten);
   mane.computeVertexNormals();
   head.add(put(shade(mane), mat));
+  // Fringe: a low band along the hairline, sitting close to the brow.
   const fringe = new THREE.LatheGeometry(
-    hrs([[1.01, 1.52], [1.08, 1.64], [1.07, 1.8], [0.98, 1.92]]).map(([r, y]) => new THREE.Vector2(r, y)),
+    hrs([[1.0, 1.58], [1.05, 1.66], [1.05, 1.8], [1.0, 1.9]]).map(([r, y]) => new THREE.Vector2(r, y)),
     12,
-    -Math.PI * 0.36,
-    Math.PI * 0.72,
+    -Math.PI * 0.34,
+    Math.PI * 0.68,
   );
   fringe.scale(1, 1, flatten);
   fringe.computeVertexNormals();
@@ -435,6 +480,8 @@ export interface HumanoidPalette {
   tunic: number;
   trouser: number;
   boots: number;
+  /** Iris colour; brown by default. */
+  eyes?: number;
 }
 
 export interface HumanoidSpec {
@@ -512,7 +559,6 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const trouser = material(p.trouser, 'cloth');
   const boots = material(p.boots, 'leather');
   const hair = material(p.hair, 'hair');
-  const dark = material(0x1a1612, 'dark');
   const buckle = material(0xb8a25a, 'metal');
   const sole = material(0x2a2420, 'leather');
 
@@ -539,7 +585,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
           [hipHalf + 0.05 * s, 0.06 * s],
         ],
         20,
-        0.7,
+        0.62,
       ),
       trouser,
     ),
@@ -600,14 +646,8 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const head = joint('head', neck, 0, 0.085 * s, 0);
   const hr = headR;
   const hf = headFlatten;
-  head.add(put(headGeometry(hr, hf), skin));
-  // Face: eyes, brows, nose, mouth, ears.
-  for (const sx of [-0.34 * hr, 0.34 * hr]) {
-    head.add(put(sphere(0.1 * hr), dark, sx, 1.27 * hr, 0.98 * hr * hf));
-    const brow = put(roundedBox(0.32 * hr, 0.06 * hr, 0.07 * hr), hair, sx, 1.47 * hr, 0.98 * hr * hf);
-    brow.rotation.z = sx < 0 ? 0.15 : -0.15;
-    head.add(brow);
-  }
+  head.add(put(headGeometry(hr, hf), faceMaterial(p.skin, p.hair, p.eyes ?? 0x5b3f2c, !!spec.goblin)));
+  // Eyes, brows and mouth are painted on; the nose and ears are modelled.
   if (spec.goblin) {
     const nose = put(new THREE.ConeGeometry(0.16 * hr, 0.9 * hr, 6), skin, 0, 1.05 * hr, 1.0 * hr * hf);
     nose.geometry = shade(nose.geometry);
@@ -644,7 +684,6 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
       head.add(ear);
     }
   }
-  head.add(put(roundedBox(0.34 * hr, 0.05 * hr, 0.05 * hr), material(0x7a3a34, 'dark'), 0, 0.66 * hr, 0.9 * hr * hf));
 
   const hairStyle = spec.hair ?? 'short';
   if (hairStyle !== 'bald') addHair(head, hr, hf, hairStyle, hair);
