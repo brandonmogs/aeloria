@@ -122,6 +122,24 @@ export interface RigDims {
   headR: number;
   shoulderHalf: number;
   hipHalf: number;
+  /** The head is longer front to back than it is wide by this factor. */
+  headFlatten: number;
+  /** The tunic's revolve profile ([radius, height above the spine joint]) and its front-back squash, for armour to hug. */
+  torsoProfile: ReadonlyArray<readonly [number, number]>;
+  torsoFlatten: number;
+  chestR: number;
+  waistR: number;
+  /** Limb radii at their thickest. */
+  thighR: number;
+  shinR: number;
+  armR: number;
+  forearmR: number;
+  deltoidR: number;
+  /** Ankle height above the ground, and foot / hand sizes. */
+  ankle: number;
+  footL: number;
+  footW: number;
+  handL: number;
 }
 
 // --- Materials ----------------------------------------------------------------------
@@ -219,11 +237,26 @@ export function lathe(profile: ReadonlyArray<readonly [number, number]>, segment
   return shade(geo);
 }
 
-/** A limb segment: a tapered capsule hanging down from the origin. */
+/**
+ * A limb segment hanging from its joint: a revolved muscle profile given as
+ * [radius, depth below the joint] pairs from the joint down to the far end,
+ * capped at both ends so nothing shows through when the joint bends.
+ */
+function limbSegment(profile: ReadonlyArray<readonly [number, number]>, segments = 18): THREE.BufferGeometry {
+  const pts: THREE.Vector2[] = [];
+  const deepest = profile[profile.length - 1][1];
+  pts.push(new THREE.Vector2(0, -deepest));
+  for (let i = profile.length - 1; i >= 0; i--) pts.push(new THREE.Vector2(profile[i][0], -profile[i][1]));
+  pts.push(new THREE.Vector2(0, -profile[0][1]));
+  const geo = new THREE.LatheGeometry(pts, segments);
+  geo.computeVertexNormals();
+  return shade(geo, 1.02, 0.93);
+}
+
+/** A tapered capsule hanging down from the origin (the rat's legs). */
 function segment(rTop: number, rBottom: number, length: number): THREE.BufferGeometry {
   const r = (rTop + rBottom) / 2;
-  const geo = new THREE.CapsuleGeometry(r, Math.max(0.01, length - r * 0.6), 4, 10);
-  // Taper: scale x/z by height.
+  const geo = new THREE.CapsuleGeometry(r, Math.max(0.01, length - r * 0.6), 4, 12);
   const pos = geo.attributes.position as THREE.BufferAttribute;
   geo.computeBoundingBox();
   const box = geo.boundingBox!;
@@ -239,11 +272,25 @@ function segment(rTop: number, rBottom: number, length: number): THREE.BufferGeo
 }
 
 function sphere(r: number): THREE.BufferGeometry {
-  return shade(new THREE.SphereGeometry(r, 10, 8), 1.02, 0.94);
+  return shade(new THREE.SphereGeometry(r, 16, 12), 1.02, 0.94);
 }
 
 function roundedBox(w: number, h: number, d: number): THREE.BufferGeometry {
   return shade(new THREE.BoxGeometry(w, h, d, 1, 1, 1), 1.02, 0.94);
+}
+
+/** A box whose top face is scaled in: feet, palms, cuffs. */
+function taperedBox(w: number, h: number, d: number, topX: number, topZ = topX): THREE.BufferGeometry {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) > 0) {
+      pos.setX(i, pos.getX(i) * topX);
+      pos.setZ(i, pos.getZ(i) * topZ);
+    }
+  }
+  geo.computeVertexNormals();
+  return shade(geo, 1.02, 0.94);
 }
 
 /** Merge every child mesh of `parent` that shares a material into a single mesh. */
@@ -277,6 +324,109 @@ export function put(geo: THREE.BufferGeometry, mat: THREE.Material, x = 0, y = 0
   return m;
 }
 
+/**
+ * A hand hanging from the wrist: the palm turned in to face the body, thumb
+ * forward, four gently curled fingers, all merged into one skin mesh.
+ */
+function buildHand(skin: THREE.Material, side: 1 | -1, s: number): THREE.Object3D {
+  const g = new THREE.Group();
+  const palmL = 0.095 * s;
+  const palmW = 0.085 * s;
+  const palmT = 0.032 * s;
+  g.add(put(sphere(0.03 * s), skin)); // wrist
+  g.add(put(taperedBox(palmT, palmL, palmW, 1, 0.8), skin, 0, -palmL / 2, 0));
+  const lengths = [0.068, 0.076, 0.071, 0.056];
+  const fr = 0.0115 * s;
+  for (let i = 0; i < 4; i++) {
+    const len = lengths[i] * s;
+    const geo = new THREE.CapsuleGeometry(fr, Math.max(0.001, len - 2 * fr), 3, 8);
+    geo.translate(0, -len / 2, 0); // hang from the knuckle
+    const finger = put(shade(geo, 1.0, 0.96), skin, 0, -palmL + fr, palmW / 2 - (i + 0.5) * (palmW / 4));
+    finger.rotation.z = -side * 0.32; // curl toward the palm
+    g.add(finger);
+  }
+  const thumbLen = 0.062 * s;
+  const thumbGeo = new THREE.CapsuleGeometry(0.013 * s, thumbLen - 0.026 * s, 3, 8);
+  thumbGeo.translate(0, -thumbLen / 2, 0);
+  const thumb = put(shade(thumbGeo, 1.0, 0.96), skin, 0, -0.03 * s, palmW / 2 + 0.004 * s);
+  thumb.rotation.set(-0.75, 0, side * 0.25);
+  g.add(thumb);
+  mergeByMaterial(g);
+  return g;
+}
+
+/** A boot: a cuff around the ankle, a foot with a rounded toe, and a thick sole. */
+function buildFoot(leather: THREE.Material, sole: THREE.Material, s: number, ankle: number): THREE.Object3D {
+  const g = new THREE.Group();
+  const L = 0.21 * s;
+  const W = 0.1 * s;
+  const forward = 0.045 * s; // the foot's centre sits ahead of the ankle
+  const bodyH = ankle - 0.02 * s;
+  g.add(put(shade(new THREE.CylinderGeometry(0.06 * s, 0.067 * s, 0.11 * s, 16)), leather, 0, 0.02 * s, -0.004 * s));
+  g.add(put(taperedBox(W, bodyH, L, 0.86, 0.94), leather, 0, -0.02 * s - bodyH / 2, forward));
+  const toe = put(sphere(W / 2), leather, 0, -0.02 * s - bodyH / 2, forward + L / 2);
+  toe.scale.set(1, bodyH / W, 1.15);
+  g.add(toe);
+  g.add(put(roundedBox(W * 1.04, 0.02 * s, L * 1.02 + W * 0.55), sole, 0, -ankle + 0.01 * s, forward + W * 0.2));
+  mergeByMaterial(g);
+  return g;
+}
+
+/**
+ * The skull: chin, jaw, cheekbones, brow and crown, longer front to back than
+ * it is wide like a real head. Its texture seam runs down the back and its v
+ * coordinate runs with height, so a painted face lands where it should.
+ */
+function headGeometry(hr: number, flattenZ: number): THREE.BufferGeometry {
+  const profile: ReadonlyArray<readonly [number, number]> = [
+    [0.3, 0],
+    [0.62, 0.12],
+    [0.8, 0.38],
+    [0.92, 0.75],
+    [1.0, 1.15],
+    [0.99, 1.55],
+    [0.88, 1.88],
+    [0.6, 2.05],
+    [0, 2.1],
+  ];
+  const geo = new THREE.LatheGeometry(
+    profile.map(([r, y]) => new THREE.Vector2(r * hr, y * hr)),
+    28,
+  );
+  geo.rotateY(Math.PI);
+  geo.scale(1, 1, flattenZ);
+  geo.computeVertexNormals();
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  const uv = geo.attributes.uv as THREE.BufferAttribute;
+  const top = 2.1 * hr;
+  for (let i = 0; i < pos.count; i++) uv.setY(i, pos.getY(i) / top);
+  return shade(geo, 1.02, 0.95);
+}
+
+/** Hair: a cap over the crown, a mane down the back and sides, and a fringe over the brow. */
+function addHair(head: THREE.Object3D, hr: number, flatten: number, style: 'short' | 'long', mat: THREE.Material): void {
+  const hrs = (pts: ReadonlyArray<readonly [number, number]>): Array<readonly [number, number]> => pts.map(([r, y]) => [r * hr, y * hr] as const);
+  head.add(put(lathe(hrs([[1.0, 1.28], [1.06, 1.6], [0.95, 1.92], [0.62, 2.13], [0, 2.19]]), 24, flatten), mat));
+  const mane = new THREE.LatheGeometry(
+    hrs([[0.98, style === 'long' ? -0.45 : 0.55], [1.06, 0.9], [1.07, 1.35], [1.02, 1.7]]).map(([r, y]) => new THREE.Vector2(r, y)),
+    14,
+    Math.PI * 0.3, // the gap faces +z: the face stays open
+    Math.PI * 1.4,
+  );
+  mane.scale(1, 1, flatten);
+  mane.computeVertexNormals();
+  head.add(put(shade(mane), mat));
+  const fringe = new THREE.LatheGeometry(
+    hrs([[1.01, 1.52], [1.08, 1.64], [1.07, 1.8], [0.98, 1.92]]).map(([r, y]) => new THREE.Vector2(r, y)),
+    12,
+    -Math.PI * 0.36,
+    Math.PI * 0.72,
+  );
+  fringe.scale(1, 1, flatten);
+  fringe.computeVertexNormals();
+  head.add(put(shade(fringe), mat));
+}
+
 // --- Humanoid rig -------------------------------------------------------------------
 
 export interface HumanoidPalette {
@@ -296,6 +446,8 @@ export interface HumanoidSpec {
   /** Arm and leg length relative to realistic. */
   armScale?: number;
   legScale?: number;
+  /** Limb and chest thickness relative to the athletic default (0.8 wiry, 1.2 burly). */
+  bulk?: number;
   /** 0 = flat stomach, 1 = pot belly. */
   belly?: number;
   /** Resting forward lean of the spine, radians. */
@@ -309,9 +461,10 @@ export interface HumanoidSpec {
 }
 
 /**
- * A person: about seven and a half heads tall, hips a little under half way
- * up, shoulders a fifth of the height wide. Legs and arms are two capsules
- * with a sphere at the joint so bends stay closed.
+ * A person with a stocky, athletic build: a little under seven heads tall,
+ * shoulders a good quarter of the height across, thick thighs and calves,
+ * real hands and boots. Legs and arms are revolved muscle profiles with a
+ * sphere at each joint so bends stay closed.
  */
 export function buildHumanoid(spec: HumanoidSpec): Rig {
   const s = spec.height / 1.75;
@@ -319,18 +472,40 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const headK = spec.headScale ?? 1;
   const armK = spec.armScale ?? 1;
   const legK = spec.legScale ?? 1;
+  const bulk = spec.bulk ?? 1;
   const belly = spec.belly ?? 0;
 
-  const thigh = 0.44 * s * legK;
-  const shin = 0.42 * s * legK;
-  const hipsY = (0.06 + 0.44 + 0.42) * s * legK;
-  const torso = 0.52 * s;
+  const ankle = 0.07 * s;
+  const thigh = 0.42 * s * legK;
+  const shin = 0.4 * s * legK;
+  const hipsY = ankle + thigh + shin;
+  const torso = 0.5 * s;
   const upperArm = 0.3 * s * armK;
-  const forearm = 0.27 * s * armK;
-  const hand = 0.15 * s;
-  const headR = 0.115 * s * headK;
-  const shoulderHalf = 0.18 * s;
-  const hipHalf = 0.085 * s;
+  const forearm = 0.26 * s * armK;
+  const headR = 0.125 * s * headK;
+  const headFlatten = 1.12;
+  const shoulderHalf = 0.215 * s * (0.85 + 0.15 * bulk);
+  const hipHalf = 0.1 * s;
+  const thighR = 0.09 * s * bulk;
+  const shinR = 0.07 * s * bulk;
+  const armR = 0.062 * s * bulk;
+  const forearmR = 0.052 * s * bulk;
+  const deltoidR = 0.072 * s * bulk;
+  const chestR = 0.19 * s * (0.8 + 0.2 * bulk);
+  const waistR = (0.155 + 0.035 * belly) * s * (0.85 + 0.15 * bulk);
+  const torsoFlatten = 0.66 + belly * 0.14;
+  const torsoProfile: Array<readonly [number, number]> = [
+    [waistR * 1.08, -0.13 * s],
+    [waistR * 1.02, -0.05 * s],
+    [waistR, 0.06 * s],
+    [(waistR + chestR) / 2 + 0.03 * belly * s, 0.18 * s],
+    [chestR * 0.96, 0.3 * s],
+    [chestR, 0.38 * s],
+    [chestR * 0.98, 0.43 * s],
+    [chestR * 0.86, 0.47 * s],
+    [chestR * 0.42, 0.495 * s],
+    [0, torso],
+  ];
 
   const skin = material(p.skin, 'skin');
   const tunic = material(p.tunic, 'cloth');
@@ -338,6 +513,8 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const boots = material(p.boots, 'leather');
   const hair = material(p.hair, 'hair');
   const dark = material(0x1a1612, 'dark');
+  const buckle = material(0xb8a25a, 'metal');
+  const sole = material(0x2a2420, 'leather');
 
   const group = new THREE.Group();
   group.rotation.order = 'YXZ';
@@ -351,69 +528,88 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   };
 
   const hips = joint('hips', group, 0, hipsY, 0);
-  // Pelvis.
-  hips.add(put(lathe([[0.11 * s, -0.12 * s], [0.14 * s, -0.02 * s], [0.135 * s, 0.06 * s]], 12, 0.72), trouser, 0, 0, 0));
+  // Pelvis and seat.
+  hips.add(
+    put(
+      lathe(
+        [
+          [0.11 * s, -0.15 * s],
+          [0.15 * s, -0.09 * s],
+          [hipHalf + 0.055 * s, -0.02 * s],
+          [hipHalf + 0.05 * s, 0.06 * s],
+        ],
+        20,
+        0.7,
+      ),
+      trouser,
+    ),
+  );
 
-  // Torso: waist, chest, shoulders, with an optional belly.
+  // Torso: the tunic over waist, chest and shoulders, a collar, and a belt.
   const spine = joint('spine', hips, 0, 0.04 * s, 0);
-  const bellyR = 0.03 * belly;
+  spine.add(put(lathe(torsoProfile, 28, torsoFlatten), tunic));
   spine.add(
     put(
       lathe(
         [
-          [0.125 * s, 0],
-          [(0.14 + bellyR * 1.5) * s, 0.1 * s],
-          [(0.14 + bellyR) * s, 0.24 * s],
-          [0.165 * s, 0.38 * s],
-          [0.175 * s, 0.45 * s],
-          [0.13 * s, 0.5 * s],
-          [0.06 * s, 0.52 * s],
+          [0.075 * s, 0.48 * s],
+          [0.088 * s, 0.5 * s],
+          [0.084 * s, 0.535 * s],
+          [0.072 * s, 0.545 * s],
         ],
-        14,
-        0.62 + belly * 0.15,
+        20,
+        0.9,
       ),
       tunic,
     ),
   );
-  // Belt.
-  spine.add(put(lathe([[0.135 * s, -0.01 * s], [0.14 * s, 0.04 * s], [0.13 * s, 0.05 * s]], 12, 0.7), boots, 0, 0, 0));
-
-  const neck = joint('neck', spine, 0, torso - 0.02 * s, 0);
-  neck.add(put(segment(0.045 * s, 0.05 * s, 0.09 * s), skin, 0, 0.09 * s, 0));
-
-  // Head: chin, jaw, cheekbones, brow, crown.
-  const head = joint('head', neck, 0, 0.08 * s, 0);
-  const hr = headR;
-  head.add(
+  const beltR = waistR * 1.05;
+  spine.add(
     put(
       lathe(
         [
-          [0.045 * hr * 8.7, 0],
-          [0.78 * hr, 0.25 * hr],
-          [0.95 * hr, 0.8 * hr],
-          [1.0 * hr, 1.3 * hr],
-          [0.92 * hr, 1.75 * hr],
-          [0.6 * hr, 2.02 * hr],
-          [0, 2.08 * hr],
+          [beltR, -0.06 * s],
+          [beltR + 0.008 * s, -0.055 * s],
+          [beltR + 0.008 * s, -0.005 * s],
+          [beltR, 0],
         ],
-        14,
-        0.9,
+        24,
+        torsoFlatten,
       ),
-      skin,
-      0,
-      0,
-      0,
+      boots,
     ),
   );
+  spine.add(put(roundedBox(0.05 * s, 0.05 * s, 0.012 * s), buckle, 0, -0.03 * s, (beltR + 0.008 * s) * torsoFlatten + 0.004 * s));
+
+  const neck = joint('neck', spine, 0, torso - 0.015 * s, 0);
+  neck.add(
+    put(
+      lathe(
+        [
+          [0.058 * s, -0.01 * s],
+          [0.054 * s, 0.05 * s],
+          [0.06 * s, 0.11 * s],
+        ],
+        16,
+      ),
+      skin,
+    ),
+  );
+
+  // Head.
+  const head = joint('head', neck, 0, 0.085 * s, 0);
+  const hr = headR;
+  const hf = headFlatten;
+  head.add(put(headGeometry(hr, hf), skin));
   // Face: eyes, brows, nose, mouth, ears.
-  for (const sx of [-0.33 * hr, 0.33 * hr]) {
-    head.add(put(sphere(0.1 * hr), dark, sx, 1.25 * hr, 0.82 * hr));
-    const brow = put(roundedBox(0.3 * hr, 0.05 * hr, 0.06 * hr), hair, sx, 1.45 * hr, 0.86 * hr);
+  for (const sx of [-0.34 * hr, 0.34 * hr]) {
+    head.add(put(sphere(0.1 * hr), dark, sx, 1.27 * hr, 0.98 * hr * hf));
+    const brow = put(roundedBox(0.32 * hr, 0.06 * hr, 0.07 * hr), hair, sx, 1.47 * hr, 0.98 * hr * hf);
     brow.rotation.z = sx < 0 ? 0.15 : -0.15;
     head.add(brow);
   }
   if (spec.goblin) {
-    const nose = put(new THREE.ConeGeometry(0.16 * hr, 0.9 * hr, 6), skin, 0, 1.05 * hr, 0.9 * hr);
+    const nose = put(new THREE.ConeGeometry(0.16 * hr, 0.9 * hr, 6), skin, 0, 1.05 * hr, 1.0 * hr * hf);
     nose.geometry = shade(nose.geometry);
     nose.rotation.x = Math.PI / 2 + 0.25;
     head.add(nose);
@@ -424,64 +620,120 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
       head.add(ear);
     }
   } else {
-    const nose = put(roundedBox(0.16 * hr, 0.34 * hr, 0.2 * hr), skin, 0, 1.05 * hr, 0.92 * hr);
-    nose.rotation.x = -0.15;
+    const nose = put(
+      lathe(
+        [
+          [0, 0],
+          [0.09 * hr, 0.05 * hr],
+          [0.14 * hr, 0.2 * hr],
+          [0.11 * hr, 0.32 * hr],
+          [0, 0.4 * hr],
+        ],
+        10,
+      ),
+      skin,
+      0,
+      1.08 * hr,
+      0.86 * hr * hf,
+    );
+    nose.rotation.x = Math.PI / 2 + 0.18;
     head.add(nose);
-    for (const sx of [-0.98 * hr, 0.98 * hr]) {
-      const ear = put(sphere(0.16 * hr), skin, sx, 1.2 * hr, 0.05 * hr);
-      ear.scale.set(0.5, 1, 0.8);
+    for (const sx of [-0.97 * hr, 0.97 * hr]) {
+      const ear = put(sphere(0.17 * hr), skin, sx, 1.2 * hr, -0.08 * hr);
+      ear.scale.set(0.45, 1, 0.75);
       head.add(ear);
     }
   }
-  head.add(put(roundedBox(0.3 * hr, 0.05 * hr, 0.05 * hr), material(0x7a3a34, 'dark'), 0, 0.68 * hr, 0.9 * hr));
+  head.add(put(roundedBox(0.34 * hr, 0.05 * hr, 0.05 * hr), material(0x7a3a34, 'dark'), 0, 0.66 * hr, 0.9 * hr * hf));
 
   const hairStyle = spec.hair ?? 'short';
-  if (hairStyle !== 'bald') {
-    // Crown cap plus a mane down the back, leaving the face open.
-    head.add(put(lathe([[0.97 * hr, 1.3 * hr], [1.02 * hr, 1.6 * hr], [0.9 * hr, 1.95 * hr], [0.45 * hr, 2.15 * hr], [0, 2.18 * hr]], 14, 0.92), hair));
-    const mane = new THREE.LatheGeometry(
-      [
-        new THREE.Vector2(1.0 * hr, hairStyle === 'long' ? -0.4 * hr : 0.7 * hr),
-        new THREE.Vector2(1.04 * hr, 1.0 * hr),
-        new THREE.Vector2(1.0 * hr, 1.5 * hr),
-      ],
-      8,
-      Math.PI * 0.31, // the gap in the lathe faces +z: the face stays open
-      Math.PI * 1.38,
-    );
-    mane.scale(1, 1, 0.92);
-    mane.computeVertexNormals();
-    head.add(put(shade(mane), hair));
-    // Fringe.
-    head.add(put(roundedBox(1.3 * hr, 0.22 * hr, 0.3 * hr), hair, 0, 1.68 * hr, 0.72 * hr));
-  }
+  if (hairStyle !== 'bald') addHair(head, hr, hf, hairStyle, hair);
 
-  // Legs.
+  // Legs: thigh, knee, calf, boot.
   const legs: Record<'L' | 'R', THREE.Object3D[]> = { L: [], R: [] };
   for (const side of ['L', 'R'] as const) {
     const sx = side === 'L' ? hipHalf : -hipHalf;
-    const th = joint(`thigh${side}`, hips, sx, -0.04 * s, 0);
-    th.add(put(segment(0.075 * s, 0.06 * s, thigh), trouser));
+    const th = joint(`thigh${side}`, hips, sx, -0.05 * s, 0);
+    th.add(
+      put(
+        limbSegment([
+          [thighR, 0],
+          [thighR * 1.04, 0.07 * s * legK],
+          [thighR * 0.98, 0.2 * s * legK],
+          [thighR * 0.84, 0.33 * s * legK],
+          [shinR * 0.95, thigh],
+        ]),
+        trouser,
+      ),
+    );
     const kn = joint(`knee${side}`, th, 0, -thigh, 0);
-    kn.add(put(sphere(0.058 * s), trouser));
-    kn.add(put(segment(0.055 * s, 0.045 * s, shin), trouser));
+    kn.add(put(sphere(shinR * 0.95), trouser));
+    kn.add(
+      put(
+        limbSegment([
+          [shinR * 0.9, 0],
+          [shinR, 0.09 * s * legK],
+          [shinR * 0.94, 0.2 * s * legK],
+          [shinR * 0.72, 0.31 * s * legK],
+          [shinR * 0.66, shin],
+        ]),
+        trouser,
+      ),
+    );
     const ft = joint(`foot${side}`, kn, 0, -shin, 0);
-    ft.add(put(roundedBox(0.1 * s, 0.07 * s, 0.26 * s), boots, 0, -0.03 * s, 0.05 * s));
+    ft.add(buildFoot(boots, sole, s, ankle));
     legs[side] = [th, kn, ft];
   }
 
-  // Arms: shoulders sit on the top of the torso, hands are flat boxes.
+  // Arms: a deltoid over each shoulder, sleeves to the elbow, bare forearms, hands.
   const arms: Record<'L' | 'R', THREE.Object3D[]> = { L: [], R: [] };
   for (const side of ['L', 'R'] as const) {
     const sx = side === 'L' ? shoulderHalf : -shoulderHalf;
-    const sh = joint(`shoulder${side}`, spine, sx, torso - 0.05 * s, 0);
-    sh.add(put(sphere(0.054 * s), tunic));
-    sh.add(put(segment(0.052 * s, 0.043 * s, upperArm), tunic));
+    const sh = joint(`shoulder${side}`, spine, sx, torso - 0.06 * s, 0);
+    const deltoid = put(sphere(deltoidR * 0.94), tunic, 0, -0.012 * s, 0);
+    deltoid.scale.set(1, 1.15, 0.95);
+    sh.add(deltoid);
+    sh.add(
+      put(
+        limbSegment([
+          [armR, 0],
+          [armR * 1.02, 0.08 * s * armK],
+          [armR * 0.92, 0.2 * s * armK],
+          [forearmR * 0.9, upperArm],
+        ]),
+        tunic,
+      ),
+    );
+    sh.add(
+      put(
+        lathe(
+          [
+            [forearmR * 0.92, -upperArm + 0.02 * s],
+            [forearmR * 1.03, -upperArm + 0.03 * s],
+            [forearmR * 1.03, -upperArm + 0.06 * s],
+            [forearmR * 0.95, -upperArm + 0.07 * s],
+          ],
+          16,
+        ),
+        tunic,
+      ),
+    );
     const el = joint(`elbow${side}`, sh, 0, -upperArm, 0);
-    el.add(put(sphere(0.042 * s), tunic));
-    el.add(put(segment(0.04 * s, 0.034 * s, forearm), skin));
+    el.add(put(sphere(forearmR * 0.88), skin));
+    el.add(
+      put(
+        limbSegment([
+          [forearmR * 0.86, 0],
+          [forearmR, 0.06 * s * armK],
+          [forearmR * 0.9, 0.14 * s * armK],
+          [forearmR * 0.7, 0.22 * s * armK],
+          [forearmR * 0.6, forearm],
+        ]),
+        skin,
+      ),
+    );
     const hd = joint(`hand${side}`, el, 0, -forearm, 0);
-    hd.add(put(roundedBox(0.07 * s, hand, 0.035 * s), skin, 0, -hand / 2, 0));
+    hd.add(buildHand(skin, side === 'L' ? 1 : -1, s));
     arms[side] = [sh, el, hd];
   }
 
@@ -490,9 +742,11 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   // Fewer draw calls: parts that share a material and never move relative to
   // each other become one mesh.
   mergeByMaterial(head);
+  mergeByMaterial(spine);
   for (const side of ['L', 'R'] as const) {
     mergeByMaterial(legs[side][1]);
     mergeByMaterial(arms[side][0]);
+    mergeByMaterial(arms[side][1]);
   }
 
   const joints: Record<JointName, THREE.Object3D> = {
@@ -529,7 +783,31 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
       handR: arms.R[2],
     },
     barHeight: spec.height + 0.22,
-    dims: { scale: s, thigh, shin, upperArm, forearm, torso, headR, shoulderHalf, hipHalf },
+    dims: {
+      scale: s,
+      thigh,
+      shin,
+      upperArm,
+      forearm,
+      torso,
+      headR,
+      shoulderHalf,
+      hipHalf,
+      headFlatten,
+      torsoProfile,
+      torsoFlatten,
+      chestR,
+      waistR,
+      thighR,
+      shinR,
+      armR,
+      forearmR,
+      deltoidR,
+      ankle,
+      footL: 0.27 * s,
+      footW: 0.1 * s,
+      handL: 0.17 * s,
+    },
     kind: 'humanoid',
   };
   spec.extras?.(rig);
@@ -631,7 +909,31 @@ export function buildRat(): Rig {
       handR: fr[2],
     },
     barHeight: 0.8,
-    dims: { scale: 0.5, thigh: 0.1, shin: 0.08, upperArm: 0.1, forearm: 0.08, torso: 0.3, headR: 0.06, shoulderHalf: 0.11, hipHalf: 0.11 },
+    dims: {
+      scale: 0.5,
+      thigh: 0.1,
+      shin: 0.08,
+      upperArm: 0.1,
+      forearm: 0.08,
+      torso: 0.3,
+      headR: 0.06,
+      shoulderHalf: 0.11,
+      hipHalf: 0.11,
+      headFlatten: 1,
+      torsoProfile: [],
+      torsoFlatten: 1,
+      chestR: 0.17,
+      waistR: 0.15,
+      thighR: 0.04,
+      shinR: 0.03,
+      armR: 0.04,
+      forearmR: 0.03,
+      deltoidR: 0.04,
+      ankle: 0.04,
+      footL: 0.08,
+      footW: 0.05,
+      handL: 0.05,
+    },
     kind: 'rat',
   };
 }
@@ -679,8 +981,8 @@ function idlePose(t: number, out: Pose): void {
   const breath = Math.sin(t * 2.1) * 0.5 + 0.5;
   set(out, 'spine', 0.02 + breath * 0.02, Math.sin(t * 0.37) * 0.03, 0);
   set(out, 'neck', -0.03 + Math.sin(t * 0.61) * 0.02, Math.sin(t * 0.45) * 0.06, 0);
-  set(out, 'shoulderL', 0.04, 0, -0.07);
-  set(out, 'shoulderR', 0.04, 0, 0.07);
+  set(out, 'shoulderL', 0.04, 0, -0.12);
+  set(out, 'shoulderR', 0.04, 0, 0.12);
   set(out, 'elbowL', -0.16, 0, 0.02);
   set(out, 'elbowR', -0.16, 0, -0.02);
   const shift = Math.sin(t * 0.3);
@@ -713,8 +1015,8 @@ function gaitPose(phase: number, run: number, out: Pose): void {
   set(out, 'footR', -leg * 0.25 - kneeR * 0.3 + 0.05);
   // Arms swing opposite the legs, elbows more bent when running.
   const armSwing = 0.35 + run * 0.45;
-  set(out, 'shoulderL', leg * armSwing, 0, -0.08 - run * 0.1);
-  set(out, 'shoulderR', -leg * armSwing, 0, 0.08 + run * 0.1);
+  set(out, 'shoulderL', leg * armSwing, 0, -0.12 - run * 0.1);
+  set(out, 'shoulderR', -leg * armSwing, 0, 0.12 + run * 0.1);
   set(out, 'elbowL', -0.25 - run * 0.9 + Math.max(0, leg) * 0.25, 0, 0);
   set(out, 'elbowR', -0.25 - run * 0.9 + Math.max(0, -leg) * 0.25, 0, 0);
   // Hips sway and dip, the spine counter-rotates, the head stays level.

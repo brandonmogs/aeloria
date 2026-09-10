@@ -58,8 +58,9 @@ export function skullCap(rig: Rig, color: number, finish: 'metal' | 'leather' = 
   const hr = rig.dims.headR;
   const g = new THREE.Group();
   const m = material(color, finish);
-  g.add(put(lathe([[1.02 * hr, 1.15 * hr], [1.08 * hr, 1.6 * hr], [0.92 * hr, 1.98 * hr], [0.42 * hr, 2.26 * hr], [0, 2.3 * hr]], 14, 0.93), m));
-  g.add(put(box(0.14 * hr, 0.7 * hr, 0.1 * hr), m, 0, 1.0 * hr, 1.0 * hr));
+  const f = rig.dims.headFlatten;
+  g.add(put(lathe([[1.03 * hr, 1.12 * hr], [1.1 * hr, 1.55 * hr], [0.97 * hr, 1.96 * hr], [0.5 * hr, 2.24 * hr], [0, 2.3 * hr]], 24, f), m));
+  g.add(put(box(0.14 * hr, 0.72 * hr, 0.1 * hr), m, 0, 1.0 * hr, 1.03 * hr * f));
   return g;
 }
 
@@ -70,15 +71,16 @@ export function buildHelmet(item: ItemStack, rig: Rig): THREE.Object3D {
     // The whole head boxed in, with a T-shaped face slit.
     const g = new THREE.Group();
     const m = material(c, 'metal');
-    g.add(put(lathe([[0.85 * hr, 0.02 * hr], [1.06 * hr, 0.7 * hr], [1.08 * hr, 1.5 * hr], [0.92 * hr, 1.98 * hr], [0.42 * hr, 2.28 * hr], [0, 2.32 * hr]], 14, 0.94), m));
+    const f = rig.dims.headFlatten;
+    g.add(put(lathe([[0.75 * hr, 0.02 * hr], [1.05 * hr, 0.55 * hr], [1.1 * hr, 1.2 * hr], [1.08 * hr, 1.6 * hr], [0.95 * hr, 1.98 * hr], [0.5 * hr, 2.27 * hr], [0, 2.32 * hr]], 24, f), m));
     const dark = material(0x14120f, 'dark');
-    g.add(put(box(0.16 * hr, 0.8 * hr, 0.1 * hr), dark, 0, 1.05 * hr, 1.03 * hr));
-    g.add(put(box(0.9 * hr, 0.14 * hr, 0.1 * hr), dark, 0, 1.3 * hr, 1.02 * hr));
+    g.add(put(box(0.16 * hr, 0.8 * hr, 0.1 * hr), dark, 0, 1.05 * hr, 1.06 * hr * f));
+    g.add(put(box(0.9 * hr, 0.14 * hr, 0.1 * hr), dark, 0, 1.3 * hr, 1.05 * hr * f));
     return g;
   }
   if (item.id.includes('cowl')) {
     const g = new THREE.Group();
-    g.add(put(lathe([[1.02 * hr, 0.55 * hr], [1.1 * hr, 1.3 * hr], [0.95 * hr, 1.95 * hr], [0.42 * hr, 2.26 * hr], [0, 2.3 * hr]], 12, 0.94), material(c, 'leather')));
+    g.add(put(lathe([[1.03 * hr, 0.55 * hr], [1.12 * hr, 1.3 * hr], [0.97 * hr, 1.95 * hr], [0.5 * hr, 2.26 * hr], [0, 2.3 * hr]], 20, rig.dims.headFlatten), material(c, 'leather')));
     return g;
   }
   return skullCap(rig, c, finishOf(item.id));
@@ -89,7 +91,7 @@ export function toque(rig: Rig): THREE.Object3D {
   const hr = rig.dims.headR;
   const white = material(0xf4f1ea, 'cloth');
   const g = new THREE.Group();
-  g.add(put(lathe([[1.0 * hr, 1.5 * hr], [1.02 * hr, 1.9 * hr], [1.15 * hr, 2.6 * hr], [1.25 * hr, 3.3 * hr], [0.9 * hr, 3.7 * hr], [0, 3.8 * hr]], 12), white));
+  g.add(put(lathe([[1.02 * hr, 1.5 * hr], [1.05 * hr, 1.9 * hr], [1.18 * hr, 2.6 * hr], [1.28 * hr, 3.3 * hr], [0.92 * hr, 3.7 * hr], [0, 3.8 * hr]], 20, rig.dims.headFlatten), white));
   return g;
 }
 
@@ -98,7 +100,7 @@ export function strawHat(rig: Rig): THREE.Object3D {
   const hr = rig.dims.headR;
   const straw = material(0xc9b26a, 'cloth');
   const g = new THREE.Group();
-  g.add(put(lathe([[0, 1.7 * hr], [2.1 * hr, 1.72 * hr], [2.15 * hr, 1.85 * hr], [1.05 * hr, 1.9 * hr], [1.0 * hr, 2.6 * hr], [0.7 * hr, 2.85 * hr], [0, 2.9 * hr]], 14), straw));
+  g.add(put(lathe([[0, 1.72 * hr], [2.1 * hr, 1.74 * hr], [2.15 * hr, 1.87 * hr], [1.08 * hr, 1.92 * hr], [1.03 * hr, 2.6 * hr], [0.7 * hr, 2.85 * hr], [0, 2.9 * hr]], 24, rig.dims.headFlatten), straw));
   return g;
 }
 
@@ -111,41 +113,27 @@ export function plume(rig: Rig): THREE.Object3D {
 /** A full beard hanging from the jaw. */
 export function beard(rig: Rig, color: number): THREE.Object3D {
   const hr = rig.dims.headR;
-  return put(lathe([[0.55 * hr, -0.55 * hr], [0.72 * hr, 0.1 * hr], [0.85 * hr, 0.7 * hr], [0.75 * hr, 0.95 * hr], [0, 1.0 * hr]], 10, 0.65), material(color, 'hair'), 0, 0, 0.62 * hr);
+  return put(lathe([[0.55 * hr, -0.55 * hr], [0.72 * hr, 0.1 * hr], [0.85 * hr, 0.7 * hr], [0.75 * hr, 0.95 * hr], [0, 1.0 * hr]], 14, 0.65), material(color, 'hair'), 0, 0, 0.62 * hr * rig.dims.headFlatten);
 }
 
 // --- Body ---------------------------------------------------------------------------
 
 export function buildChest(item: ItemStack, rig: Rig): THREE.Object3D {
   const s = rig.dims.scale;
+  const d = rig.dims;
   const c = metalColor(item.id);
   const plate = item.id.includes('platebody');
   const finish = finishOf(item.id);
   const m = material(c, finish);
   const g = new THREE.Group();
-  g.add(
-    put(
-      lathe(
-        [
-          [0.14 * s, -0.02 * s],
-          [0.152 * s, 0.1 * s],
-          [0.152 * s, 0.24 * s],
-          [0.178 * s, 0.38 * s],
-          [0.188 * s, 0.45 * s],
-          [0.14 * s, 0.505 * s],
-          [0.07 * s, 0.52 * s],
-        ],
-        plate ? 14 : 12,
-        0.66,
-      ),
-      m,
-    ),
-  );
+  // The body's own tunic profile, let out a little so the armour sits over it.
+  const profile = d.torsoProfile.filter(([, y]) => y > -0.1 * s).map(([r, y]) => [r * 1.06 + 0.004 * s, y] as const);
+  g.add(put(lathe(profile, plate ? 28 : 20, d.torsoFlatten), m));
   if (plate) {
     // Pauldrons over the shoulders.
     for (const sx of [-1, 1]) {
-      const p = put(shade(new THREE.SphereGeometry(0.085 * s, 10, 6, 0, Math.PI * 2, 0, Math.PI * 0.55)), m, sx * rig.dims.shoulderHalf, rig.dims.torso - 0.03 * s, 0);
-      p.scale.set(1, 0.8, 1);
+      const p = put(shade(new THREE.SphereGeometry(d.deltoidR * 1.3, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55)), m, sx * d.shoulderHalf, d.torso - 0.05 * s, 0);
+      p.scale.set(1, 0.85, 1);
       g.add(p);
     }
   }
@@ -155,7 +143,7 @@ export function buildChest(item: ItemStack, rig: Rig): THREE.Object3D {
 /** A leather work apron over the front of the torso. */
 export function apron(rig: Rig): THREE.Object3D {
   const s = rig.dims.scale;
-  return put(wedge(0.3 * s, 0.5 * s, 0.03 * s, 1.15, 1), material(0xd8cfa8, 'cloth'), 0, 0.1 * s, 0.135 * s);
+  return put(wedge(0.3 * s, 0.5 * s, 0.03 * s, 1.15, 1), material(0xd8cfa8, 'cloth'), 0, 0.1 * s, rig.dims.waistR * rig.dims.torsoFlatten + 0.025 * s);
 }
 
 // --- Legs, feet, hands --------------------------------------------------------------
@@ -164,19 +152,25 @@ export function apron(rig: Rig): THREE.Object3D {
 export function buildLegGuard(item: ItemStack, rig: Rig): [THREE.Object3D, THREE.Object3D] {
   const s = rig.dims.scale;
   const m = material(metalColor(item.id), finishOf(item.id));
-  const thigh = put(prism(0.088 * s, 0.072 * s, rig.dims.thigh * 0.96, 10), m, 0, -rig.dims.thigh / 2, 0);
-  const shin = put(prism(0.066 * s, 0.056 * s, rig.dims.shin * 0.92, 10), m, 0, -rig.dims.shin / 2 - 0.01 * s, 0);
+  const d = rig.dims;
+  const thigh = put(prism(d.thighR * 1.1, d.shinR * 1.06, d.thigh * 0.94, 14), m, 0, -d.thigh / 2, 0);
+  const shin = put(prism(d.shinR * 1.1, d.shinR * 0.74, d.shin * 0.86, 14), m, 0, -d.shin / 2 - 0.005 * s, 0);
   return [thigh, shin];
 }
 
 export function buildBoot(item: ItemStack, rig: Rig): THREE.Object3D {
   const s = rig.dims.scale;
-  return put(wedge(0.12 * s, 0.1 * s, 0.29 * s, 0.85, 0.9), material(metalColor(item.id), finishOf(item.id)), 0, -0.03 * s, 0.055 * s);
+  const d = rig.dims;
+  const m = material(metalColor(item.id), finishOf(item.id));
+  const g = new THREE.Group();
+  g.add(put(prism(0.066 * s, 0.072 * s, 0.12 * s, 16), m, 0, 0.02 * s, -0.004 * s));
+  g.add(put(wedge(d.footW * 1.14, d.ankle * 0.95, d.footL * 1.02, 0.85, 0.92), m, 0, -d.ankle * 0.5 - 0.005 * s, 0.065 * s));
+  return g;
 }
 
 export function buildGlove(item: ItemStack, rig: Rig): THREE.Object3D {
   const s = rig.dims.scale;
-  return put(box(0.085 * s, 0.17 * s, 0.05 * s), material(metalColor(item.id), finishOf(item.id)), 0, -0.075 * s, 0);
+  return put(box(0.05 * s, rig.dims.handL, 0.1 * s), material(metalColor(item.id), finishOf(item.id)), 0, -rig.dims.handL / 2 + 0.01 * s, 0.004 * s);
 }
 
 // --- Weapons and shields ------------------------------------------------------------

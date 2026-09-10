@@ -420,6 +420,7 @@ function rigFor(entity: Entity): Rig {
           armScale: 1.2,
           legScale: 0.85,
           belly: 1,
+          bulk: 0.85,
           hunch: 0.3,
           goblin: true,
           hair: 'bald',
@@ -432,6 +433,7 @@ function rigFor(entity: Entity): Rig {
         // Castle guards: chainmail and crimson, plus a helm.
         return buildHumanoid({
           height: 1.8,
+          bulk: 1.12,
           palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a },
           extras: (rig) => rig.sockets.head.add(skullCap(rig, 0xb4b8bf)),
         });
@@ -439,6 +441,7 @@ function rigFor(entity: Entity): Rig {
         // Same kit, redder, with an officer's plume.
         return buildHumanoid({
           height: 1.82,
+          bulk: 1.15,
           palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x8b2b1f, boots: 0x2a2a2a },
           extras: (rig) => {
             rig.sockets.head.add(skullCap(rig, 0xc9ccd2));
@@ -449,12 +452,14 @@ function rigFor(entity: Entity): Rig {
         return buildHumanoid({
           height: 1.7,
           belly: 0.6,
+          bulk: 1.1,
           palette: { skin: 0xe0ac79, hair: 0x3a2a1a, tunic: 0xf0ede4, trouser: 0x4a4a4a, boots: 0x2a2a2a },
           extras: (rig) => rig.sockets.head.add(toque(rig)),
         });
       case 'woodsman':
         return buildHumanoid({
           height: 1.85,
+          bulk: 1.2,
           palette: { skin: 0xd9a06c, hair: 0x8b5a2b, tunic: 0x6b8f3a, trouser: 0x5a4632, boots: 0x3b2a1c },
           extras: (rig) => {
             rig.sockets.head.add(beard(rig, 0x8b5a2b));
@@ -464,6 +469,7 @@ function rigFor(entity: Entity): Rig {
       case 'fisherman':
         return buildHumanoid({
           height: 1.72,
+          bulk: 0.95,
           palette: { skin: 0xd9a06c, hair: 0xd0d0d0, tunic: 0x4f6f8f, trouser: 0x6b6b6b, boots: 0x3b2a1c },
           extras: (rig) => {
             rig.sockets.head.add(strawHat(rig));
@@ -481,6 +487,7 @@ function rigFor(entity: Entity): Rig {
   }
   return buildHumanoid({
     height: 1.75,
+    bulk: 1.05,
     palette: { skin: 0xe0ac79, hair: 0x4a2f16, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c },
   });
 }
@@ -509,7 +516,7 @@ function createCape(rig: Rig): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cap
   const cape = makeCape();
   const cloth = new THREE.Mesh(cape.geo, makeCapeMaterial());
   cloth.scale.setScalar(s);
-  cloth.position.set(0, rig.dims.torso - 0.06 * s, -0.13 * s); // off the back of the shoulders
+  cloth.position.set(0, rig.dims.torso - 0.06 * s, -(rig.dims.chestR * rig.dims.torsoFlatten + 0.01 * s)); // off the back of the shoulders
   cloth.rotation.x = 0.18;
   const clasp = put(shade(new THREE.OctahedronGeometry(0.05 * s, 0)), material(0xe8c66a, 'metal'), 0, rig.dims.torso - 0.04 * s, 0.1 * s);
   return { cloth, clasp, cape };
