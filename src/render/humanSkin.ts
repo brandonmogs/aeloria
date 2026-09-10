@@ -281,10 +281,11 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           const dn = Math.hypot(ax - 0.0085, y - (nose.y - 0.014));
           if (dn < 0.0045 && z > nose.z - 0.05) col = mix(col, scale(skin, 0.45), 0.7 * (1 - dn / 0.0045));
           // Lips and the line between them.
-          if (ax < mouth.half * 0.72 && z > mouth.z - 0.05) {
+          if (ax < mouth.half * 0.66 && z > mouth.z - 0.05) {
             const dy = y - mouth.y;
-            if (dy > -0.008 && dy < 0.0065) col = mix(col, lip, dy > 0 ? 0.55 : 0.7);
-            if (Math.abs(dy) < 0.0014) col = mix(col, dark, 0.55);
+            const edge = clamp01(1 - ax / (mouth.half * 0.66));
+            if (dy > -0.007 && dy < 0.0055) col = mix(col, lip, (dy > 0 ? 0.3 : 0.42) * (0.5 + 0.5 * edge));
+            if (Math.abs(dy) < 0.001) col = mix(col, dark, 0.35 * (0.4 + 0.6 * edge));
           }
           // Cheek warmth.
           const dc = Math.hypot(ax - 0.05, y - (eye.y - 0.048));

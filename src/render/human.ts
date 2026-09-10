@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { JOINTS, JointName, Rig, RigDims, Sockets } from './characters';
 import { eyeMaterial, lookMaterial, LookSpec } from './humanSkin';
+import { buildBaseBoots } from './gear';
 
 /**
  * People are built from one real human body: MakeHuman's CC0 base mesh,
@@ -428,6 +429,11 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     kind: 'humanoid',
     stance: spec.stance,
   };
+  if (look.booted) {
+    const [left, right] = buildBaseBoots(rig, p.boots);
+    bones.footL.add(left);
+    bones.footR.add(right);
+  }
   spec.extras?.(rig);
   return rig;
 }

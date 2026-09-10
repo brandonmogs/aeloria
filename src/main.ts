@@ -795,6 +795,7 @@ async function runGame(): Promise<void> {
     sfx,
     camera: renderer.camera,
     stats: () => renderer.stats,
+    terrainHeight: (x: number, y: number) => terrain.heightAt(x, y),
     talk: (npcName: string) => {
       let best: Npc | null = null;
       let bestDist = Infinity;

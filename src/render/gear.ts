@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ItemStack, itemDef } from '../sim/items';
 import { Rig, lathe, material, put, shade } from './characters';
 
@@ -200,7 +201,7 @@ export function buildChest(item: ItemStack, rig: Rig): THREE.Object3D {
 /** A leather work apron over the front of the torso. */
 export function apron(rig: Rig): THREE.Object3D {
   const s = rig.dims.scale;
-  return put(wedge(0.3 * s, 0.5 * s, 0.03 * s, 1.15, 1), material(0xd8cfa8, 'cloth'), 0, 0.1 * s, rig.dims.waistR * rig.dims.torsoFlatten + 0.025 * s);
+  return put(wedge(0.3 * s, 0.5 * s, 0.03 * s, 1.15, 1), material(0xd8cfa8, 'cloth'), 0, 0.1 * s, rig.dims.chestR * rig.dims.torsoFlatten + 0.02 * s);
 }
 
 // --- Legs, feet, hands --------------------------------------------------------------
@@ -385,4 +386,57 @@ export function buildShield(item: ItemStack, rig: Rig): THREE.Object3D {
   g.position.set(0.06 * s, 0.02 * s, 0.03 * s);
   g.rotation.y = 0.35;
   return g;
+}
+
+// --- Base boots ---------------------------------------------------------------------
+
+/** A tapered box without baked shading, for merging with other plain geometries. */
+function rawWedge(w: number, h: number, d: number, topX: number, topZ = topX): THREE.BufferGeometry {
+  const geo = new THREE.BoxGeometry(w, h, d);
+  const pos = geo.attributes.position as THREE.BufferAttribute;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) > 0) {
+      pos.setX(i, pos.getX(i) * topX);
+      pos.setZ(i, pos.getZ(i) * topZ);
+    }
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+/** Merge geometries after placing them, so a boot is one draw call per material. */
+function mergeParts(parts: Array<[THREE.BufferGeometry, number, number, number]>): THREE.BufferGeometry {
+  const placed = parts.map(([geo, x, y, z]) => {
+    const g = geo.index ? geo.toNonIndexed() : geo;
+    g.translate(x, y, z);
+    return g;
+  });
+  return mergeGeometries(placed, false);
+}
+
+/**
+ * Plain leather boots over the body's bare feet: a cuff at the ankle, a
+ * wedge over the foot, a rounded toe and a thick sole. Returns [left, right].
+ */
+export function buildBaseBoots(rig: Rig, color: number): [THREE.Object3D, THREE.Object3D] {
+  const d = rig.dims;
+  const s = d.scale;
+  const make = (): THREE.Object3D => {
+    const g = new THREE.Group();
+    const H = d.ankle + 0.006 * s;
+    const W = d.footW * 1.12;
+    const L = d.footL * 1.04;
+    const cz = d.footL * 0.29; // the foot's centre sits ahead of the ankle
+    const toe = new THREE.SphereGeometry(W / 2, 12, 8);
+    toe.scale(1, H / W, 1.25);
+    const leather = mergeParts([
+      [new THREE.CylinderGeometry(d.shinR * 0.92 + 0.005 * s, d.shinR + 0.005 * s, 0.11 * s, 16), 0, 0.035 * s, -0.008 * s],
+      [rawWedge(W, H, L * 0.82, 0.86, 0.95), 0, -d.ankle + H / 2 - 0.002 * s, cz - 0.01 * s],
+      [toe, 0, -d.ankle + H / 2 - 0.002 * s, cz - 0.01 * s + L * 0.41],
+    ]);
+    g.add(put(shade(leather, 1.02, 0.9), material(color, 'leather')));
+    g.add(put(box(W * 1.06, 0.014 * s, L * 1.08), material(0x2a2420, 'leather'), 0, -d.ankle + 0.005 * s, cz + 0.01 * s));
+    return g;
+  };
+  return [make(), make()];
 }
