@@ -242,7 +242,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
     const nb = atlas.broad[i];
     let col: RGB = skin;
     let rough = 0.52;
-    let mottle = 0.07;
+    let mottle = look.goblin ? 0.18 : 0.07;
 
     switch (name) {
       case 'head': {

@@ -157,7 +157,7 @@ export interface RigDims {
 
 // --- Materials ----------------------------------------------------------------------
 
-type Finish = 'skin' | 'cloth' | 'leather' | 'metal' | 'hair' | 'dark';
+type Finish = 'skin' | 'cloth' | 'leather' | 'metal' | 'rust' | 'hair' | 'dark';
 
 const materialCache = new Map<string, THREE.MeshStandardMaterial>();
 
@@ -217,6 +217,21 @@ export function material(color: number, finish: Finish): THREE.MeshStandardMater
     case 'metal':
       m = new THREE.MeshStandardMaterial({ color, vertexColors: true, roughness: 0.45, metalness: 0.85, envMapIntensity: 0.9 });
       break;
+    case 'rust': {
+      // Pitted, half-oxidised iron: the leather grain doubles as pitting.
+      const d = leatherDetail();
+      m = new THREE.MeshStandardMaterial({
+        color,
+        vertexColors: true,
+        roughness: 0.78,
+        metalness: 0.55,
+        envMapIntensity: 0.6,
+        map: d.albedo,
+        normalMap: d.normal,
+        normalScale: new THREE.Vector2(0.55, 0.55),
+      });
+      break;
+    }
     case 'hair': {
       const d = hairDetail();
       m = new THREE.MeshStandardMaterial({

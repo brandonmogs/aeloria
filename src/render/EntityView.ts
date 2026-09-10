@@ -6,8 +6,9 @@ import { Npc } from '../sim/Npc';
 import { EquipSlot, EQUIP_SLOTS } from '../sim/Inventory';
 import { ItemStack, itemDef } from '../sim/items';
 import { Terrain } from './Terrain';
-import { ACTION_DURATION, ActionKind, Animator, Rig, buildRat, lathe, material, put, shade } from './characters';
+import { ACTION_DURATION, ActionKind, Animator, Rig, buildRat, material, put, shade } from './characters';
 import { buildHumanoid } from './human';
+import { goblinBracer, goblinFeatures, goblinGreave, goblinPauldron, goblinShield, goblinStrap, goblinSword } from './goblinGear';
 import {
   apron,
   beard,
@@ -387,7 +388,7 @@ export class EntityView {
 /** Which attack clip an entity's weapon calls for. */
 function attackClipFor(entity: Entity): ActionKind {
   if (entity instanceof Npc) {
-    return entity.kind === 'goblin' ? 'crush' : entity.kind === 'rat' ? 'stab' : 'slash';
+    return entity.kind === 'rat' ? 'stab' : 'slash';
   }
   if (entity instanceof Player) {
     const weapon = entity.inventory.equipment.weapon;
@@ -415,17 +416,28 @@ function rigFor(entity: Entity): Rig {
   if (entity instanceof Npc) {
     switch (entity.kind) {
       case 'goblin':
+        // A lean green brawler: big head and ears, long arms, short bowed
+        // legs, bare chest and feet, sword and spiked shield, crouched stance.
         return buildHumanoid({
           height: 1.32,
-          headScale: 1.35,
-          armScale: 1.2,
+          headScale: 1.4,
+          armScale: 1.18,
           legScale: 0.85,
-          belly: 1,
           bulk: 0.85,
+          shoulders: 1.02,
           goblin: true,
-          hair: 'bald',
-          palette: { skin: 0x7d9c3c, hair: 0x2a2a1a, tunic: 0x7d9c3c, trouser: 0x6b4a2f, boots: 0x5a3d25, eyes: 0xd9a13a },
-          extras: (rig) => rig.sockets.handR.add(goblinClub(rig)),
+          stance: 'brawler',
+          palette: { skin: 0x86963a, hair: 0x2a2a1a, tunic: 0x86963a, trouser: 0x4a3626, boots: 0x3a2a1c, eyes: 0xd9a13a },
+          extras: (rig) => {
+            rig.sockets.head.add(goblinFeatures(rig));
+            rig.sockets.handR.add(goblinSword(rig));
+            rig.sockets.handL.add(goblinShield(rig));
+            rig.joints.shoulderL.add(goblinPauldron(rig));
+            rig.sockets.torso.add(goblinStrap(rig));
+            rig.sockets.shinL.add(goblinGreave(rig));
+            rig.sockets.shinR.add(goblinGreave(rig));
+            rig.joints.elbowR.add(goblinBracer(rig));
+          },
         });
       case 'rat':
         return buildRat();
@@ -490,19 +502,6 @@ function rigFor(entity: Entity): Rig {
     bulk: 1.05,
     palette: { skin: 0xe0ac79, hair: 0x4a2f16, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, eyes: 0x4f7fa8 },
   });
-}
-
-/** A goblin's crude club, gripped in the right hand. */
-function goblinClub(rig: Rig): THREE.Object3D {
-  const s = rig.dims.scale;
-  const club = new THREE.Group();
-  const wood = material(0x6b4a2f, 'leather');
-  club.add(put(shade(new THREE.CylinderGeometry(0.022, 0.028, 0.4, 7)), wood, 0, 0.18, 0));
-  club.add(put(lathe([[0.03, 0], [0.085, 0.07], [0.075, 0.18], [0, 0.22]], 8), material(0x7a5230, 'leather'), 0, 0.36, 0));
-  club.scale.setScalar(s);
-  club.position.set(0, -0.075 * s, 0.03 * s);
-  club.rotation.set(0.4, 0, -0.1);
-  return club;
 }
 
 /** Stable string of equipped item ids, so EntityView can spot a change cheaply. */
