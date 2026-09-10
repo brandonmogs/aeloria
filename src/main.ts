@@ -27,6 +27,7 @@ import { GameLoop } from './engine/GameLoop';
 import { Renderer } from './render/Renderer';
 import { Terrain } from './render/Terrain';
 import { loadPhotoLibrary } from './render/assets';
+import { loadHumanTemplate } from './render/human';
 import { TileGridView } from './render/TileGridView';
 import { SceneryView } from './render/SceneryView';
 import { GrassView } from './render/GrassView';
@@ -136,8 +137,9 @@ async function runGame(): Promise<void> {
   // --- Rendering -----------------------------------------------------------
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const renderer = new Renderer(canvas);
-  // Scanned CC0 textures load before the world is built; anything missing falls back to procedural.
-  const photos = await loadPhotoLibrary();
+  // Scanned CC0 textures and the human body template load before the world is
+  // built; any missing texture set falls back to procedural.
+  const [photos] = await Promise.all([loadPhotoLibrary(), loadHumanTemplate()]);
   const terrain = new Terrain(map, props, terrainSpec, photos);
   renderer.scene.add(terrain.mesh);
   const tileView = new TileGridView(renderer.scene, terrain);

@@ -53,34 +53,80 @@ function prism(rTop: number, rBottom: number, height: number, sides = 8): THREE.
 
 // --- Head ---------------------------------------------------------------------------
 
+interface HeadFrame {
+  /** Skull half-width. */
+  hr: number;
+  top: number;
+  brow: number;
+  chin: number;
+  chinZ: number;
+  /** Centre of the skull front-to-back, and its depth relative to width. */
+  cz: number;
+  flatten: number;
+}
+
+/** Where the skull is, relative to the head socket, so hats sit on it. */
+function headFrame(rig: Rig): HeadFrame {
+  const d = rig.dims;
+  const hr = d.headR;
+  const f = d.face;
+  if (!f) return { hr, top: 2.1 * hr, brow: 1.45 * hr, chin: 0.05 * hr, chinZ: 0.85 * hr, cz: 0, flatten: d.headFlatten };
+  return { hr, top: f.top, brow: f.brow, chin: f.chin, chinZ: f.chinZ, cz: (f.front + f.back) / 2, flatten: (f.front - f.back) / (2 * hr) };
+}
+
+function onSkull(h: HeadFrame, geo: THREE.BufferGeometry, m: THREE.Material): THREE.Mesh {
+  return put(geo, m, 0, 0, h.cz);
+}
+
 /** A steel skull-cap with a nose guard. */
 export function skullCap(rig: Rig, color: number, finish: 'metal' | 'leather' = 'metal'): THREE.Object3D {
-  const hr = rig.dims.headR;
+  const h = headFrame(rig);
+  const hr = h.hr;
   const g = new THREE.Group();
   const m = material(color, finish);
-  const f = rig.dims.headFlatten;
-  g.add(put(lathe([[1.03 * hr, 1.12 * hr], [1.1 * hr, 1.55 * hr], [0.97 * hr, 1.96 * hr], [0.5 * hr, 2.24 * hr], [0, 2.3 * hr]], 24, f), m));
-  g.add(put(box(0.14 * hr, 0.72 * hr, 0.1 * hr), m, 0, 1.0 * hr, 1.03 * hr * f));
+  const span = h.top - h.brow;
+  g.add(onSkull(h, lathe([[1.07 * hr, h.brow + 0.012], [1.13 * hr, h.brow + span * 0.45], [0.98 * hr, h.brow + span * 0.88], [0.5 * hr, h.top + 0.02], [0, h.top + 0.04]], 24, h.flatten), m));
+  g.add(put(box(0.14 * hr, (h.brow - h.chin) * 0.55, 0.1 * hr), m, 0, h.brow - (h.brow - h.chin) * 0.28, h.cz + 1.02 * hr * h.flatten));
   return g;
 }
 
 export function buildHelmet(item: ItemStack, rig: Rig): THREE.Object3D {
-  const hr = rig.dims.headR;
+  const h = headFrame(rig);
+  const hr = h.hr;
   const c = metalColor(item.id);
+  const span = h.top - h.brow;
   if (item.id.includes('full_helm')) {
     // The whole head boxed in, with a T-shaped face slit.
     const g = new THREE.Group();
     const m = material(c, 'metal');
-    const f = rig.dims.headFlatten;
-    g.add(put(lathe([[0.75 * hr, 0.02 * hr], [1.05 * hr, 0.55 * hr], [1.1 * hr, 1.2 * hr], [1.08 * hr, 1.6 * hr], [0.95 * hr, 1.98 * hr], [0.5 * hr, 2.27 * hr], [0, 2.32 * hr]], 24, f), m));
+    g.add(
+      onSkull(
+        h,
+        lathe(
+          [
+            [0.8 * hr, h.chin - 0.012],
+            [1.1 * hr, h.chin + (h.brow - h.chin) * 0.4],
+            [1.14 * hr, h.brow],
+            [1.12 * hr, h.brow + span * 0.5],
+            [0.98 * hr, h.brow + span * 0.88],
+            [0.5 * hr, h.top + 0.025],
+            [0, h.top + 0.04],
+          ],
+          24,
+          h.flatten,
+        ),
+        m,
+      ),
+    );
     const dark = material(0x14120f, 'dark');
-    g.add(put(box(0.16 * hr, 0.8 * hr, 0.1 * hr), dark, 0, 1.05 * hr, 1.06 * hr * f));
-    g.add(put(box(0.9 * hr, 0.14 * hr, 0.1 * hr), dark, 0, 1.3 * hr, 1.05 * hr * f));
+    const front = h.cz + 1.06 * hr * h.flatten;
+    g.add(put(box(0.16 * hr, (h.brow - h.chin) * 0.8, 0.1 * hr), dark, 0, (h.brow + h.chin) / 2, front));
+    g.add(put(box(0.9 * hr, 0.14 * hr, 0.1 * hr), dark, 0, h.brow - 0.03, front));
     return g;
   }
   if (item.id.includes('cowl')) {
     const g = new THREE.Group();
-    g.add(put(lathe([[1.03 * hr, 0.55 * hr], [1.12 * hr, 1.3 * hr], [0.97 * hr, 1.95 * hr], [0.5 * hr, 2.26 * hr], [0, 2.3 * hr]], 20, rig.dims.headFlatten), material(c, 'leather')));
+    g.add(onSkull(h, lathe([[1.06 * hr, h.chin + 0.02], [1.15 * hr, h.brow - 0.01], [1.0 * hr, h.brow + span * 0.85], [0.5 * hr, h.top + 0.02], [0, h.top + 0.035]], 20, h.flatten), material(c, 'leather')));
     return g;
   }
   return skullCap(rig, c, finishOf(item.id));
@@ -88,33 +134,44 @@ export function buildHelmet(item: ItemStack, rig: Rig): THREE.Object3D {
 
 /** A tall white chef's hat. */
 export function toque(rig: Rig): THREE.Object3D {
-  const hr = rig.dims.headR;
+  const h = headFrame(rig);
+  const hr = h.hr;
   const white = material(0xf4f1ea, 'cloth');
   const g = new THREE.Group();
-  g.add(put(lathe([[1.02 * hr, 1.5 * hr], [1.05 * hr, 1.9 * hr], [1.18 * hr, 2.6 * hr], [1.28 * hr, 3.3 * hr], [0.92 * hr, 3.7 * hr], [0, 3.8 * hr]], 20, rig.dims.headFlatten), white));
+  g.add(onSkull(h, lathe([[1.05 * hr, h.brow + 0.01], [1.07 * hr, h.top - 0.01], [1.2 * hr, h.top + 0.08], [1.3 * hr, h.top + 0.16], [0.95 * hr, h.top + 0.21], [0, h.top + 0.22]], 20, h.flatten), white));
   return g;
 }
 
 /** A wide-brimmed straw hat. */
 export function strawHat(rig: Rig): THREE.Object3D {
-  const hr = rig.dims.headR;
+  const h = headFrame(rig);
+  const hr = h.hr;
   const straw = material(0xc9b26a, 'cloth');
   const g = new THREE.Group();
-  g.add(put(lathe([[0, 1.72 * hr], [2.1 * hr, 1.74 * hr], [2.15 * hr, 1.87 * hr], [1.08 * hr, 1.92 * hr], [1.03 * hr, 2.6 * hr], [0.7 * hr, 2.85 * hr], [0, 2.9 * hr]], 24, rig.dims.headFlatten), straw));
+  g.add(onSkull(h, lathe([[0, h.brow + 0.04], [2.2 * hr, h.brow + 0.045], [2.25 * hr, h.brow + 0.06], [1.1 * hr, h.brow + 0.065], [1.06 * hr, h.top + 0.02], [0.7 * hr, h.top + 0.06], [0, h.top + 0.07]], 24, h.flatten), straw));
   return g;
 }
 
 /** A red officer's plume rising from the crown. */
 export function plume(rig: Rig): THREE.Object3D {
-  const hr = rig.dims.headR;
-  return put(wedge(0.2 * hr, 1.4 * hr, 0.9 * hr, 0.6, 1.1), material(0xc0332a, 'cloth'), 0, 2.9 * hr, -0.2 * hr);
+  const h = headFrame(rig);
+  const hr = h.hr;
+  return put(wedge(0.2 * hr, 1.4 * hr, 0.9 * hr, 0.6, 1.1), material(0xc0332a, 'cloth'), 0, h.top + 0.06, h.cz - 0.2 * hr);
 }
 
 /** A full beard hanging from the jaw. */
 export function beard(rig: Rig, color: number): THREE.Object3D {
-  const hr = rig.dims.headR;
-  return put(lathe([[0.55 * hr, -0.55 * hr], [0.72 * hr, 0.1 * hr], [0.85 * hr, 0.7 * hr], [0.75 * hr, 0.95 * hr], [0, 1.0 * hr]], 14, 0.65), material(color, 'hair'), 0, 0, 0.62 * hr * rig.dims.headFlatten);
+  const h = headFrame(rig);
+  const hr = h.hr;
+  return put(
+    lathe([[0.5 * hr, h.chin - 0.1], [0.7 * hr, h.chin - 0.045], [0.85 * hr, h.chin + 0.025], [0.75 * hr, h.chin + 0.055], [0, h.chin + 0.06]], 14, 0.7),
+    material(color, 'hair'),
+    0,
+    0,
+    h.chinZ - 0.5 * hr,
+  );
 }
+
 
 // --- Body ---------------------------------------------------------------------------
 

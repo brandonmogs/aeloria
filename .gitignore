@@ -4,3 +4,6 @@ dist/
 .DS_Store
 
 scripts/shots/
+
+# Downloaded source data for scripts/build-*.mjs
+scripts/.cache/

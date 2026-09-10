@@ -6,7 +6,8 @@ import { Npc } from '../sim/Npc';
 import { EquipSlot, EQUIP_SLOTS } from '../sim/Inventory';
 import { ItemStack, itemDef } from '../sim/items';
 import { Terrain } from './Terrain';
-import { ACTION_DURATION, ActionKind, Animator, Rig, buildHumanoid, buildRat, lathe, material, put, shade } from './characters';
+import { ACTION_DURATION, ActionKind, Animator, Rig, buildRat, lathe, material, put, shade } from './characters';
+import { buildHumanoid } from './human';
 import {
   apron,
   beard,
@@ -421,7 +422,6 @@ function rigFor(entity: Entity): Rig {
           legScale: 0.85,
           belly: 1,
           bulk: 0.85,
-          hunch: 0.3,
           goblin: true,
           hair: 'bald',
           palette: { skin: 0x7d9c3c, hair: 0x2a2a1a, tunic: 0x7d9c3c, trouser: 0x6b4a2f, boots: 0x5a3d25, eyes: 0xd9a13a },
