@@ -13,5 +13,14 @@ export default defineConfig({
     watch: { ignored: ['**/scripts/shots/**', '**/dist/**', '**/.claude/**'] },
   },
   preview: { port: 2006, strictPort: true },
-  build: { target: 'es2020' },
+  build: {
+    target: 'es2020',
+    rollupOptions: {
+      // The game, plus the developer pages (the character lab at /dev/character/).
+      input: {
+        main: 'index.html',
+        character: 'dev/character/index.html',
+      },
+    },
+  },
 });

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" href="data:," />
+    <title>Aeloria character lab</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        height: 100%;
+        background: #16181c;
+        color: #d8dbe0;
+        font: 12px/1.4 system-ui, 'Segoe UI', sans-serif;
+      }
+      body {
+        display: flex;
+        overflow: hidden;
+      }
+      #panel {
+        width: 310px;
+        flex: none;
+        overflow-y: auto;
+        padding: 10px 12px 20px;
+        background: #1e2126;
+        border-right: 1px solid #0b0c0e;
+      }
+      body.no-ui #panel {
+        display: none;
+      }
+      #stage {
+        flex: 1;
+        position: relative;
+        min-width: 0;
+      }
+      #view {
+        width: 100%;
+        height: 100%;
+        display: block;
+      }
+      #stats {
+        position: absolute;
+        left: 10px;
+        top: 8px;
+        font: 11px/1.4 ui-monospace, Consolas, monospace;
+        color: #c9ccd2;
+        background: rgba(0, 0, 0, 0.45);
+        padding: 4px 8px;
+        border-radius: 4px;
+        white-space: pre;
+        pointer-events: none;
+      }
+      #hint {
+        position: absolute;
+        right: 10px;
+        bottom: 8px;
+        font-size: 11px;
+        color: #9aa0a8;
+        pointer-events: none;
+      }
+      h1 {
+        font-size: 14px;
+        margin-bottom: 4px;
+        color: #fff;
+      }
+      .sub {
+        color: #8f959d;
+        margin-bottom: 10px;
+      }
+      details {
+        margin-bottom: 10px;
+      }
+      summary {
+        cursor: pointer;
+        font-weight: 600;
+        color: #f0c36a;
+        margin-bottom: 6px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin: 3px 0;
+      }
+      .row .lbl {
+        flex: 0 0 96px;
+        color: #aab0b8;
+      }
+      .row select,
+      .row input[type='range'] {
+        flex: 1;
+        min-width: 0;
+      }
+      .row input[type='color'] {
+        width: 36px;
+        height: 22px;
+        padding: 0;
+        border: none;
+        background: none;
+      }
+      .row input[type='checkbox'] {
+        flex: none;
+      }
+      .val {
+        flex: 0 0 52px;
+        text-align: right;
+        color: #c9ccd2;
+      }
+      select,
+      button,
+      input {
+        font: inherit;
+        color: inherit;
+        background: #2a2e35;
+        border: 1px solid #3a3f48;
+        border-radius: 3px;
+        padding: 2px 4px;
+      }
+      button {
+        cursor: pointer;
+        padding: 3px 8px;
+      }
+      button:hover {
+        background: #363b44;
+      }
+      .buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        margin: 6px 0 2px;
+      }
+    </style>
+  </head>
+  <body>
+    <aside id="panel"></aside>
+    <main id="stage">
+      <canvas id="view"></canvas>
+      <div id="stats"></div>
+      <div id="hint">drag: orbit · right-drag: raise / lower · wheel: zoom</div>
+    </main>
+    <script type="module" src="/src/dev/character/main.ts"></script>
+  </body>
+</html>

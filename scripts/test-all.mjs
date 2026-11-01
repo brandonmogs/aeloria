@@ -23,6 +23,7 @@ const TESTS = [
   'map-test',
   'content-test',
   'ranged-magic-test',
+  'character-shot',
 ];
 
 const server = await createServer({ server: { port: 5199, open: false } });

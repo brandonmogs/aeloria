@@ -35,7 +35,7 @@ export interface RenderStats {
  * the way the 2007 palette did, a soft vignette, and a dither that kills the
  * banding tone-mapped skies are prone to.
  */
-const GRADE_SHADER = {
+export const GRADE_SHADER = {
   uniforms: {
     tDiffuse: { value: null as THREE.Texture | null },
     saturation: { value: 1.08 },
