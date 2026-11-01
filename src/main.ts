@@ -813,6 +813,7 @@ async function runGame(): Promise<void> {
     },
     dialogueView: () => lastDialogueView,
     lastMinimapTarget: () => minimap.lastTarget,
+    minimapZoom: () => minimap.zoom,
     shopIsOpen: () => shopPanel.isOpen,
     smithingIsOpen: () => smithingPanel.isOpen,
     interactables: () => world.interactables,

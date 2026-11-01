@@ -13,16 +13,25 @@ import { bakeTerrain } from './WorldMap';
  * yellow dots for NPCs, red for items on the ground, and the player as a
  * white dot at the centre. Clicking walks there: the click is unrotated back
  * into tile space, so "up" on the minimap is always where you're looking.
+ * Scrolling the wheel over it zooms the map in and out, like OSRS's minimap
+ * zoom; the zoom eases in over a few frames so it never jumps.
  */
 export class MiniMap {
-  /** Pixels per tile in the baked terrain and on screen. */
+  /** Pixels per tile on screen at zoom 1. */
   private readonly px = 4;
+  /** Pixels per tile in the baked terrain: twice the screen density, so zooming in stays crisp. */
+  private readonly bakePx = 8;
   private readonly size = 184;
   private readonly canvas = document.createElement('canvas');
   private readonly ctx: CanvasRenderingContext2D;
   private readonly terrain: HTMLCanvasElement;
   /** The tile the last minimap click resolved to (for diagnostics/tests). */
   lastTarget: Tile | null = null;
+  /** Zoom as drawn this frame (eases toward {@link zoomTarget}). */
+  zoom = 1;
+  private zoomTarget = 1;
+  static readonly MIN_ZOOM = 0.5;
+  static readonly MAX_ZOOM = 2.5;
 
   constructor(
     private readonly map: TileMap,
@@ -38,7 +47,7 @@ export class MiniMap {
     this.canvas.id = 'minimap';
     document.body.appendChild(this.canvas);
     this.ctx = this.canvas.getContext('2d')!;
-    this.terrain = bakeTerrain(map, props, this.px, extras);
+    this.terrain = bakeTerrain(map, props, this.bakePx, extras);
 
     if (onClickTile) {
       this.canvas.addEventListener('pointerdown', (e) => {
@@ -49,6 +58,27 @@ export class MiniMap {
         }
       });
     }
+    // Wheel over the map: zoom in (scroll up) or out (scroll down), in even
+    // multiplicative steps so each notch feels the same at any zoom.
+    this.canvas.addEventListener(
+      'wheel',
+      (e) => {
+        e.preventDefault();
+        if (e.deltaY === 0) return;
+        this.setZoom(this.zoomTarget * Math.exp(-Math.sign(e.deltaY) * 0.2));
+      },
+      { passive: false },
+    );
+  }
+
+  /** Request a zoom level (clamped); the drawn zoom eases toward it. */
+  setZoom(zoom: number): void {
+    this.zoomTarget = Math.min(MiniMap.MAX_ZOOM, Math.max(MiniMap.MIN_ZOOM, zoom));
+  }
+
+  /** Screen pixels per tile at the current zoom. */
+  private get pixelsPerTile(): number {
+    return this.px * this.zoom;
   }
 
   /** Redraw. Call once per frame. */
@@ -59,18 +89,30 @@ export class MiniMap {
     ctx.clearRect(0, 0, this.size, this.size);
     if (!tracked) return;
 
+    this.zoom += (this.zoomTarget - this.zoom) * 0.3;
+    if (Math.abs(this.zoomTarget - this.zoom) < 0.002) this.zoom = this.zoomTarget;
+    const ppt = this.pixelsPerTile;
+    const k = ppt / this.bakePx;
+
     ctx.save();
     ctx.beginPath();
     ctx.arc(half, half, half - 1, 0, Math.PI * 2);
     ctx.clip();
 
     // Rotate the world so the camera's heading points up, then scroll it so
-    // the player's tile sits at the centre.
+    // the player's tile sits at the centre. Shrinking the bake is smoothed;
+    // blowing it up stays blocky, like the real minimap.
     ctx.translate(half, half);
     ctx.rotate(-this.camera.heading);
-    const px = this.px;
+    ctx.imageSmoothingEnabled = k < 1;
     const p = tracked.position;
-    ctx.drawImage(this.terrain, -(p.x + 0.5) * px, -(this.map.height - 1 - p.y + 0.5) * px);
+    ctx.drawImage(
+      this.terrain,
+      -(p.x + 0.5) * ppt,
+      -(this.map.height - 1 - p.y + 0.5) * ppt,
+      this.terrain.width * k,
+      this.terrain.height * k,
+    );
 
     for (const ground of this.world.groundItems.values()) {
       this.dot(ground.tile.x - p.x, ground.tile.y - p.y, '#ff3b2f', 2);
@@ -91,16 +133,17 @@ export class MiniMap {
     ctx.stroke();
   }
 
-  /** A dot at a tile offset from the player, inside the rotated context. */
+  /** A dot at a tile offset from the player, inside the rotated context. Dots keep their size at any zoom. */
   private dot(dx: number, dy: number, fill: string, r: number): void {
     const ctx = this.ctx;
+    const ppt = this.pixelsPerTile;
     ctx.beginPath();
-    ctx.arc(dx * this.px, -dy * this.px, r, 0, Math.PI * 2);
+    ctx.arc(dx * ppt, -dy * ppt, r, 0, Math.PI * 2);
     ctx.fillStyle = fill;
     ctx.fill();
   }
 
-  /** Undo the rotation and scroll to find which tile a click landed on. */
+  /** Undo the rotation, zoom and scroll to find which tile a click landed on. */
   private tileAtClick(clientX: number, clientY: number): Tile | null {
     const tracked = this.world.entities.get(this.trackedId);
     if (!tracked) return null;
@@ -110,8 +153,9 @@ export class MiniMap {
     const h = this.camera.heading;
     const dx = ox * Math.cos(h) - oy * Math.sin(h);
     const dy = ox * Math.sin(h) + oy * Math.cos(h);
-    const x = Math.round(tracked.position.x + dx / this.px);
-    const y = Math.round(tracked.position.y - dy / this.px);
+    const ppt = this.pixelsPerTile;
+    const x = Math.round(tracked.position.x + dx / ppt);
+    const y = Math.round(tracked.position.y - dy / ppt);
     return this.map.inBounds(x, y) ? tile(x, y) : null;
   }
 }

@@ -50,6 +50,28 @@ await page.screenshot({ path: 'scripts/shots/world-map.png' });
 await page.keyboard.press('Escape');
 const closed = await page.evaluate(() => document.getElementById('world-map').hidden);
 
-console.log(JSON.stringify({ start, northTarget, walkingNorth, mid, southTarget, walkingSouth, worldMap, closed, errors }, null, 2));
+// Scrolling over the minimap zooms it: up zooms in, down zooms back out, and
+// a click still resolves to the right tile at the new scale.
+await page.mouse.move(mm.x + mm.width / 2, mm.y + mm.height / 2);
+await page.mouse.wheel(0, -100);
+await page.mouse.wheel(0, -100);
+await page.waitForTimeout(400);
+const zoomedIn = await page.evaluate(() => window.__aeloria.minimapZoom());
+await page.evaluate(() => window.__aeloria.camera.faceNorth());
+await page.waitForTimeout(300);
+const before = await page.evaluate(() => ({ ...window.__aeloria.player.position }));
+await page.mouse.click(mm.x + mm.width / 2, mm.y + mm.height * 0.28);
+await page.waitForTimeout(300);
+const zoomedTarget = await page.evaluate(() => window.__aeloria.lastMinimapTarget());
+// At 1.49x zoom the same screen offset reaches fewer tiles north than at 1x.
+const zoomedClickNorth = zoomedTarget && zoomedTarget.y > before.y && zoomedTarget.y - before.y < northTarget.y - start.y;
+await page.screenshot({ path: 'scripts/shots/minimap-zoomed.png' });
+await page.mouse.move(mm.x + mm.width / 2, mm.y + mm.height / 2);
+for (let i = 0; i < 6; i++) await page.mouse.wheel(0, 100);
+await page.waitForTimeout(400);
+const zoomedOut = await page.evaluate(() => window.__aeloria.minimapZoom());
+const zoomWorks = zoomedIn > 1.3 && zoomedIn < 1.6 && zoomedOut < 1;
+
+console.log(JSON.stringify({ start, northTarget, walkingNorth, mid, southTarget, walkingSouth, worldMap, closed, zoomedIn, zoomedTarget, zoomedClickNorth, zoomedOut, errors }, null, 2));
 await browser.close();
-process.exit(!errors.length && walkingNorth && walkingSouth && worldMap.open && worldMap.keyRows >= 5 && closed ? 0 : 1);
+process.exit(!errors.length && walkingNorth && walkingSouth && worldMap.open && worldMap.keyRows >= 5 && closed && zoomWorks && zoomedClickNorth ? 0 : 1);
