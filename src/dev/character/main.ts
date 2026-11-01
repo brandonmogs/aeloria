@@ -192,7 +192,8 @@ const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 // --- The page --------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  await loadHumanTemplate();
+  // The pipeline's GLB template by default; ?chars=legacy shows the old json/bin body.
+  await loadHumanTemplate(new URLSearchParams(location.search).get('chars') === 'legacy' ? 'legacy' : 'glb');
   const lab = new CharacterLab(canvas);
 
   let rebuildTimer = 0;

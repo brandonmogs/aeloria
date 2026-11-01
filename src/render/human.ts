@@ -3,6 +3,7 @@ import { JOINTS, JointName, Rig, RigDims, Sockets, Stance } from './characters';
 import { eyeMaterial, lookMaterial, LookSpec } from './humanSkin';
 import { buildBaseBoots } from './gear';
 import { HairStyle, SCALP_COLS, SCALP_ROWS, ScalpShape, buildHair } from './hair';
+import { Glb, parseGlb, readFloat, readUint16, readUint32 } from './glb';
 
 /**
  * People are built from one real human body: MakeHuman's CC0 base mesh,
@@ -44,22 +45,16 @@ export interface HumanLandmarks {
   handReach: number;
 }
 
-export interface HumanTemplate {
-  /** Standing height in metres. */
-  height: number;
+/** One body mesh of the template at a level of detail. */
+export interface TemplateMesh {
   vertexCount: number;
   positions: Float32Array;
   normals: Float32Array;
   uvs: Float32Array;
+  /** Four bone indices per vertex, into the template's `bones`. */
   skinIndex: Uint16Array;
   skinWeight: Float32Array;
   indices: Uint32Array;
-  joints: Record<JointName, THREE.Vector3>;
-  parents: Record<JointName, JointName | null>;
-  landmarks: HumanLandmarks;
-  radii: { thigh: number; shin: number; upperArm: number; deltoid: number; forearm: number };
-  torsoProfile: Array<readonly [number, number]>;
-  torsoFlatten: number;
   /** Attributes every character shares (normals, uvs, skinning, index): uploaded once. */
   shared: {
     normal: THREE.BufferAttribute;
@@ -70,13 +65,130 @@ export interface HumanTemplate {
   };
 }
 
+export type TemplateSource = 'legacy' | 'glb';
+
+/**
+ * The body everyone is built from: the finest mesh (also `lods[0]`), the
+ * skeleton it is skinned to, and the measurements taken from it. The legacy
+ * json/bin template has the game's sixteen joints as its bones; the GLB from
+ * scripts/build-characters.mjs has the shared humanoid skeleton (standard
+ * bone names, spine links, clavicles, toes, hair and cape chains), where each
+ * game joint drives one bone and every other bone follows an owner joint.
+ */
+export interface HumanTemplate extends TemplateMesh {
+  source: TemplateSource;
+  /** Standing height in metres. */
+  height: number;
+  /** Bone names in skin order. */
+  bones: string[];
+  boneParent: Array<number | null>;
+  /** Rest positions of the bones in template space. */
+  bonePositions: THREE.Vector3[];
+  /** The game joint that owns each bone's flesh, for the reshape and the painters. */
+  owner: JointName[];
+  /** The bone each game joint drives. */
+  jointBone: Record<JointName, number>;
+  joints: Record<JointName, THREE.Vector3>;
+  landmarks: HumanLandmarks;
+  radii: { thigh: number; shin: number; upperArm: number; deltoid: number; forearm: number };
+  torsoProfile: Array<readonly [number, number]>;
+  torsoFlatten: number;
+  /** The body at every level of detail, finest first. */
+  lods: TemplateMesh[];
+}
+
 let template: HumanTemplate | null = null;
 
 const v3 = (a: number[]): THREE.Vector3 => new THREE.Vector3(a[0], a[1], a[2]);
 
-/** Fetch the template once, before the world is built. */
-export async function loadHumanTemplate(base = '/models/'): Promise<HumanTemplate> {
+/**
+ * Fetch the template once, before the world is built: the legacy json/bin
+ * pair, or the GLB the character pipeline writes (`?chars=new` in the game).
+ */
+export async function loadHumanTemplate(source: TemplateSource = 'legacy', base = '/models/'): Promise<HumanTemplate> {
   if (template) return template;
+  template = source === 'glb' ? await loadGlbTemplate(`${base}characters/human.glb`) : await loadLegacyTemplate(base);
+  return template;
+}
+
+function templateMesh(positions: Float32Array, normals: Float32Array, uvs: Float32Array, skinIndex: Uint16Array, skinWeight: Float32Array, indices: Uint32Array): TemplateMesh {
+  return {
+    vertexCount: positions.length / 3,
+    positions,
+    normals,
+    uvs,
+    skinIndex,
+    skinWeight,
+    indices,
+    shared: {
+      normal: new THREE.BufferAttribute(normals, 3),
+      uv: new THREE.BufferAttribute(uvs, 2),
+      skinIndex: new THREE.BufferAttribute(skinIndex, 4),
+      skinWeight: new THREE.BufferAttribute(skinWeight, 4),
+      index: new THREE.BufferAttribute(indices, 1),
+    },
+  };
+}
+
+/** The landmarks as the build scripts write them: [x, y, z] arrays and numbers. */
+interface RawLandmarks {
+  headTop: number[];
+  eyeL: number[];
+  eyeR: number[];
+  noseTip: number[];
+  mouth: number[];
+  mouthHalfWidth: number;
+  chin: number[];
+  chinBottom: number[];
+  earL: number[];
+  earR: number[];
+  brow: number[][];
+  skullHalfWidth: number;
+  skullFront: number;
+  skullBack: number;
+  neckFront: number[];
+  chestFront: number[];
+  chestBack: number[];
+  footFront: number;
+  footBack: number;
+  footHalfWidth: number;
+  handReach: number;
+}
+
+interface Measurements {
+  height: number;
+  landmarks: RawLandmarks;
+  radii: HumanTemplate['radii'];
+  torsoProfile: Array<[number, number]>;
+  torsoFlatten: number;
+}
+
+const landmarksFrom = (lm: RawLandmarks): HumanLandmarks => ({
+  headTop: v3(lm.headTop),
+  eyeL: v3(lm.eyeL),
+  eyeR: v3(lm.eyeR),
+  noseTip: v3(lm.noseTip),
+  mouth: v3(lm.mouth),
+  mouthHalfWidth: lm.mouthHalfWidth,
+  chin: v3(lm.chin),
+  chinBottom: v3(lm.chinBottom),
+  earL: v3(lm.earL),
+  earR: v3(lm.earR),
+  brow: lm.brow.map(v3),
+  skullHalfWidth: lm.skullHalfWidth,
+  skullFront: lm.skullFront,
+  skullBack: lm.skullBack,
+  neckFront: v3(lm.neckFront),
+  chestFront: v3(lm.chestFront),
+  chestBack: v3(lm.chestBack),
+  footFront: lm.footFront,
+  footBack: lm.footBack,
+  footHalfWidth: lm.footHalfWidth,
+  handReach: lm.handReach,
+});
+
+/** The json/bin pair from scripts/build-human.mjs: the sixteen game joints are the bones. */
+async function loadLegacyTemplate(base: string): Promise<HumanTemplate> {
   const [meta, bin] = await Promise.all([
     fetch(`${base}human.json`).then((r) => r.json()),
     fetch(`${base}human.bin`).then((r) => r.arrayBuffer()),
@@ -87,60 +199,96 @@ export async function loadHumanTemplate(base = '/models/'): Promise<HumanTemplat
     if (l.type !== type) throw new Error(`${name}: expected ${type}, got ${l.type}`);
     return new ctors[type](bin, l.offset, l.length) as InstanceType<(typeof ctors)[K]>;
   };
-  const positions = view('position', 'Float32Array');
-  const normals = view('normal', 'Float32Array');
-  const uvs = view('uv', 'Float32Array');
-  const skinIndex = view('skinIndex', 'Uint16Array');
-  const skinWeight = view('skinWeight', 'Float32Array');
-  const indices = view('index', 'Uint32Array');
-  const lm = meta.landmarks;
-  const joints = Object.fromEntries(JOINTS.map((j) => [j, v3(meta.jointPositions[j])])) as Record<JointName, THREE.Vector3>;
-  template = {
-    height: meta.height,
-    vertexCount: positions.length / 3,
-    positions,
-    normals,
-    uvs,
-    skinIndex,
-    skinWeight,
-    indices,
+  const mesh = templateMesh(
+    view('position', 'Float32Array'),
+    view('normal', 'Float32Array'),
+    view('uv', 'Float32Array'),
+    view('skinIndex', 'Uint16Array'),
+    view('skinWeight', 'Float32Array'),
+    view('index', 'Uint32Array'),
+  );
+  const m = meta as Measurements & { jointPositions: Record<JointName, number[]>; parents: Record<JointName, JointName | null> };
+  const joints = Object.fromEntries(JOINTS.map((j) => [j, v3(m.jointPositions[j])])) as Record<JointName, THREE.Vector3>;
+  const bones = [...JOINTS];
+  return {
+    ...mesh,
+    source: 'legacy',
+    height: m.height,
+    bones,
+    boneParent: JOINTS.map((j) => {
+      const p = m.parents[j];
+      return p ? JOINTS.indexOf(p) : null;
+    }),
+    bonePositions: JOINTS.map((j) => joints[j]),
+    owner: bones,
+    jointBone: Object.fromEntries(JOINTS.map((j, i) => [j, i])) as Record<JointName, number>,
     joints,
-    parents: meta.parents,
-    landmarks: {
-      headTop: v3(lm.headTop),
-      eyeL: v3(lm.eyeL),
-      eyeR: v3(lm.eyeR),
-      noseTip: v3(lm.noseTip),
-      mouth: v3(lm.mouth),
-      mouthHalfWidth: lm.mouthHalfWidth,
-      chin: v3(lm.chin),
-      chinBottom: v3(lm.chinBottom),
-      earL: v3(lm.earL),
-      earR: v3(lm.earR),
-      brow: (lm.brow as number[][]).map(v3),
-      skullHalfWidth: lm.skullHalfWidth,
-      skullFront: lm.skullFront,
-      skullBack: lm.skullBack,
-      neckFront: v3(lm.neckFront),
-      chestFront: v3(lm.chestFront),
-      chestBack: v3(lm.chestBack),
-      footFront: lm.footFront,
-      footBack: lm.footBack,
-      footHalfWidth: lm.footHalfWidth,
-      handReach: lm.handReach,
-    },
+    landmarks: landmarksFrom(m.landmarks),
+    radii: m.radii,
+    torsoProfile: m.torsoProfile,
+    torsoFlatten: m.torsoFlatten,
+    lods: [mesh],
+  };
+}
+
+/** What scripts/build-characters.mjs stores in the GLB's asset extras. */
+interface GlbMeta extends Measurements {
+  bones: string[];
+  boneParents: Array<string | null>;
+  bonePositions: Record<string, number[]>;
+  gameJoints: Record<JointName, string>;
+  boneOwner: JointName[];
+}
+
+function meshFrom(glb: Glb, prim: { attributes: Record<string, number>; indices: number }): TemplateMesh {
+  const a = prim.attributes;
+  return templateMesh(
+    readFloat(glb, a.POSITION),
+    readFloat(glb, a.NORMAL),
+    readFloat(glb, a.TEXCOORD_0),
+    readUint16(glb, a.JOINTS_0),
+    readFloat(glb, a.WEIGHTS_0),
+    readUint32(glb, prim.indices),
+  );
+}
+
+/** The GLB from scripts/build-characters.mjs: the shared humanoid skeleton and the body at three levels of detail. */
+async function loadGlbTemplate(url: string): Promise<HumanTemplate> {
+  const glb = parseGlb(await fetch(url).then((r) => r.arrayBuffer()));
+  const meta = glb.json.asset.extras as unknown as GlbMeta;
+  const skin = glb.json.skins?.[0];
+  if (!skin) throw new Error(`${url}: no skin`);
+  const bones = skin.joints.map((i) => glb.json.nodes[i].name);
+  const index = (name: string): number => {
+    const i = bones.indexOf(name);
+    if (i < 0) throw new Error(`${url}: no bone ${name}`);
+    return i;
+  };
+  const bonePositions = bones.map((b) => v3(meta.bonePositions[b]));
+  const jointBone = Object.fromEntries(JOINTS.map((j) => [j, index(meta.gameJoints[j])])) as Record<JointName, number>;
+  const joints = Object.fromEntries(JOINTS.map((j) => [j, bonePositions[jointBone[j]].clone()])) as Record<JointName, THREE.Vector3>;
+  const lods = glb.json.nodes
+    .filter((node) => node.mesh !== undefined)
+    .map((node) => glb.json.meshes[node.mesh as number])
+    .sort((a, b) => Number(a.extras?.lod ?? 0) - Number(b.extras?.lod ?? 0))
+    .map((mesh) => meshFrom(glb, mesh.primitives[0]));
+  if (!lods.length) throw new Error(`${url}: no body mesh`);
+  return {
+    ...lods[0],
+    source: 'glb',
+    height: meta.height,
+    bones,
+    boneParent: meta.boneParents.map((p) => (p ? index(p) : null)),
+    bonePositions,
+    owner: meta.boneOwner,
+    jointBone,
+    joints,
+    landmarks: landmarksFrom(meta.landmarks),
     radii: meta.radii,
     torsoProfile: meta.torsoProfile,
     torsoFlatten: meta.torsoFlatten,
-    shared: {
-      normal: new THREE.BufferAttribute(normals, 3),
-      uv: new THREE.BufferAttribute(uvs, 2),
-      skinIndex: new THREE.BufferAttribute(skinIndex, 4),
-      skinWeight: new THREE.BufferAttribute(skinWeight, 4),
-      index: new THREE.BufferAttribute(indices, 1),
-    },
+    lods,
   };
-  return template;
 }
 
 export function humanTemplate(): HumanTemplate {
@@ -245,11 +393,11 @@ function measureScalp(pos: Float32Array, T: HumanTemplate, headJoint: THREE.Vect
   const rows = SCALP_ROWS;
   const cols = SCALP_COLS;
   const radius = new Float32Array(rows * cols);
-  const headIndex = JOINTS.indexOf('head');
+  const isHead = T.owner.map((o) => o === 'head');
   const r = new THREE.Vector3();
   for (let i = 0; i < T.vertexCount; i++) {
     let wHead = 0;
-    for (let k = 0; k < 4; k++) if (T.skinIndex[i * 4 + k] === headIndex) wHead += T.skinWeight[i * 4 + k];
+    for (let k = 0; k < 4; k++) if (isHead[T.skinIndex[i * 4 + k]]) wHead += T.skinWeight[i * 4 + k];
     if (wHead < 0.3) continue;
     r.fromArray(pos, i * 3).sub(headJoint);
     if (ears.some((ear) => r.distanceTo(ear) < earClear)) continue;
@@ -355,7 +503,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
       for (let k = 0; k < 4; k++) {
         const w = T.skinWeight[i * 4 + k];
         if (w <= 0) continue;
-        const j = JOINTS[T.skinIndex[i * 4 + k]];
+        const j = T.owner[T.skinIndex[i * 4 + k]];
         const c = CHILD[j];
         if (c) {
           const a = rest[j];
@@ -437,7 +585,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
       v.fromArray(pos, i * 3);
       for (let k = 0; k < 4; k++) {
         const w = T.skinWeight[i * 4 + k];
-        if (w > 0) v.addScaledVector(offset[JOINTS[T.skinIndex[i * 4 + k]]], w);
+        if (w > 0) v.addScaledVector(offset[T.owner[T.skinIndex[i * 4 + k]]], w);
       }
       v.toArray(pos, i * 3);
     }
@@ -452,22 +600,28 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   /** A landmark on the head, in the head bone's local space (scaled with the head). */
   const onHead = (l: THREE.Vector3): THREE.Vector3 => l.clone().sub(rest.head).multiplyScalar(headK * s);
 
-  // 4. Skeleton and skinned mesh.
+  // 4. Skeleton and skinned mesh. Every template bone becomes a THREE.Bone;
+  //    the game's joints drive the bones that carry them, and the rest (spine
+  //    links, clavicles, toes, the hair and cape chains) follow their owner
+  //    joint's offset so they stay inside the reshaped flesh.
   const group = new THREE.Group();
   group.rotation.order = 'YXZ';
-  const bones = {} as Record<JointName, THREE.Bone>;
-  for (const j of JOINTS) {
+  const boneList = T.bones.map((name) => {
     const b = new THREE.Bone();
-    b.name = j;
+    b.name = name;
     b.rotation.order = 'YXZ';
-    const parent = T.parents[j];
-    b.position.copy(posed[j]);
-    if (parent) {
-      b.position.sub(posed[parent]);
-      bones[parent].add(b);
+    return b;
+  });
+  const posedBone = T.bonePositions.map((p, b) => p.clone().add(offset[T.owner[b]]).multiplyScalar(s));
+  for (let b = 0; b < boneList.length; b++) {
+    const parent = T.boneParent[b];
+    boneList[b].position.copy(posedBone[b]);
+    if (parent !== null) {
+      boneList[b].position.sub(posedBone[parent]);
+      boneList[parent].add(boneList[b]);
     }
-    bones[j] = b;
   }
+  const bones = Object.fromEntries(JOINTS.map((j) => [j, boneList[T.jointBone[j]]])) as Record<JointName, THREE.Bone>;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', T.shared.normal);
@@ -495,8 +649,8 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.frustumCulled = false; // poses reach outside the rest-pose bounds
-  mesh.add(bones.hips);
-  mesh.bind(new THREE.Skeleton(JOINTS.map((j) => bones[j])));
+  mesh.add(boneList[T.boneParent.indexOf(null)]);
+  mesh.bind(new THREE.Skeleton(boneList));
   group.add(mesh);
 
   // 5. Eyes: real eyeballs behind the lids.
@@ -575,6 +729,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const rig: Rig = {
     group,
     joints: bones,
+    bones: boneList,
     sockets,
     barHeight: spec.height + 0.22,
     dims,

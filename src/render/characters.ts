@@ -120,6 +120,8 @@ export interface Rig {
   stance?: Stance;
   /** The hair, on the head bone; hidden under a helmet. */
   hair?: THREE.Object3D;
+  /** Every bone of the skeleton in skin order, when the body is a skinned template. */
+  bones?: THREE.Bone[];
 }
 
 export interface RigDims {

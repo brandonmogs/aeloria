@@ -139,7 +139,7 @@ async function runGame(): Promise<void> {
   const renderer = new Renderer(canvas);
   // Scanned CC0 textures and the human body template load before the world is
   // built; any missing texture set falls back to procedural.
-  const [photos] = await Promise.all([loadPhotoLibrary(), loadHumanTemplate()]);
+  const [photos] = await Promise.all([loadPhotoLibrary(), loadHumanTemplate(new URLSearchParams(location.search).get('chars') === 'new' ? 'glb' : 'legacy')]);
   const terrain = new Terrain(map, props, terrainSpec, photos);
   renderer.scene.add(terrain.mesh);
   const tileView = new TileGridView(renderer.scene, terrain);

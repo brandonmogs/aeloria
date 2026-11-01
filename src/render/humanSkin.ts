@@ -88,6 +88,7 @@ function bakeAtlas(T: HumanTemplate): Atlas {
   const P = T.positions;
   const UV = T.uvs;
   const w = new Map<number, number>();
+  const ownerIndex = T.owner.map((o) => JOINTS.indexOf(o));
   const MARGIN = 0.6; // pixels outside an edge still count, so adjacent triangles leave no cracks
   for (let t = 0; t < idx.length; t += 3) {
     const a = idx[t];
@@ -98,7 +99,9 @@ function bakeAtlas(T: HumanTemplate): Atlas {
     for (const vi of [a, b, c]) {
       for (let k = 0; k < 4; k++) {
         const wt = T.skinWeight[vi * 4 + k];
-        if (wt > 0) w.set(T.skinIndex[vi * 4 + k], (w.get(T.skinIndex[vi * 4 + k]) ?? 0) + wt);
+        if (wt <= 0) continue;
+        const j = ownerIndex[T.skinIndex[vi * 4 + k]];
+        w.set(j, (w.get(j) ?? 0) + wt);
       }
     }
     let region = 0;
