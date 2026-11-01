@@ -7,7 +7,7 @@ import { EquipSlot, EQUIP_SLOTS } from '../sim/Inventory';
 import { ItemStack, itemDef } from '../sim/items';
 import { Terrain } from './Terrain';
 import { ACTION_DURATION, ActionKind, Animator, Rig, buildRat, material, put, shade } from './characters';
-import { buildHumanoid } from './human';
+import { HERO_BUILD, buildHumanoid } from './human';
 import { goblinBracer, goblinFeatures, goblinGreave, goblinPauldron, goblinShield, goblinStrap, goblinSword } from './goblinGear';
 import {
   apron,
@@ -442,18 +442,24 @@ function rigFor(entity: Entity): Rig {
       case 'rat':
         return buildRat();
       case 'guard':
-        // Castle guards: chainmail and crimson, plus a helm.
+        // Castle guards: a fighter's build in chainmail and crimson, plus a helm.
         return buildHumanoid({
-          height: 1.8,
-          bulk: 1.12,
+          ...HERO_BUILD,
+          height: 1.86,
+          bulk: 1.2,
+          shoulders: 1.18,
+          waist: 0.9,
           palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a },
           extras: (rig) => rig.sockets.head.add(skullCap(rig, 0xb4b8bf)),
         });
       case 'captain':
         // Same kit, redder, with an officer's plume.
         return buildHumanoid({
-          height: 1.82,
-          bulk: 1.15,
+          ...HERO_BUILD,
+          height: 1.88,
+          bulk: 1.22,
+          shoulders: 1.2,
+          waist: 0.9,
           palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x8b2b1f, boots: 0x2a2a2a },
           extras: (rig) => {
             rig.sockets.head.add(skullCap(rig, 0xc9ccd2));
@@ -461,17 +467,26 @@ function rigFor(entity: Entity): Rig {
           },
         });
       case 'cook':
+        // Stout, but still standing tall.
         return buildHumanoid({
-          height: 1.7,
+          ...HERO_BUILD,
+          height: 1.74,
           belly: 0.6,
-          bulk: 1.1,
+          bulk: 1.15,
+          waist: 1.04,
+          hips: 1,
+          pecs: 0.4,
+          stance: undefined,
           palette: { skin: 0xe0ac79, hair: 0x3a2a1a, tunic: 0xf0ede4, trouser: 0x4a4a4a, boots: 0x2a2a2a },
           extras: (rig) => rig.sockets.head.add(toque(rig)),
         });
       case 'woodsman':
         return buildHumanoid({
-          height: 1.85,
-          bulk: 1.2,
+          ...HERO_BUILD,
+          height: 1.9,
+          bulk: 1.28,
+          shoulders: 1.2,
+          waist: 0.92,
           palette: { skin: 0xd9a06c, hair: 0x8b5a2b, tunic: 0x6b8f3a, trouser: 0x5a4632, boots: 0x3b2a1c },
           extras: (rig) => {
             rig.sockets.head.add(beard(rig, 0x8b5a2b));
@@ -479,9 +494,16 @@ function rigFor(entity: Entity): Rig {
           },
         });
       case 'fisherman':
+        // Older and leaner, no hero's chest.
         return buildHumanoid({
-          height: 1.72,
+          ...HERO_BUILD,
+          height: 1.76,
           bulk: 0.95,
+          shoulders: 1.1,
+          waist: 0.96,
+          chestWidth: 1.04,
+          pecs: 0.3,
+          stance: undefined,
           palette: { skin: 0xd9a06c, hair: 0xd0d0d0, tunic: 0x4f6f8f, trouser: 0x6b6b6b, boots: 0x3b2a1c },
           extras: (rig) => {
             rig.sockets.head.add(strawHat(rig));
@@ -490,16 +512,22 @@ function rigFor(entity: Entity): Rig {
         });
       case 'shopkeeper':
         return buildHumanoid({
-          height: 1.74,
-          belly: 0.4,
+          ...HERO_BUILD,
+          height: 1.78,
+          belly: 0.35,
+          waist: 0.98,
+          pecs: 0.5,
+          stance: undefined,
           palette: { skin: 0xe0ac79, hair: 0x2a1a0a, tunic: 0x7a4f8a, trouser: 0x3a3a4a, boots: 0x2a2a2a },
           extras: (rig) => rig.sockets.torso.add(apron(rig)),
         });
     }
   }
+  // The player: a Lineage 2 human fighter's build and bearing.
   return buildHumanoid({
-    height: 1.75,
-    bulk: 1.05,
+    ...HERO_BUILD,
+    height: 1.84,
+    hair: 'long',
     palette: { skin: 0xe0ac79, hair: 0x4a2f16, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, eyes: 0x4f7fa8 },
   });
 }

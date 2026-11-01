@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { JOINTS, JointName, Rig, RigDims, Sockets } from './characters';
+import { JOINTS, JointName, Rig, RigDims, Sockets, Stance } from './characters';
 import { eyeMaterial, lookMaterial, LookSpec } from './humanSkin';
 import { buildBaseBoots } from './gear';
 
@@ -10,9 +10,13 @@ import { buildBaseBoots } from './gear';
  * renderer needs (eyes, nose, mouth, chin, ears, brows, skull, feet, hands).
  *
  * {@link buildHumanoid} clones the template per character, reshapes it
- * (head size, limb length, bulk, belly), scales it to the character's height,
- * hangs a bone skeleton off the same joints the animator already drives, and
- * dresses it with a skin texture baked per look (see humanSkin.ts).
+ * (head size, limb length, bulk, belly, waist, chest, pelvis, jaw), scales
+ * it to the character's height, hangs a bone skeleton off the same joints
+ * the animator already drives, and dresses it with a skin texture baked per
+ * look (see humanSkin.ts). The reshape controls are what turn the base
+ * mesh's androgynous figure into the tall, V-torsoed heroes of a Lineage 2
+ * character screen: eight heads tall, long legs, broad shoulders and a
+ * narrow waist.
  */
 
 export interface HumanLandmarks {
@@ -159,7 +163,7 @@ export interface HumanoidSpec {
   /** Standing height in tiles (about metres). */
   height: number;
   palette: HumanoidPalette;
-  /** Head size relative to a realistic head. */
+  /** Head size relative to a realistic head (0.92 makes a figure eight heads tall). */
   headScale?: number;
   /** Arm and leg length relative to realistic. */
   armScale?: number;
@@ -172,6 +176,18 @@ export interface HumanoidSpec {
   chest?: number;
   /** Shoulder width relative to the template (the default 1.06 broadens the base mesh a little). */
   shoulders?: number;
+  /** Waist girth relative to the template: 0.85 pinches a V-torso, 1.1 thickens the middle. */
+  waist?: number;
+  /** Ribcage and upper-back width relative to the template: 1.12 is a fighter's chest. */
+  chestWidth?: number;
+  /** Pectoral definition, 0 (none) to 1 (sculpted). */
+  pecs?: number;
+  /** Pelvis width relative to the template: narrow hips (0.95) read as male and athletic. */
+  hips?: number;
+  /** Neck length relative to the template. */
+  neck?: number;
+  /** Jaw width toward the chin relative to the template: 0.9 gives the sharp chin of a Lineage 2 face. */
+  jaw?: number;
   /** Green skin, no shirt, ragged breeches, bare feet; ears and nose are added by the caller. */
   goblin?: boolean;
   /** Hair style (painted). */
@@ -182,10 +198,26 @@ export interface HumanoidSpec {
   shirt?: boolean;
   booted?: boolean;
   /** A resting posture the animator layers under every clip. */
-  stance?: 'brawler';
+  stance?: Stance;
   /** Optional decorations added to the head or body sockets. */
   extras?: (rig: Rig) => void;
 }
+
+/** The tall, athletic build of a Lineage 2 human fighter; spread over a spec with overrides. */
+export const HERO_BUILD = {
+  headScale: 0.93,
+  legScale: 1.06,
+  armScale: 1.03,
+  bulk: 1.1,
+  shoulders: 1.16,
+  waist: 0.86,
+  chestWidth: 1.12,
+  pecs: 1,
+  hips: 0.95,
+  neck: 1.05,
+  jaw: 0.9,
+  stance: 'hero',
+} as const satisfies Partial<HumanoidSpec>;
 
 // --- Building -----------------------------------------------------------------------
 
@@ -200,11 +232,17 @@ const CHILD: Partial<Record<JointName, JointName>> = {
   elbowR: 'handR',
 };
 
+const gauss = (d: number, sigma: number): number => Math.exp(-(d * d) / (2 * sigma * sigma));
+/** Smoothstep from 0 at `a` to 1 at `b`. */
+const smooth = (x: number, a: number, b: number): number => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+
 /** A person built from the human template, reshaped and dressed for `spec`. */
 export function buildHumanoid(spec: HumanoidSpec): Rig {
   const T = humanTemplate();
   const p = spec.palette;
-  const s = spec.height / T.height;
   const headK = spec.headScale ?? 1;
   const armK = spec.armScale ?? 1;
   const legK = spec.legScale ?? 1;
@@ -212,23 +250,37 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const belly = spec.belly ?? 0;
   const chest = spec.chest ?? 0;
   const shoulders = spec.shoulders ?? 1.06;
+  const waist = spec.waist ?? 1;
+  const chestWidth = spec.chestWidth ?? 1;
+  const pecs = spec.pecs ?? 0;
+  const hipsK = spec.hips ?? 1;
+  const neckK = spec.neck ?? 1;
+  const jaw = spec.jaw ?? 1;
   const rest = T.joints;
+  const lm = T.landmarks;
   const n = T.vertexCount;
 
   // 1. Reshape in template space: limbs thicker or thinner about their bone
-  //    axes, the torso wider and the belly swelling forward, the head scaled
-  //    about its joint.
+  //    axes; the torso wider, pinched at the waist, broadened across the ribs,
+  //    the belly swelling forward and the chest pushed out; the pelvis
+  //    narrowed; the head scaled about its joint and the jaw tapered.
   const pos = new Float32Array(T.positions);
   const limbK = 1 + (bulk - 1) * 1.0;
   const torsoK = 1 + (bulk - 1) * 0.6;
   const navelY = rest.spine.y + 0.1;
+  const waistY = rest.spine.y + 0.16;
+  const ribY = rest.shoulderL.y - 0.09;
+  const breastY = lm.chestFront.y;
+  const pecY = breastY + 0.02;
+  const mouthY = lm.mouth.y;
   const v = new THREE.Vector3();
   const d = new THREE.Vector3();
   const tmp = new THREE.Vector3();
   const axis = new THREE.Vector3();
   const proj = new THREE.Vector3();
-  const breastY = T.landmarks.chestFront.y;
-  const reshape = limbK !== 1 || torsoK !== 1 || belly !== 0 || headK !== 1 || chest !== 1;
+  /** Width factors of the torso by height, shared with the armour profile below. */
+  const torsoWidthAt = (y: number): number => 1 + (waist - 1) * gauss(y - waistY, 0.075) + (chestWidth - 1) * gauss(y - ribY, 0.09);
+  const reshape = limbK !== 1 || torsoK !== 1 || belly !== 0 || headK !== 1 || chest !== 1 || waist !== 1 || chestWidth !== 1 || pecs !== 0 || hipsK !== 1 || jaw !== 1;
   if (reshape) {
     for (let i = 0; i < n; i++) {
       v.fromArray(pos, i * 3);
@@ -245,20 +297,38 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
           proj.copy(a).addScaledVector(axis, t);
           d.addScaledVector(tmp.copy(v).sub(proj), (limbK - 1) * w);
         } else if (j === 'spine' || j === 'hips' || j === 'neck') {
-          const bell = Math.exp(-((v.y - navelY) ** 2) / (2 * 0.1 * 0.1));
+          const bell = gauss(v.y - navelY, 0.1);
           const front = v.z > rest.spine.z ? 1 : 0.2;
-          const kx = torsoK + belly * 0.12 * bell;
-          const kz = torsoK + belly * 0.5 * bell * front;
+          const wBell = gauss(v.y - waistY, 0.075);
+          const hBell = j === 'hips' ? gauss(v.y - rest.hips.y, 0.12) : 0;
+          const kx = torsoWidthAt(v.y) + (torsoK - 1) + belly * 0.12 * bell + (hipsK - 1) * hBell;
+          const kz = torsoK + belly * 0.5 * bell * front + (waist - 1) * 0.6 * wBell;
           d.x += v.x * (kx - 1) * w;
           d.z += (v.z - rest.spine.z) * (kz - 1) * w;
-          if (chest < 1 && v.z > rest.spine.z + 0.05) {
-            // Press the base mesh's breasts back toward the ribcage.
-            const bx = Math.exp(-((Math.abs(v.x) - 0.072) ** 2) / (2 * 0.045 * 0.045));
-            const by = Math.exp(-((v.y - breastY) ** 2) / (2 * 0.05 * 0.05));
-            d.z -= 0.034 * (1 - chest) * bx * by * w;
+          if (v.z > rest.spine.z + 0.05) {
+            if (chest < 1) {
+              // Press the base mesh's breasts back toward the ribcage.
+              const bx = gauss(Math.abs(v.x) - 0.072, 0.045);
+              const by = gauss(v.y - breastY, 0.05);
+              d.z -= 0.034 * (1 - chest) * bx * by * w;
+            }
+            if (pecs > 0) {
+              // Pectorals: a broad, flat plate from the sternum out to the
+              // armpit, fading slowly up toward the collarbone and ending in
+              // a crisper edge underneath.
+              const ax = Math.abs(v.x);
+              const px = smooth(ax, 0.012, 0.04) * (1 - smooth(ax, 0.095, 0.135));
+              const dy = v.y - pecY;
+              const py = dy > 0 ? gauss(dy, 0.055) : gauss(dy, 0.028);
+              d.z += 0.011 * pecs * px * py * w;
+            }
           }
         } else if (j === 'head') {
           d.addScaledVector(tmp.copy(v).sub(rest.head), (headK - 1) * w);
+          if (jaw !== 1 && v.y < mouthY + 0.015 && v.z > rest.head.z + 0.03) {
+            const fall = Math.min(1, (mouthY + 0.015 - v.y) / 0.045);
+            d.x += v.x * (jaw - 1) * fall * w;
+          }
         }
       }
       v.add(d).toArray(pos, i * 3);
@@ -266,12 +336,16 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   }
 
   // 2. Proportions: longer or shorter limbs move the joints along their bones,
-  //    the flesh follows through the skin weights, and the whole body drops so
-  //    the feet stay on the ground.
+  //    the shoulders and thighs spread or close, the neck lengthens; the flesh
+  //    follows through the skin weights, and the whole body drops so the feet
+  //    stay on the ground.
   const posed = {} as Record<JointName, THREE.Vector3>;
   for (const j of JOINTS) posed[j] = rest[j].clone();
   posed.shoulderL.x *= shoulders;
   posed.shoulderR.x *= shoulders;
+  posed.thighL.x *= hipsK;
+  posed.thighR.x *= hipsK;
+  posed.head.y += (neckK - 1) * (rest.head.y - rest.neck.y);
   const along = (from: JointName, to: JointName, k: number): void => {
     posed[to] = posed[from].clone().add(tmp.copy(rest[to]).sub(rest[from]).multiplyScalar(k));
   };
@@ -302,7 +376,10 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     }
   }
 
-  // 3. Scale to the character's height.
+  // 3. Scale to the character's height, measured after the reshape so long
+  //    legs or a long neck never make a figure taller than it was asked to be.
+  const standing = posed.head.y + (lm.headTop.y - rest.head.y) * headK;
+  const s = spec.height / standing;
   for (let i = 0; i < pos.length; i++) pos[i] *= s;
   for (const j of JOINTS) posed[j].multiplyScalar(s);
   /** A landmark on the head, in the head bone's local space (scaled with the head). */
@@ -357,7 +434,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   // 5. Eyes: real eyeballs behind the lids.
   const eyeR = 0.0122 * s * headK;
   const eyeGeo = new THREE.SphereGeometry(eyeR, 18, 12);
-  for (const l of [T.landmarks.eyeL, T.landmarks.eyeR]) {
+  for (const l of [lm.eyeL, lm.eyeR]) {
     const eye = new THREE.Mesh(eyeGeo, eyeMaterial(look.eyes, look.goblin));
     eye.position.copy(onHead(l));
     eye.castShadow = false;
@@ -365,9 +442,8 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   }
 
   // 6. Measurements for equipment, in the rig's units.
-  const lm = T.landmarks;
   const dist = (a: JointName, b: JointName): number => posed[a].distanceTo(posed[b]);
-  const chestBands = T.torsoProfile.filter(([r]) => r > 0.1);
+  const chestBands = T.torsoProfile.filter(([r]) => r > 0.1).map(([r, y]) => [r * torsoWidthAt(y + rest.spine.y), y] as const);
   const chestR = Math.max(...chestBands.map(([r]) => r)) * s * torsoK;
   const waistR = Math.min(...chestBands.map(([r]) => r)) * s * torsoK;
   const dims: RigDims = {

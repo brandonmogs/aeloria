@@ -99,6 +99,13 @@ export interface Sockets {
   handR: THREE.Object3D;
 }
 
+/**
+ * Resting postures layered under every clip: the goblin's wide-legged
+ * brawler crouch, or the hero's easy, chest-out stance from a Lineage 2
+ * character screen.
+ */
+export type Stance = 'brawler' | 'hero';
+
 export interface Rig {
   group: THREE.Group;
   joints: Record<JointName, THREE.Object3D>;
@@ -109,7 +116,7 @@ export interface Rig {
   dims: RigDims;
   kind: 'humanoid' | 'rat';
   /** A resting posture the animator layers under every clip. */
-  stance?: 'brawler';
+  stance?: Stance;
 }
 
 export interface RigDims {
@@ -812,6 +819,7 @@ export class Animator {
     }
     blendInto(base, cycle, this.gait);
     if (rig.stance === 'brawler') brawlerStance(base, this.gait);
+    else if (rig.stance === 'hero') heroStance(base, this.gait);
 
     // Action layer.
     if (this.clip) {
@@ -896,6 +904,29 @@ function brawlerStance(out: Pose, gait: number): void {
   add('elbowL', -0.9);
   add('elbowR', -0.9);
   out.hipsY -= 0.1 * k;
+}
+
+/**
+ * The hero's stance: feet a little apart with the toes turned out, chest
+ * lifted and chin up, arms held just clear of the body with an easy bend at
+ * the elbow. It fades out as the gait takes over so walking stays natural.
+ */
+function heroStance(out: Pose, gait: number): void {
+  const k = 1 - gait * 0.75;
+  const add = (j: JointName, x: number, y = 0, z = 0): void => {
+    const i = J[j] * 3;
+    out.rot[i] += x * k;
+    out.rot[i + 1] += y * k;
+    out.rot[i + 2] += z * k;
+  };
+  add('thighL', 0, 0.1, 0.035);
+  add('thighR', 0, -0.1, -0.035);
+  add('spine', -0.05);
+  add('neck', 0.01);
+  add('shoulderL', 0.02, 0, -0.09);
+  add('shoulderR', 0.02, 0, 0.09);
+  add('elbowL', -0.1, 0, 0.04);
+  add('elbowR', -0.1, 0, -0.04);
 }
 
 /** out = out * (1 - w) + b * w, for every channel. */
