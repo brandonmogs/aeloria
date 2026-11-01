@@ -8,8 +8,9 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GRADE_SHADER, SUN_DIRECTION } from '../../render/Renderer';
 import { Animator, Rig } from '../../render/characters';
-import { HERO_BUILD, HumanoidSpec, buildHumanoid } from '../../render/human';
+import { HERO_BUILD, HumanoidSpec, bodyFor, buildHumanoid } from '../../render/human';
 import { Outfit, billowCape, dressRig } from '../../render/outfit';
+import { raceExtras } from '../../render/raceGear';
 import { characterStyle, setRimDirection, styleCharacter } from '../../render/characterStyle';
 import { AnimationName, Framing, LabConfig, LightingPreset, Locomotion, RACES } from './config';
 
@@ -259,10 +260,12 @@ export class CharacterLab {
     const spec: HumanoidSpec = {
       ...HERO_BUILD,
       ...race.build[cfg.sex],
+      body: bodyFor(cfg.race, cfg.sex),
       height: cfg.height,
       hair: cfg.hair,
       bracers: true,
       palette: { skin: cfg.skin, hair: cfg.hairColor, tunic: cfg.tunic, trouser: cfg.trouser, boots: 0x3b2a1c, eyes: cfg.eyes },
+      extras: raceExtras(cfg.race, cfg.sex, cfg.hairColor),
     };
     const rig = buildHumanoid(spec);
     const outfit = dressRig(rig, cfg.equipment);

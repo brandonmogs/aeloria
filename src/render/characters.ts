@@ -160,6 +160,8 @@ export interface RigDims {
     chinZ: number;
     noseTip: THREE.Vector3;
     mouth: THREE.Vector3;
+    /** Half the mouth's width. */
+    mouthHalf: number;
     front: number;
     back: number;
     earL: THREE.Vector3;

@@ -67,6 +67,17 @@ export interface TemplateMesh {
 
 export type TemplateSource = 'legacy' | 'glb';
 
+export type Race = 'human' | 'elf' | 'darkelf' | 'orc' | 'dwarf';
+export type Sex = 'male' | 'female';
+/** A body the pipeline writes (`public/models/characters/<id>.glb`), or the legacy json/bin pair. */
+export type BodyId = 'legacy' | 'human_m' | 'human_f' | 'elf_m' | 'elf_f' | 'orc_m' | 'orc_f' | 'dwarf_m' | 'dwarf_f';
+export const BODY_IDS: readonly BodyId[] = ['human_m', 'human_f', 'elf_m', 'elf_f', 'orc_m', 'orc_f', 'dwarf_m', 'dwarf_f'];
+/** The body a race and sex are built on; dark elves share the elf body and differ in materials. */
+export function bodyFor(race: Race, sex: Sex): BodyId {
+  const base = race === 'darkelf' ? 'elf' : race;
+  return `${base}_${sex === 'female' ? 'f' : 'm'}` as BodyId;
+}
+
 /**
  * The body everyone is built from: the finest mesh (also `lods[0]`), the
  * skeleton it is skinned to, and the measurements taken from it. The legacy
@@ -97,18 +108,45 @@ export interface HumanTemplate extends TemplateMesh {
   lods: TemplateMesh[];
 }
 
-let template: HumanTemplate | null = null;
+const bodies = new Map<BodyId, HumanTemplate>();
+const loading = new Map<BodyId, Promise<HumanTemplate>>();
+let defaultBody: BodyId | null = null;
 
 const v3 = (a: number[]): THREE.Vector3 => new THREE.Vector3(a[0], a[1], a[2]);
 
+/** Fetch one body once; later calls share the same template. */
+export function loadBody(id: BodyId, base = '/models/'): Promise<HumanTemplate> {
+  let p = loading.get(id);
+  if (!p) {
+    p = (id === 'legacy' ? loadLegacyTemplate(base) : loadGlbTemplate(`${base}characters/${id}.glb`)).then((t) => {
+      bodies.set(id, t);
+      return t;
+    });
+    loading.set(id, p);
+  }
+  return p;
+}
+
+/** A loaded body; `loadBody` it first. */
+export function body(id: BodyId): HumanTemplate {
+  const t = bodies.get(id);
+  if (!t) throw new Error(`body ${id} not loaded: await loadBody('${id}') first`);
+  return t;
+}
+
 /**
- * Fetch the template once, before the world is built: the legacy json/bin
- * pair, or the GLB the character pipeline writes (`?chars=new` in the game).
+ * Fetch the bodies before the world is built: the legacy json/bin pair, or
+ * every body the character pipeline writes (`?chars=new` in the game), with
+ * the human man as the default for a spec that names no body.
  */
 export async function loadHumanTemplate(source: TemplateSource = 'legacy', base = '/models/'): Promise<HumanTemplate> {
-  if (template) return template;
-  template = source === 'glb' ? await loadGlbTemplate(`${base}characters/human.glb`) : await loadLegacyTemplate(base);
-  return template;
+  if (source === 'legacy') {
+    defaultBody = 'legacy';
+    return loadBody('legacy', base);
+  }
+  defaultBody = 'human_m';
+  const all = await Promise.all(BODY_IDS.map((id) => loadBody(id, base)));
+  return all[0];
 }
 
 function templateMesh(positions: Float32Array, normals: Float32Array, uvs: Float32Array, skinIndex: Uint16Array, skinWeight: Float32Array, indices: Uint32Array): TemplateMesh {
@@ -291,9 +329,10 @@ async function loadGlbTemplate(url: string): Promise<HumanTemplate> {
   };
 }
 
+/** The default body: the legacy template, or the human man. */
 export function humanTemplate(): HumanTemplate {
-  if (!template) throw new Error('human template not loaded: await loadHumanTemplate() first');
-  return template;
+  if (!defaultBody) throw new Error('bodies not loaded: await loadHumanTemplate() first');
+  return body(defaultBody);
 }
 
 // --- Specs --------------------------------------------------------------------------
@@ -311,6 +350,8 @@ export interface HumanoidPalette {
 export interface HumanoidSpec {
   /** Standing height in tiles (about metres). */
   height: number;
+  /** The base body (race and sex); the default body when omitted. */
+  body?: BodyId;
   palette: HumanoidPalette;
   /** Head size relative to a realistic head (0.92 makes a figure eight heads tall). */
   headScale?: number;
@@ -321,7 +362,7 @@ export interface HumanoidSpec {
   bulk?: number;
   /** 0 = flat stomach, 1 = pot belly. */
   belly?: number;
-  /** Chest fullness: 0 flattens the base mesh's slight breasts (the default), 1 keeps them. */
+  /** Chest fullness: 0 flattens the legacy base mesh's slight breasts (its default), 1 keeps them (the default on the pipeline's sexed bodies). */
   chest?: number;
   /** Shoulder width relative to the template (the default 1.06 broadens the base mesh a little). */
   shoulders?: number;
@@ -456,14 +497,14 @@ const smooth = (x: number, a: number, b: number): number => {
 
 /** A person built from the human template, reshaped and dressed for `spec`. */
 export function buildHumanoid(spec: HumanoidSpec): Rig {
-  const T = humanTemplate();
+  const T = spec.body ? body(spec.body) : humanTemplate();
   const p = spec.palette;
   const headK = spec.headScale ?? 1;
   const armK = spec.armScale ?? 1;
   const legK = spec.legScale ?? 1;
   const bulk = spec.bulk ?? 1;
   const belly = spec.belly ?? 0;
-  const chest = spec.chest ?? 0;
+  const chest = spec.chest ?? (T.source === 'legacy' ? 0 : 1);
   const shoulders = spec.shoulders ?? 1.06;
   const waist = spec.waist ?? 1;
   const chestWidth = spec.chestWidth ?? 1;
@@ -706,6 +747,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
       chinZ: onHead(lm.chin).z,
       noseTip: onHead(lm.noseTip),
       mouth: onHead(lm.mouth),
+      mouthHalf: lm.mouthHalfWidth * headK * s,
       front: (lm.skullFront - rest.head.z) * headK * s,
       back: (lm.skullBack - rest.head.z) * headK * s,
       earL,

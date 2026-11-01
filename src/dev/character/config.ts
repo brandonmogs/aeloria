@@ -2,18 +2,17 @@ import { EquipSlot } from '../../sim/Inventory';
 import { allItemIds, itemDef } from '../../sim/items';
 import { ACTION_DURATION, ActionKind } from '../../render/characters';
 import { HairStyle } from '../../render/hair';
-import { HumanoidSpec } from '../../render/human';
+import { HumanoidSpec, Race, Sex } from '../../render/human';
 import { Equipment, emptyEquipment } from '../../render/outfit';
 
 /**
- * What the character lab can show: races and sexes as builds on the shared
- * body, the equipment per slot, outfit sets, animations, lighting and the
- * style toggles, all round-tripped through the page's query string so a
- * look can be linked to or screenshotted headlessly.
+ * What the character lab can show: races and sexes (a body from the pipeline
+ * plus proportion knobs), the equipment per slot, outfit sets, animations,
+ * lighting and the style toggles, all round-tripped through the page's query
+ * string so a look can be linked to or screenshotted headlessly.
  */
 
-export type Race = 'human' | 'elf' | 'darkelf' | 'orc' | 'dwarf';
-export type Sex = 'male' | 'female';
+export type { Race, Sex };
 export type Locomotion = 'idle' | 'walk' | 'run';
 export type AnimationName = Locomotion | ActionKind;
 export type LightingPreset = 'sun' | 'golden' | 'overcast' | 'moonlit' | 'studio';
@@ -82,43 +81,44 @@ export interface RaceDef {
   eyes: number;
 }
 
-/** A woman's frame on the shared body: narrower shoulders, fuller hips, a longer neck and a softer jaw. */
+/** The heroic treatment of the woman's body: the frame is baked in, this keeps the waist and jaw of a character screen. */
 const FEMALE: Partial<HumanoidSpec> = {
-  shoulders: 1.0,
-  hips: 1.1,
-  waist: 0.78,
-  chestWidth: 0.98,
-  pecs: 0.15,
-  chest: 1,
-  jaw: 0.8,
-  neck: 1.08,
-  bulk: 0.9,
-  armScale: 1.0,
-  legScale: 1.08,
+  shoulders: 1.04,
+  hips: 1.02,
+  waist: 0.84,
+  chestWidth: 1.02,
+  pecs: 0,
+  jaw: 0.88,
+  neck: 1.06,
+  bulk: 0.95,
+  armScale: 1.02,
+  legScale: 1.06,
 };
 
 const ELF_MALE: Partial<HumanoidSpec> = {
   headScale: 0.9,
   legScale: 1.1,
-  armScale: 1.06,
+  armScale: 1.05,
   bulk: 0.9,
-  shoulders: 1.08,
-  waist: 0.82,
-  chestWidth: 1.04,
-  jaw: 0.84,
-  neck: 1.1,
+  shoulders: 1.04,
+  waist: 0.86,
+  chestWidth: 1.02,
+  pecs: 0.3,
+  jaw: 0.88,
+  neck: 1.14,
 };
-const ELF_FEMALE: Partial<HumanoidSpec> = { ...FEMALE, headScale: 0.9, legScale: 1.12, bulk: 0.84, waist: 0.76, jaw: 0.78, neck: 1.12 };
+const ELF_FEMALE: Partial<HumanoidSpec> = { ...FEMALE, headScale: 0.9, legScale: 1.1, bulk: 0.88, waist: 0.8, jaw: 0.85, neck: 1.1 };
 
 /**
- * Races as builds of the one shared body until milestone 3 gives each its
- * own base mesh (ears, tusks, brow ridges): tall and slender elves, a broad
- * orc frame, a short, stocky dwarf.
+ * Races: a body from the pipeline (sex, build and face baked in: pointed
+ * ears, a heavy jaw, a dwarf's short frame) plus proportion knobs on top of
+ * HERO_BUILD, and the default colours of a character screen.
  */
 export const RACES: Record<Race, RaceDef> = {
   human: {
     label: 'Human',
-    build: { male: {}, female: FEMALE },
+    // The man's body already carries a man's frame, so the heroic knobs ease off; the neck of the base target is short.
+    build: { male: { bulk: 1.0, shoulders: 1.08, chestWidth: 1.06, waist: 0.9, pecs: 0.5, neck: 1.12, jaw: 0.94 }, female: FEMALE },
     height: { male: 1.84, female: 1.74 },
     hairStyle: { male: 'long', female: 'long' },
     skin: 0xe3b48d,
@@ -146,8 +146,8 @@ export const RACES: Record<Race, RaceDef> = {
   orc: {
     label: 'Orc',
     build: {
-      male: { bulk: 1.35, shoulders: 1.3, waist: 1.06, chestWidth: 1.24, hips: 1.04, jaw: 1.18, neck: 0.88, headScale: 1.0, armScale: 1.08 },
-      female: { ...FEMALE, bulk: 1.15, shoulders: 1.12, chestWidth: 1.08, jaw: 1.0, neck: 0.95 },
+      male: { bulk: 1.12, shoulders: 1.16, waist: 1.02, chestWidth: 1.12, hips: 1.02, pecs: 0.8, jaw: 1.08, neck: 0.95, headScale: 0.98, armScale: 1.08 },
+      female: { ...FEMALE, bulk: 1.08, shoulders: 1.1, chestWidth: 1.06, jaw: 0.98, neck: 0.96 },
     },
     height: { male: 1.98, female: 1.88 },
     hairStyle: { male: 'short', female: 'long' },
@@ -158,8 +158,8 @@ export const RACES: Record<Race, RaceDef> = {
   dwarf: {
     label: 'Dwarf',
     build: {
-      male: { headScale: 1.1, legScale: 0.78, armScale: 0.92, bulk: 1.4, shoulders: 1.26, waist: 1.14, chestWidth: 1.26, hips: 1.1, jaw: 1.12, neck: 0.85 },
-      female: { ...FEMALE, headScale: 1.08, legScale: 0.8, armScale: 0.92, bulk: 1.2, shoulders: 1.08, waist: 1.0, chestWidth: 1.1, hips: 1.16, jaw: 0.95, neck: 0.88 },
+      male: { headScale: 1.06, legScale: 0.95, armScale: 0.96, bulk: 1.18, shoulders: 1.14, waist: 1.1, chestWidth: 1.14, hips: 1.06, pecs: 0.6, jaw: 1.06, neck: 0.92 },
+      female: { ...FEMALE, headScale: 1.04, legScale: 0.95, armScale: 0.96, bulk: 1.1, shoulders: 1.06, waist: 1.0, chestWidth: 1.08, hips: 1.1, jaw: 0.95, neck: 0.9 },
     },
     height: { male: 1.42, female: 1.36 },
     hairStyle: { male: 'long', female: 'long' },

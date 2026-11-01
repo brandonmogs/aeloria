@@ -41,10 +41,12 @@ zoom with the wheel. `window.__characterLab` exposes the lab, its config and
 
 Two body templates exist; one is chosen when the page loads:
 
-- **The GLB template** (`public/models/characters/human.glb`, written by
-  `npm run build:characters`, see the pipeline below): the default in the
-  preview page, and in the game behind `?chars=new`. It carries the shared
-  humanoid skeleton and the body at three levels of detail.
+- **The pipeline's bodies** (`public/models/characters/<race>_<m|f>.glb`,
+  written by `npm run build:characters`, see the pipeline below): the default
+  in the preview page, and in the game behind `?chars=new`. Each carries the
+  shared humanoid skeleton and one body at three levels of detail; a spec
+  names its body (`body: bodyFor(race, sex)`) and the human man is the
+  default.
 - **The legacy template** (`public/models/human.{json,bin}` from
   `scripts/build-human.mjs`): the game's default until the new path is
   integrated; `?chars=legacy` shows it in the preview page.
@@ -65,9 +67,11 @@ to Hips, spine to Spine, shoulderL to LeftArm, and so on); every other bone
 an owner joint, so the reshape, the painters and the clips carry over
 unchanged.
 
-Races and sexes are, for now, presets of the reshape knobs
-(`src/dev/character/config.ts`); milestone 3 replaces them with base meshes
-per race on the shared skeleton.
+A race is a body from the pipeline (its sex, build and face baked in) plus
+proportion knobs on top of `HERO_BUILD` and default colours
+(`RACES` in `src/dev/character/config.ts`), and what the body cannot carry
+(`src/render/raceGear.ts`): an orc's tusks, a dwarf's beard. Dark elves share
+the elf body and differ only in skin, hair and eye colour.
 
 The style pass (`src/render/characterStyle.ts`) patches the PBR materials
 through `onBeforeCompile`: soft wrap diffuse on non-metals, a specular boost
@@ -78,11 +82,16 @@ values are shared uniforms; nothing is cloned per character.
 ## The asset pipeline
 
 `scripts/build-characters.mjs` is the source of truth for the character
-bodies. It downloads MakeHuman's CC0 base mesh, default skeleton and painted
-skin weights (cached under `scripts/.cache/`) and writes
-`public/models/characters/human.glb`:
+bodies. It downloads MakeHuman's CC0 base mesh, morph targets, default
+skeleton and painted skin weights (cached under `scripts/.cache/`) and writes
+one GLB per body in `public/models/characters/`:
 
-1. keeps the `body` group of the mesh (no helpers, joint cubes or teeth);
+1. layers the body's targets on the base mesh (`BODIES` in the script: a sex
+   is the three ethnic young-adult targets blended equally plus MakeHuman's
+   "ideal proportions"; races add build targets such as max muscle or min
+   height, and face targets such as pointed ears or a heavy jaw) and keeps
+   the `body` group (no helpers, joint cubes or teeth). The joint cubes move
+   with the targets, so the skeleton follows the shape;
 2. folds MakeHuman's 163 bones into the shared skeleton: 22 body bones with
    the standard humanoid names (Hips, Spine, Spine1, Spine2, Neck, Head,
    Left/RightShoulder, Arm, ForeArm, Hand, UpLeg, Leg, Foot, ToeBase) plus
@@ -112,11 +121,19 @@ scene-graph walk.
 
 ### Adding a race
 
-Milestone 3 gives each race and sex its own base mesh. A race will be either
-a set of reshape targets or a replacement body with the same UV layout,
-skinned to the same skeleton; `build-characters.mjs` then writes one GLB per
-race and `loadHumanTemplate` picks the file by race. Until then, races are
-presets in `src/dev/character/config.ts`.
+1. Add a body per sex to `BODIES` in `scripts/build-characters.mjs`: start
+   from `sexed('male')` / `sexed('female')` and layer targets from
+   MakeHuman's `data/targets` tree (the script fetches them by name; the
+   GitHub listing of a group such as `nose` or `torso` shows what exists).
+   Run `npm run build:characters <id>` and read the printed measurements.
+2. Add the id to `BodyId` and `BODY_IDS` in `src/render/human.ts` and teach
+   `bodyFor` which race uses it.
+3. Add the race to `Race` (same file), its label, proportion knobs, heights
+   and colours to `RACES` in `src/dev/character/config.ts`, and anything the
+   body cannot carry (tusks, a beard) to `raceExtras` in
+   `src/render/raceGear.ts`.
+4. Add a look to `scripts/character-shot.mjs` so the lab's smoke test
+   renders it, and check it under each lighting preset.
 
 ## Where Blender would slot in
 
