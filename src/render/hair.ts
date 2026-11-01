@@ -85,7 +85,7 @@ function paintStrands(ctx: CanvasRenderingContext2D, W: number, H: number, count
   for (let i = 0; i < count; i++) {
     let x = r() * W;
     const width = minWidth + r() * 2.4;
-    const lum = Math.round(255 * (0.55 + 0.6 * r()));
+    const lum = Math.round(255 * (0.62 + 0.5 * r()));
     ctx.lineWidth = width;
     ctx.strokeStyle = `rgb(${lum},${lum},${lum})`;
     const step = 24;
@@ -115,7 +115,7 @@ function strandTextures(): StrandTextures {
   albedoCanvas.width = W;
   albedoCanvas.height = H;
   const actx = albedoCanvas.getContext('2d')!;
-  actx.fillStyle = 'rgb(165,165,165)';
+  actx.fillStyle = 'rgb(200,200,200)';
   actx.fillRect(0, 0, W, H);
   paintStrands(actx, W, H, 220, 7, 0.8);
 
@@ -460,7 +460,7 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
       const side = a0 < parting ? -1 : 1;
       const away = Math.abs(a0 - parting);
       const grown = smooth(away, 0.04, 0.6) * (0.9 + 0.2 * rand());
-      const endY = h.browY + hr * (long ? 0.5 - 0.58 * grown : 0.62 - 0.36 * grown);
+      const endY = h.browY + hr * (long ? 0.5 - 0.46 * grown : 0.62 - 0.34 * grown);
       const eTop = rimElevation(scalp, a0, hairlineY(a0, h, style)) - 0.12;
       const column: number[] = [];
       for (let k = 0; k <= FK; k++) {
@@ -502,10 +502,10 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
   // Side locks in front of the ears, down to the jaw.
   if (style === 'long') {
     for (const sign of [1, -1]) {
-      for (const t of [1.15, 1.35]) {
+      for (const [t, len] of [[1.12, 1.5], [1.32, 1.15]] as const) {
         const a0 = sign * t;
         const eRim = rimElevation(scalp, a0, hairlineY(a0, h, style));
-        ribbon(cards, curve(a0, eRim - 0.08, 0.08 * hr, sign * 0.1 * hr, 1.9 * hr * (0.9 + 0.2 * rand()), 0.18 * hr), C, 0.45 * hr, 0.2 * hr, 0.85, rand() * 0.5);
+        ribbon(cards, curve(a0, eRim - 0.08, 0.08 * hr, sign * 0.08 * hr, len * hr * (0.9 + 0.2 * rand()), 0.2 * hr), C, 0.38 * hr, 0.14 * hr, 0.85, rand() * 0.5);
       }
     }
   }

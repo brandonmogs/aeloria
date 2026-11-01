@@ -32,6 +32,8 @@ export interface LookSpec {
   trousers: 'full' | 'ragged' | 'none';
   shirt: boolean;
   booted: boolean;
+  /** Leather bracers on bare forearms. */
+  bracers: boolean;
   goblin: boolean;
 }
 
@@ -195,32 +197,32 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
   const trouser = rgb(look.trouser);
   const boots = rgb(look.boots);
   const leather = rgb(0x3a2a1c);
+  const strap = rgb(0x2a1d12);
   const buckle = rgb(0xc9a85a);
-  const lip = mix(skin, rgb(look.goblin ? 0x3a3020 : 0x8a3a3a), 0.55);
+  const piping = rgb(0xb8963f);
+  const undershirt = rgb(0xe9e1cc);
+  const lip = mix(skin, rgb(look.goblin ? 0x3a3020 : 0x8a3a3a), 0.5);
   const dark = rgb(0x1a1210);
+  const white = rgb(0xffffff);
+  const smooth = (v: number, a: number, b: number): number => {
+    const t = clamp01((v - a) / (b - a));
+    return t * t * (3 - 2 * t);
+  };
   // Face landmarks in head-local metres.
   const H = J.head;
   const eye = { x: Math.abs(lm.eyeL.x - H.x), y: lm.eyeL.y - H.y };
   const nose = { y: lm.noseTip.y - H.y, z: lm.noseTip.z - H.z };
   const mouth = { y: lm.mouth.y - H.y, z: lm.mouth.z - H.z, half: lm.mouthHalfWidth };
-  const brows = lm.brow.map((b) => ({ x: b.x - H.x, y: b.y - H.y }));
   const hairFrame = { hr: lm.skullHalfWidth, browY: lm.brow[1].y - H.y, earY: lm.earL.y - H.y };
   const skullCz = (lm.skullFront + lm.skullBack) / 2 - H.z;
-  const browAt = (ax: number): number | null => {
-    if (ax < brows[0].x - 0.004 || ax > brows[brows.length - 1].x + 0.01) return null;
-    for (let i = 0; i + 1 < brows.length; i++) {
-      const p0 = brows[i];
-      const p1 = brows[i + 1];
-      if (ax >= p0.x - 0.004 && ax <= p1.x + 0.01) {
-        const t = clamp01((ax - p0.x) / Math.max(1e-4, p1.x - p0.x));
-        return p0.y + (p1.y - p0.y) * t;
-      }
-    }
-    return null;
-  };
   // Clothing lines, relative to the joints that own the surrounding triangles.
   const beltY = J.spine.y + 0.06;
   const neckSpine = J.neck.y - J.spine.y;
+  const vTop = neckSpine + 0.02;
+  const vDepth = 0.13;
+  const tabardHem = beltY - 0.11;
+  const sleeveEnd = -0.16;
+  const cuff = J.handL.y - J.elbowL.y + 0.012;
   const hemKnee = J.kneeL.y - J.thighL.y + 0.04;
   const bootTopKnee = J.footL.y - J.kneeL.y + 0.19;
   const soleFoot = -J.footL.y + 0.018;
@@ -257,12 +259,12 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
     switch (name) {
       case 'head': {
         // Hair over the crown, dropping to the nape at the back, leaving the ears and face.
+        const ear = ax > 0.058 && y < eye.y + 0.028 && z > -0.02 && z < 0.06;
         if (look.hairStyle !== 'bald') {
           // The painted scalp under the hair geometry (see hair.ts) follows
           // the cap's own hairline, a touch above it, so the cap's edge is
           // what shows, never a painted one.
-          const hairline = hairlineY(Math.atan2(x, z - skullCz), hairFrame, look.hairStyle) + 0.004;
-          const ear = ax > 0.058 && y < eye.y + 0.028 && z > -0.02 && z < 0.06;
+          const hairline = hairlineY(Math.atan2(x, z - skullCz), hairFrame, look.hairStyle) + 0.01;
           if (y > hairline && !ear) {
             col = hair;
             rough = 0.62;
@@ -270,33 +272,63 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
             break;
           }
         }
+        rough = 0.5;
+        if (ear) {
+          col = mix(col, rgb(0xd08a6a), 0.1);
+          break;
+        }
         if (z > 0.06) {
-          // Brows.
-          const by = browAt(ax);
-          if (by !== null && Math.abs(y - by) < 0.005 && ax > 0.006) {
-            col = mix(skin, scale(hair, 0.7), 0.85);
-            rough = 0.6;
-            break;
+          const dy = y - eye.y;
+          const dxe = ax - eye.x;
+          // The forehead and the nose carry a little more sheen than the cheeks.
+          if ((ax < 0.014 && y > nose.y - 0.01) || (y > eye.y + 0.02 && ax < 0.045)) rough = 0.44;
+          // Brows: thin and arched, peaking past the middle and tapering into a tail.
+          if (ax > 0.009 && ax < 0.057) {
+            const t = (ax - 0.009) / 0.048;
+            const arch = eye.y + 0.029 + 0.005 * Math.sin(Math.PI * Math.min(1, t * 1.15));
+            const half = (0.0028 + 0.0008 * Math.sin(Math.PI * t)) * (1 - 0.55 * smooth(t, 0.6, 1));
+            const d = Math.abs(y - arch) / half;
+            if (d < 1) col = mix(col, scale(hair, 0.6), (look.goblin ? 0.6 : 0.85) * (1 - smooth(d, 0.55, 1)));
           }
-          // Eye sockets and the lash line.
-          const de = Math.hypot(ax - eye.x, y - eye.y);
-          if (de < 0.024) col = mix(col, scale(skin, 0.62), 0.3 * (1 - de / 0.024));
-          if (Math.abs(y - (eye.y + 0.008)) < 0.0015 && Math.abs(ax - eye.x) < 0.012) col = mix(col, dark, 0.6);
-          // Nostrils.
-          const dn = Math.hypot(ax - 0.0085, y - (nose.y - 0.014));
-          if (dn < 0.0045 && z > nose.z - 0.05) col = mix(col, scale(skin, 0.45), 0.7 * (1 - dn / 0.0045));
-          // Lips and the line between them.
-          if (ax < mouth.half * 0.66 && z > mouth.z - 0.05) {
-            const dy = y - mouth.y;
-            const edge = clamp01(1 - ax / (mouth.half * 0.66));
-            if (dy > -0.007 && dy < 0.0055) col = mix(col, lip, (dy > 0 ? 0.3 : 0.42) * (0.5 + 0.5 * edge));
-            if (Math.abs(dy) < 0.001) col = mix(col, dark, 0.35 * (0.4 + 0.6 * edge));
+          // Lids: a soft shadow in the crease above the eye, a lash line
+          // along the upper lid winging up at the outer corner, and a fainter
+          // line under the eye.
+          const de = Math.hypot(dxe, dy);
+          if (dy > 0.003 && dy < 0.017 && Math.abs(dxe) < 0.017) {
+            col = mix(col, scale(skin, 0.7), 0.16 * (1 - smooth(dy, 0.009, 0.017)) * (1 - smooth(Math.abs(dxe), 0.011, 0.017)));
+          }
+          if (de < 0.02 && dy < 0) col = mix(col, scale(skin, 0.75), 0.07 * (1 - de / 0.02));
+          const lashY = eye.y + 0.008 + 0.0025 * smooth(dxe, 0.006, 0.014);
+          if (Math.abs(y - lashY) < 0.0011 + 0.0004 * smooth(dxe, 0, 0.012) && dxe > -0.0135 && dxe < 0.015) col = mix(col, dark, 0.7);
+          if (Math.abs(dy + 0.0078) < 0.0006 && Math.abs(dxe) < 0.011) col = mix(col, dark, 0.3);
+          // Nose: the sides of the bridge fall into shade; the nostrils are dark.
+          const dny = y - nose.y;
+          if (dny > 0.004 && dny < 0.045 && ax > 0.004 && ax < 0.02 && z > nose.z - 0.05) {
+            col = mix(col, scale(skin, 0.78), 0.1 * smooth(ax, 0.004, 0.009) * (1 - smooth(ax, 0.012, 0.02)));
+          }
+          const dn = Math.hypot(ax - 0.009, y - (nose.y - 0.006));
+          if (dn < 0.0036 && z > nose.z - 0.035) col = mix(col, scale(skin, 0.45), 0.7 * (1 - dn / 0.0036));
+          // Lips: a thinner upper lip and a fuller lower one with a highlight,
+          // both tapering into the corners, split by a dark line.
+          const halfW = mouth.half * 0.6;
+          if (ax < halfW && z > mouth.z - 0.05) {
+            const dm = y - mouth.y;
+            const edge = clamp01(1 - (ax / halfW) * (ax / halfW));
+            const up = 0.0032 * (0.35 + 0.65 * edge);
+            const down = 0.0062 * (0.35 + 0.65 * edge);
+            if (dm > 0 && dm < up) col = mix(col, lip, 0.4 * (1 - smooth(dm / up, 0.7, 1)));
+            if (dm < 0 && dm > -down) {
+              col = mix(col, lip, 0.5 * (1 - smooth(-dm / down, 0.7, 1)));
+              const hl = (1 - smooth(Math.abs(dm + 0.0028), 0.0008, 0.0018)) * (1 - smooth(ax, 0.008, 0.016));
+              col = mix(col, white, 0.14 * hl);
+              rough = 0.38;
+            }
+            if (Math.abs(dm) < 0.0008) col = mix(col, dark, 0.4 * (0.4 + 0.6 * edge));
           }
           // Cheek warmth.
-          const dc = Math.hypot(ax - 0.05, y - (eye.y - 0.048));
-          if (dc < 0.035 && !look.goblin) col = mix(col, rgb(0xc86a5a), 0.14 * (1 - dc / 0.035));
+          const dc = Math.hypot(ax - 0.046, y - (eye.y - 0.04));
+          if (dc < 0.035 && !look.goblin) col = mix(col, rgb(0xc86a5a), 0.16 * (1 - dc / 0.035));
         }
-        rough = 0.5;
         break;
       }
       case 'neck':
@@ -305,22 +337,56 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
       case 'hips': {
         const yAbs = y + J[name].y;
         const ySpine = yAbs - J.spine.y;
-        const scoop = ySpine > neckSpine - 0.075 && z > 0.02 && ax < 0.08 - (neckSpine - ySpine) * 0.7;
-        if (Math.abs(yAbs - beltY) < 0.017) {
+        const front = z > 0.02;
+        const dBelt = yAbs - beltY;
+        // A V-neck down the chest over a laced undershirt, piped in gold.
+        const vT = (ySpine - (vTop - vDepth)) / vDepth;
+        const vHalf = 0.07 * vT;
+        if (Math.abs(dBelt) < 0.02) {
+          // A wide leather belt, stitched along its edges, with a framed buckle.
           col = leather;
           rough = 0.6;
           mottle = 0.12;
-          if (ax < 0.022 && z > 0.06 && Math.abs(yAbs - beltY) < 0.014) {
-            col = buckle;
-            rough = 0.35;
+          if (Math.abs(dBelt) > 0.016) col = mix(col, buckle, 0.18);
+          if (front && ax < 0.026 && Math.abs(dBelt) < 0.017) {
+            const frame = ax > 0.019 || Math.abs(dBelt) > 0.011 || (ax < 0.003 && Math.abs(dBelt) < 0.012);
+            col = frame ? buckle : strap;
+            rough = frame ? 0.35 : 0.6;
             mottle = 0.03;
           }
         } else if (yAbs > beltY) {
-          if (look.shirt && !scoop) {
+          if (look.shirt) {
             col = tunic;
-            rough = 0.92;
+            rough = 0.82;
             mottle = 0.14;
+            if (front && vT > 0 && ySpine < vTop + 0.03) {
+              if (ax < vHalf) {
+                // Inside the V: the undershirt, laced across three times.
+                col = undershirt;
+                rough = 0.9;
+                mottle = 0.08;
+                for (const lace of [0.035, 0.065, 0.095]) {
+                  if (Math.abs(ySpine - (vTop - lace)) < 0.0016 && ax < vHalf - 0.004) col = mix(col, strap, 0.75);
+                }
+              } else if (ax < vHalf + 0.006) {
+                col = piping;
+                rough = 0.5;
+                mottle = 0.05;
+              }
+            } else if (front && vT <= 0 && vT > -0.06 && ax < 0.006) {
+              col = piping;
+              rough = 0.5;
+              mottle = 0.05;
+            } else if (front && ax < 0.0015 && dBelt > 0.025) {
+              col = scale(tunic, 0.8);
+            }
           }
+        } else if (look.shirt && yAbs > tabardHem && ax < 0.105) {
+          // A short tabard below the belt, split at the hips, piped along its edges.
+          const edge = yAbs < tabardHem + 0.006 || ax > 0.099;
+          col = edge ? piping : scale(tunic, 0.88);
+          rough = edge ? 0.5 : 0.82;
+          mottle = edge ? 0.05 : 0.14;
         } else if (look.trousers !== 'none') {
           col = trouser;
           rough = 0.88;
@@ -331,17 +397,35 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
       case 'shoulderL':
       case 'shoulderR':
         if (look.shirt && look.sleeves !== 'none') {
-          col = tunic;
-          rough = 0.92;
-          mottle = 0.14;
+          if (look.sleeves === 'long' || y > sleeveEnd) {
+            col = tunic;
+            rough = 0.82;
+            mottle = 0.14;
+            if (look.sleeves === 'short' && y < sleeveEnd + 0.006) {
+              col = piping;
+              rough = 0.5;
+              mottle = 0.05;
+            }
+          }
         }
         break;
       case 'elbowL':
       case 'elbowR':
         if (look.shirt && look.sleeves === 'long') {
           col = tunic;
-          rough = 0.92;
+          rough = 0.82;
           mottle = 0.14;
+          if (y < cuff + 0.014 && y > cuff) {
+            col = piping;
+            rough = 0.5;
+            mottle = 0.05;
+          }
+        } else if (look.bracers && y < cuff + 0.12 && y > cuff - 0.004) {
+          // A leather bracer from the wrist up the forearm, strapped twice.
+          const d = y - cuff;
+          col = Math.abs(d - 0.03) < 0.004 || Math.abs(d - 0.09) < 0.004 ? strap : leather;
+          rough = 0.6;
+          mottle = 0.12;
         }
         break;
       case 'thighL':
@@ -357,8 +441,10 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
       case 'kneeL':
       case 'kneeR':
         if (look.booted && y < bootTopKnee) {
-          col = boots;
-          rough = 0.6;
+          // Boots to the knee, folded over at the top.
+          const d = bootTopKnee - y;
+          col = d < 0.035 ? scale(boots, 1.3) : d < 0.038 ? scale(boots, 0.6) : boots;
+          rough = d < 0.035 ? 0.55 : 0.6;
           mottle = 0.12;
         } else if (look.trousers === 'full') {
           col = trouser;

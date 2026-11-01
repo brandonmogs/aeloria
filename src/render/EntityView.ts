@@ -452,6 +452,7 @@ function rigFor(entity: Entity): Rig {
           shoulders: 1.18,
           waist: 0.9,
           hair: 'short',
+          bracers: true,
           palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a },
           extras: (rig) => rig.sockets.head.add(skullCap(rig, 0xb4b8bf)),
         });
@@ -464,6 +465,7 @@ function rigFor(entity: Entity): Rig {
           shoulders: 1.2,
           waist: 0.9,
           hair: 'short',
+          bracers: true,
           palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x8b2b1f, boots: 0x2a2a2a },
           extras: (rig) => {
             rig.sockets.head.add(skullCap(rig, 0xc9ccd2));
@@ -492,6 +494,7 @@ function rigFor(entity: Entity): Rig {
           shoulders: 1.2,
           waist: 0.92,
           hair: 'long',
+          bracers: true,
           palette: { skin: 0xd9a06c, hair: 0x8b5a2b, tunic: 0x6b8f3a, trouser: 0x5a4632, boots: 0x3b2a1c },
           extras: (rig) => {
             rig.sockets.head.add(beard(rig, 0x8b5a2b));
@@ -533,7 +536,8 @@ function rigFor(entity: Entity): Rig {
     ...HERO_BUILD,
     height: 1.84,
     hair: 'long',
-    palette: { skin: 0xe0ac79, hair: 0x4a2f16, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, eyes: 0x4f7fa8 },
+    bracers: true,
+    palette: { skin: 0xe3b48d, hair: 0x4a2f16, tunic: 0x3f7a4a, trouser: 0x4a4858, boots: 0x3b2a1c, eyes: 0x4f7fa8 },
   });
 }
 

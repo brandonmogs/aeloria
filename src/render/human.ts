@@ -198,6 +198,8 @@ export interface HumanoidSpec {
   trousers?: 'full' | 'ragged' | 'none';
   shirt?: boolean;
   booted?: boolean;
+  /** Leather bracers on bare forearms. */
+  bracers?: boolean;
   /** A resting posture the animator layers under every clip. */
   stance?: Stance;
   /** Optional decorations added to the head or body sockets. */
@@ -486,6 +488,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     trousers: spec.trousers ?? (spec.goblin ? 'ragged' : 'full'),
     shirt: spec.shirt ?? !spec.goblin,
     booted: spec.booted ?? !spec.goblin,
+    bracers: spec.bracers ?? false,
     goblin: !!spec.goblin,
   };
   const mesh = new THREE.SkinnedMesh(geo, lookMaterial(T, look));
