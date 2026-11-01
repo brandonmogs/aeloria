@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { JOINTS, JointName, Rig, RigDims, Sockets, Stance } from './characters';
 import { eyeMaterial, lookMaterial, LookSpec } from './humanSkin';
 import { buildBaseBoots } from './gear';
+import { HairStyle, SCALP_COLS, SCALP_ROWS, ScalpShape, buildHair } from './hair';
 
 /**
  * People are built from one real human body: MakeHuman's CC0 base mesh,
@@ -190,8 +191,8 @@ export interface HumanoidSpec {
   jaw?: number;
   /** Green skin, no shirt, ragged breeches, bare feet; ears and nose are added by the caller. */
   goblin?: boolean;
-  /** Hair style (painted). */
-  hair?: 'short' | 'long' | 'bald';
+  /** Hair style: built as geometry on the skull, with a painted scalp beneath. */
+  hair?: HairStyle;
   /** Clothing cut. Defaults: tunic with sleeves to the elbow, full trousers, boots. */
   sleeves?: 'long' | 'short' | 'none';
   trousers?: 'full' | 'ragged' | 'none';
@@ -231,6 +232,70 @@ const CHILD: Partial<Record<JointName, JointName>> = {
   shoulderR: 'elbowR',
   elbowR: 'handR',
 };
+
+/**
+ * Measure the scalp of a finished head: for each direction out of a point
+ * inside the skull, how far the skin is. Vertices the head bone owns count,
+ * except the ears, which stick out past the skull hair should hug. Empty
+ * bins (under the jaw, inside the neck) borrow from the bin above them.
+ */
+function measureScalp(pos: Float32Array, T: HumanTemplate, headJoint: THREE.Vector3, centre: THREE.Vector3, ears: THREE.Vector3[], earClear: number): ScalpShape {
+  const rows = SCALP_ROWS;
+  const cols = SCALP_COLS;
+  const radius = new Float32Array(rows * cols);
+  const headIndex = JOINTS.indexOf('head');
+  const r = new THREE.Vector3();
+  for (let i = 0; i < T.vertexCount; i++) {
+    let wHead = 0;
+    for (let k = 0; k < 4; k++) if (T.skinIndex[i * 4 + k] === headIndex) wHead += T.skinWeight[i * 4 + k];
+    if (wHead < 0.3) continue;
+    r.fromArray(pos, i * 3).sub(headJoint);
+    if (ears.some((ear) => r.distanceTo(ear) < earClear)) continue;
+    r.sub(centre);
+    const len = r.length();
+    if (len < 1e-6) continue;
+    const e = Math.acos(Math.max(-1, Math.min(1, r.y / len)));
+    let a = Math.atan2(r.x, r.z);
+    if (a < 0) a += Math.PI * 2;
+    const row = Math.min(rows - 1, Math.floor((e / Math.PI) * rows));
+    const col = Math.floor((a / (Math.PI * 2)) * cols) % cols;
+    const idx = row * cols + col;
+    if (len > radius[idx]) radius[idx] = len;
+  }
+  // The crown bin is tiny: let every column share the widest reading there.
+  let crown = 0;
+  for (let c = 0; c < cols; c++) crown = Math.max(crown, radius[c]);
+  for (let c = 0; c < cols; c++) radius[c] = crown;
+  for (let row = 1; row < rows; row++) {
+    for (let c = 0; c < cols; c++) {
+      const idx = row * cols + c;
+      if (radius[idx] > 0) continue;
+      // Nearest filled neighbour in the row, else the bin above.
+      let filled = 0;
+      for (let d = 1; d <= 3 && !filled; d++) {
+        const l = radius[row * cols + ((c - d + cols) % cols)];
+        const rr = radius[row * cols + ((c + d) % cols)];
+        filled = l > 0 ? l : rr > 0 ? rr : 0;
+      }
+      radius[idx] = filled || radius[(row - 1) * cols + c];
+    }
+  }
+  // A bin with one vertex in a hollow reads short and lets the skin poke
+  // through the hair: take the widest of each bin's neighbours instead.
+  const dilated = new Float32Array(radius);
+  for (let row = 0; row < rows; row++) {
+    for (let c = 0; c < cols; c++) {
+      let best = 0;
+      for (let dr = -1; dr <= 1; dr++) {
+        const rr = row + dr;
+        if (rr < 0 || rr >= rows) continue;
+        for (let dc = -1; dc <= 1; dc++) best = Math.max(best, radius[rr * cols + ((c + dc + cols) % cols)]);
+      }
+      dilated[row * cols + c] = best;
+    }
+  }
+  return { centre: centre.clone(), rows, cols, radius: dilated };
+}
 
 const gauss = (d: number, sigma: number): number => Math.exp(-(d * d) / (2 * sigma * sigma));
 /** Smoothstep from 0 at `a` to 1 at `b`. */
@@ -441,8 +506,15 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     bones.head.add(eye);
   }
 
-  // 6. Measurements for equipment, in the rig's units.
+  // 6. Measurements for equipment, in the rig's units. The scalp is measured
+  //    from the finished head so hair hugs whatever skull this figure has.
   const dist = (a: JointName, b: JointName): number => posed[a].distanceTo(posed[b]);
+  const earL = onHead(lm.earL);
+  const earR = onHead(lm.earR);
+  const headTop = onHead(lm.headTop).y;
+  const earY = (earL.y + earR.y) / 2;
+  const skullCentre = new THREE.Vector3(0, earY + (headTop - earY) * 0.3, ((lm.skullFront + lm.skullBack) / 2 - rest.head.z) * headK * s);
+  const scalp = measureScalp(pos, T, posed.head, skullCentre, [earL, earR], 0.03 * s * headK);
   const chestBands = T.torsoProfile.filter(([r]) => r > 0.1).map(([r, y]) => [r * torsoWidthAt(y + rest.spine.y), y] as const);
   const chestR = Math.max(...chestBands.map(([r]) => r)) * s * torsoK;
   const waistR = Math.min(...chestBands.map(([r]) => r)) * s * torsoK;
@@ -479,8 +551,9 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
       mouth: onHead(lm.mouth),
       front: (lm.skullFront - rest.head.z) * headK * s,
       back: (lm.skullBack - rest.head.z) * headK * s,
-      earL: onHead(lm.earL),
-      earR: onHead(lm.earR),
+      earL,
+      earR,
+      scalp,
     },
   };
 
@@ -509,6 +582,11 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     const [left, right] = buildBaseBoots(rig, p.boots);
     bones.footL.add(left);
     bones.footR.add(right);
+  }
+  const hair = buildHair(rig, look.hairStyle, p.hair, (p.hair & 0xff) + spec.height * 100);
+  if (hair) {
+    bones.head.add(hair);
+    rig.hair = hair;
   }
   spec.extras?.(rig);
   return rig;

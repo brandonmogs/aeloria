@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { clothDetail, hairDetail, leatherDetail, skinDetail } from './characterTextures';
+import type { ScalpShape } from './hair';
 
 /**
  * Characters: articulated rigs and a small procedural animation system.
@@ -117,6 +118,8 @@ export interface Rig {
   kind: 'humanoid' | 'rat';
   /** A resting posture the animator layers under every clip. */
   stance?: Stance;
+  /** The hair, on the head bone; hidden under a helmet. */
+  hair?: THREE.Object3D;
 }
 
 export interface RigDims {
@@ -159,6 +162,8 @@ export interface RigDims {
     back: number;
     earL: THREE.Vector3;
     earR: THREE.Vector3;
+    /** The skull's surface by direction, for hair to sit on. */
+    scalp?: ScalpShape;
   };
 }
 

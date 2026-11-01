@@ -794,6 +794,7 @@ async function runGame(): Promise<void> {
     hoverTile: () => input.hoverTile,
     sfx,
     camera: renderer.camera,
+    scene: renderer.scene,
     stats: () => renderer.stats,
     terrainHeight: (x: number, y: number) => terrain.heightAt(x, y),
     talk: (npcName: string) => {

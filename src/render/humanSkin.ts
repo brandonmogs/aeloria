@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { JOINTS, JointName } from './characters';
 import type { HumanTemplate } from './human';
 import { skinDetail } from './characterTextures';
+import { hairlineY } from './hair';
 import { tileableNoise } from './texgen';
 
 /**
@@ -61,7 +62,7 @@ const RANGES: Record<string, Range> = {
 };
 
 interface Atlas {
-  /** Packed per pixel: r = region << 3 | z (3 bits), g = y, b = x, all relative to the region's joint. */
+  /** Packed per pixel: r = region << 3, g = y, b = x, a = 1 + z, all relative to the region's joint. */
   data: Uint8ClampedArray;
   /** Fine noise for mottle, broad noise for hairlines and hems. */
   fine: Float32Array;
@@ -90,9 +91,6 @@ function bakeAtlas(T: HumanTemplate): Atlas {
     const a = idx[t];
     const b = idx[t + 1];
     const c = idx[t + 2];
-    const cx = (P[a * 3] + P[b * 3] + P[c * 3]) / 3;
-    const cy = (P[a * 3 + 1] + P[b * 3 + 1] + P[c * 3 + 1]) / 3;
-    const cz = (P[a * 3 + 2] + P[b * 3 + 2] + P[c * 3 + 2]) / 3;
     // The joint that owns most of the triangle.
     w.clear();
     for (const vi of [a, b, c]) {
@@ -106,10 +104,7 @@ function bakeAtlas(T: HumanTemplate): Atlas {
     for (const [j, wt] of w) if (wt > best) { best = wt; region = j; }
     const joint = T.joints[JOINTS[region]];
     const range = RANGES[JOINTS[region]];
-    const zq = q(cz - joint.z, range.z, 7);
-    const yq = q(cy - joint.y, range.y, 255);
-    const xq = q(cx - joint.x, range.x, 255);
-    const code0 = (region << 3) | zq;
+    const code0 = region << 3;
     const ax = UV[a * 2] * SIZE;
     const ay = (1 - UV[a * 2 + 1]) * SIZE;
     const bx = UV[b * 2] * SIZE;
@@ -137,11 +132,23 @@ function bakeAtlas(T: HumanTemplate): Atlas {
         if (e1 < -MARGIN) continue;
         const e2 = (((ax - cxp) * (y - cyp) - (ay - cyp) * (x - cxp)) * sgn) / lca;
         if (e2 < -MARGIN) continue;
+        // Barycentric weights from the edge distances, so every pixel carries
+        // its own position and painted lines run smoothly across triangles.
+        let wa = Math.max(0, e1 * lbc);
+        let wb = Math.max(0, e2 * lca);
+        let wc = Math.max(0, e0 * lab);
+        const ws = wa + wb + wc || 1;
+        wa /= ws;
+        wb /= ws;
+        wc /= ws;
+        const vx = wa * P[a * 3] + wb * P[b * 3] + wc * P[c * 3];
+        const vy = wa * P[a * 3 + 1] + wb * P[b * 3 + 1] + wc * P[c * 3 + 1];
+        const vz = wa * P[a * 3 + 2] + wb * P[b * 3 + 2] + wc * P[c * 3 + 2];
         const i = (py * SIZE + px) * 4;
         data[i] = code0;
-        data[i + 1] = yq;
-        data[i + 2] = xq;
-        data[i + 3] = 255;
+        data[i + 1] = q(vy - joint.y, range.y, 255);
+        data[i + 2] = q(vx - joint.x, range.x, 255);
+        data[i + 3] = 1 + q(vz - joint.z, range.z, 254);
       }
     }
   }
@@ -160,6 +167,7 @@ function bakeAtlas(T: HumanTemplate): Atlas {
         data[i * 4] = data[from * 4];
         data[i * 4 + 1] = data[from * 4 + 1];
         data[i * 4 + 2] = data[from * 4 + 2];
+        data[i * 4 + 3] = data[from * 4 + 3];
         next[i] = 1;
       }
     }
@@ -196,6 +204,8 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
   const nose = { y: lm.noseTip.y - H.y, z: lm.noseTip.z - H.z };
   const mouth = { y: lm.mouth.y - H.y, z: lm.mouth.z - H.z, half: lm.mouthHalfWidth };
   const brows = lm.brow.map((b) => ({ x: b.x - H.x, y: b.y - H.y }));
+  const hairFrame = { hr: lm.skullHalfWidth, browY: lm.brow[1].y - H.y, earY: lm.earL.y - H.y };
+  const skullCz = (lm.skullFront + lm.skullBack) / 2 - H.z;
   const browAt = (ax: number): number | null => {
     if (ax < brows[0].x - 0.004 || ax > brows[brows.length - 1].x + 0.01) return null;
     for (let i = 0; i + 1 < brows.length; i++) {
@@ -234,7 +244,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
     const region = r >> 3;
     const name: JointName | 'none' = region < JOINTS.length ? JOINTS[region] : 'none';
     const range = RANGES[name];
-    const z = range.z[0] + ((r & 7) / 7) * (range.z[1] - range.z[0]);
+    const z = range.z[0] + ((src[i * 4 + 3] - 1) / 254) * (range.z[1] - range.z[0]);
     const y = range.y[0] + (src[i * 4 + 1] / 255) * (range.y[1] - range.y[0]);
     const x = range.x[0] + (src[i * 4 + 2] / 255) * (range.x[1] - range.x[0]);
     const ax = Math.abs(x);
@@ -248,15 +258,10 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
       case 'head': {
         // Hair over the crown, dropping to the nape at the back, leaving the ears and face.
         if (look.hairStyle !== 'bald') {
-          // The hairline by depth: high on the forehead, dipping at the temples,
-          // just over the ears at the sides, down to the nape behind.
-          let hairline: number;
-          if (z > 0.09) hairline = eye.y + 0.085;
-          else if (z > 0.04) hairline = eye.y + 0.06;
-          else if (z > -0.01) hairline = eye.y + 0.032;
-          else if (z > -0.06) hairline = eye.y - 0.03;
-          else hairline = eye.y - 0.07;
-          hairline += (nb - 0.5) * 0.016;
+          // The painted scalp under the hair geometry (see hair.ts) follows
+          // the cap's own hairline, a touch above it, so the cap's edge is
+          // what shows, never a painted one.
+          const hairline = hairlineY(Math.atan2(x, z - skullCz), hairFrame, look.hairStyle) + 0.004;
           const ear = ax > 0.058 && y < eye.y + 0.028 && z > -0.02 && z < 0.06;
           if (y > hairline && !ear) {
             col = hair;

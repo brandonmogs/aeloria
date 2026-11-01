@@ -355,6 +355,8 @@ export class EntityView {
       avatar.gear.push(obj);
     };
 
+    // A helmet covers the cap and fringe; long hair still falls out the back.
+    if (rig.hair) for (const part of rig.hair.children) part.visible = !eq.helmet || part.name === 'hair-fall';
     if (eq.helmet) add(buildHelmet(eq.helmet, rig), s.head);
     if (eq.chestplate) add(buildChest(eq.chestplate, rig), s.torso);
     if (eq.legs) {
@@ -449,6 +451,7 @@ function rigFor(entity: Entity): Rig {
           bulk: 1.2,
           shoulders: 1.18,
           waist: 0.9,
+          hair: 'short',
           palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x5a2f2f, boots: 0x3a3f4a },
           extras: (rig) => rig.sockets.head.add(skullCap(rig, 0xb4b8bf)),
         });
@@ -460,6 +463,7 @@ function rigFor(entity: Entity): Rig {
           bulk: 1.22,
           shoulders: 1.2,
           waist: 0.9,
+          hair: 'short',
           palette: { skin: 0xd8a06c, hair: 0x3a2a1a, tunic: 0x8c93a3, trouser: 0x8b2b1f, boots: 0x2a2a2a },
           extras: (rig) => {
             rig.sockets.head.add(skullCap(rig, 0xc9ccd2));
@@ -487,6 +491,7 @@ function rigFor(entity: Entity): Rig {
           bulk: 1.28,
           shoulders: 1.2,
           waist: 0.92,
+          hair: 'long',
           palette: { skin: 0xd9a06c, hair: 0x8b5a2b, tunic: 0x6b8f3a, trouser: 0x5a4632, boots: 0x3b2a1c },
           extras: (rig) => {
             rig.sockets.head.add(beard(rig, 0x8b5a2b));
