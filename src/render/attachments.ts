@@ -16,6 +16,21 @@ import { clothDetail, hairDetail, leatherDetail } from './characterTextures';
 
 const TILE_INDEX = Object.fromEntries(TILES.map((t, i) => [t, i])) as Record<TileName, number>;
 
+/**
+ * A secondary bone chain (the hair's, the cape's): the bones down it, top
+ * first, with their bind-space heights. Cloth hung on a chain is weighted
+ * between the two bones it falls between, so the chain's sway bends it.
+ */
+export interface Chain {
+  bones: number[];
+  y: number[];
+}
+
+export type ChainName = 'hair' | 'cape';
+
+/** Which chain a prop hangs on, by the name its builder gave the mesh. */
+const CHAIN_OF: Record<string, ChainName> = { 'hair-fall': 'hair', 'cape-cloth': 'cape' };
+
 let shared: THREE.MeshStandardMaterial | null = null;
 
 const VERT_PARS = /* glsl */ `
@@ -147,6 +162,8 @@ const tmpM3 = new THREE.Matrix3();
 
 /** Accumulates baked parts into one skinned geometry. */
 export class AttachmentBuilder {
+  constructor(private readonly chains: Partial<Record<ChainName, Chain>> = {}) {}
+
   private readonly pos: number[] = [];
   private readonly nor: number[] = [];
   private readonly uv: number[] = [];
@@ -167,9 +184,10 @@ export class AttachmentBuilder {
 
   /**
    * One mesh's geometry, carried by `matrix` into bind space and skinned
-   * rigidly to `bone`. `uvScale` repeats the tile across the part.
+   * rigidly to `bone`, or down `chain` by height with `bone` holding what is
+   * above the chain's top. `uvScale` repeats the tile across the part.
    */
-  mesh(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, bone: number, surface: Surface, uvScale = 1): void {
+  mesh(geometry: THREE.BufferGeometry, matrix: THREE.Matrix4, bone: number, surface: Surface, uvScale = 1, chain?: Chain): void {
     const position = geometry.attributes.position as THREE.BufferAttribute;
     if (!geometry.attributes.normal) geometry.computeVertexNormals();
     const normal = geometry.attributes.normal as THREE.BufferAttribute;
@@ -189,12 +207,35 @@ export class AttachmentBuilder {
       else this.col.push(c.r, c.g, c.b, 1);
       this.tile.push(tile);
       this.ench.push(surface.enchant);
-      this.si.push(bone, 0, 0, 0);
-      this.sw.push(1, 0, 0, 0);
+      if (chain) this.chainWeights(tmpV.y, chain, bone);
+      else {
+        this.si.push(bone, 0, 0, 0);
+        this.sw.push(1, 0, 0, 0);
+      }
     }
     const index = geometry.index;
     const n = index ? index.count : position.count;
     for (let i = 0; i < n; i++) this.idx.push(base + (index ? index.getX(i) : i));
+  }
+
+  /** Weights for a vertex at height `y` on a chain: the two bones it falls between. */
+  private chainWeights(y: number, chain: Chain, root: number): void {
+    const last = chain.bones.length - 1;
+    if (y >= chain.y[0]) {
+      this.si.push(root, 0, 0, 0);
+      this.sw.push(1, 0, 0, 0);
+      return;
+    }
+    for (let k = 0; k < last; k++) {
+      if (y >= chain.y[k + 1]) {
+        const t = (chain.y[k] - y) / (chain.y[k] - chain.y[k + 1]);
+        this.si.push(chain.bones[k], chain.bones[k + 1], 0, 0);
+        this.sw.push(1 - t, t, 0, 0);
+        return;
+      }
+    }
+    this.si.push(chain.bones[last], 0, 0, 0);
+    this.sw.push(1, 0, 0, 0);
   }
 
   /**
@@ -220,7 +261,8 @@ export class AttachmentBuilder {
             const extent = 2 * geometry.boundingSphere!.radius * tmpV.setFromMatrixScale(matrix).x;
             uvScale = Math.max(1, Math.min(12, Math.round(extent / metres)));
           }
-          this.mesh(geometry, matrix, bone, surface, uvScale);
+          const chainName = CHAIN_OF[node.name];
+          this.mesh(geometry, matrix, bone, surface, uvScale, chainName ? this.chains[chainName] : undefined);
         }
       }
       for (const child of node.children) walk(child);
@@ -297,7 +339,13 @@ export function mergeAttachments(rig: Rig): THREE.SkinnedMesh | null {
   const bones = rig.bones;
   if (!body || !bones) return null;
   const skeleton = body.skeleton;
-  const builder = new AttachmentBuilder();
+  const bindPos = (i: number): THREE.Vector3 => new THREE.Vector3().setFromMatrixPosition(skeleton.boneInverses[i].clone().invert());
+  const chain = (names: string[]): Chain | undefined => {
+    const idx = names.map((n) => bones.findIndex((b) => b.name === n));
+    if (idx.some((i) => i < 0)) return undefined;
+    return { bones: idx, y: idx.map((i) => bindPos(i).y) };
+  };
+  const builder = new AttachmentBuilder({ hair: chain(['Hair1', 'Hair2', 'Hair3']), cape: chain(['Cape1', 'Cape2', 'Cape3']) });
   bones.forEach((bone, bi) => {
     const bindWorld = skeleton.boneInverses[bi].clone().invert();
     for (const child of [...bone.children]) {

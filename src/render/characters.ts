@@ -765,8 +765,15 @@ export class Animator {
   /** Facing (yaw) eased toward the requested heading. */
   private yaw = 0;
   private yawSet = false;
+  /** The hair and cape chains (see attachments.ts), and how far each streams back. */
+  private readonly chains: { hair: THREE.Bone[]; cape: THREE.Bone[] };
+  private hairSway = 0;
+  private capeSway = 0;
 
-  constructor(private readonly rig: Rig) {}
+  constructor(private readonly rig: Rig) {
+    const byName = (names: string[]): THREE.Bone[] => names.map((n) => rig.bones?.find((b) => b.name === n)).filter((b): b is THREE.Bone => !!b);
+    this.chains = { hair: byName(['Hair1', 'Hair2', 'Hair3']), cape: byName(['Cape1', 'Cape2', 'Cape3']) };
+  }
 
   /** Start (or restart) an action. Looping actions repeat until {@link stopAction}. */
   play(kind: ActionKind, loop = false): void {
@@ -883,6 +890,30 @@ export class Animator {
     rig.joints.hips.position.y = rig.joints.hips.userData.restY ?? (rig.joints.hips.userData.restY = rig.joints.hips.position.y);
     rig.joints.hips.position.y += cur.hipsY * rig.dims.scale;
     rig.group.rotation.set(cur.lean, this.yaw, 0);
+    this.sway(input.time, dt);
+  }
+
+  /**
+   * Swing the hair and cape chains: streaming back with the gait, bobbing
+   * with the stride, drifting a little at rest. A chain hangs down its
+   * bones' -y, so a positive pitch swings it toward -z, behind the character.
+   */
+  private sway(time: number, dt: number): void {
+    const g = this.gait;
+    const phase = this.phase * Math.PI * 2;
+    const k = 1 - Math.exp(-dt * 6);
+    this.capeSway += (g * (0.2 + 0.2 * this.run) - this.capeSway) * k;
+    this.hairSway += (g * (0.07 + 0.1 * this.run) - this.hairSway) * k;
+    const flutter = 0.05 * Math.sin(time * 3.1) + 0.03 * Math.sin(time * 7.3 + 1);
+    this.chains.cape.forEach((b, i) => {
+      b.rotation.x = this.capeSway * (0.5 + 0.1 * i) + flutter * (0.3 + 0.5 * i) + g * 0.08 * Math.sin(phase * 2 + i * 0.8);
+      b.rotation.z = g * 0.04 * Math.sin(phase + i);
+    });
+    const drift = 0.03 * Math.sin(time * 1.7);
+    this.chains.hair.forEach((b, i) => {
+      b.rotation.x = this.hairSway * (0.5 + 0.2 * i) + drift * (0.3 + 0.4 * i) + g * 0.05 * Math.sin(phase * 2 + 1 + i * 0.7);
+      b.rotation.z = g * 0.05 * Math.sin(phase + 0.5 + i * 0.6);
+    });
   }
 
   /** Vertical offset of the whole body (sinking after death). */
