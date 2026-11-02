@@ -105,13 +105,20 @@ let physical: string | null = null;
 
 /**
  * Patch a PBR material with the style pass. Idempotent; materials flagged
- * `userData.enchant` before the call pick up the glow.
+ * `userData.enchant` before the call pick up the glow, and a material flagged
+ * `userData.perVertexEnchant` glows where its `vEnchant` varying says (the
+ * merged attachments mesh). Whatever the material already did in
+ * onBeforeCompile still runs, after the style pass, so it may expand the
+ * chunks the pass anchors on.
  */
 export function applyCharacterStyle(mat: THREE.Material): void {
   if (!(mat instanceof THREE.MeshStandardMaterial) || mat.userData.styled) return;
   mat.userData.styled = true;
   const enchant = { value: mat.userData.enchant ? 1 : 0 };
-  mat.onBeforeCompile = (shader) => {
+  const perVertex = mat.userData.perVertexEnchant === true;
+  const own = mat.onBeforeCompile;
+  const ownKey = mat.customProgramCacheKey;
+  mat.onBeforeCompile = (shader, renderer) => {
     const s = characterStyle;
     Object.assign(shader.uniforms, {
       uWrap: s.wrap,
@@ -130,11 +137,12 @@ export function applyCharacterStyle(mat: THREE.Material): void {
     f = patch(f, '#include <common>', '#include <common>\n' + PARS);
     f = patch(f, '#include <lights_physical_pars_fragment>', physical);
     f = patch(f, '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n\tgStyleMetal = metalnessFactor;');
-    f = patch(f, '#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + GLOW);
+    f = patch(f, '#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + (perVertex ? GLOW.replace('uEnchant', 'vEnchant') : GLOW));
     f = patch(f, '#include <opaque_fragment>', RIM + '#include <opaque_fragment>');
     shader.fragmentShader = f;
+    own.call(mat, shader, renderer);
   };
-  mat.customProgramCacheKey = () => 'aeloria-character-style-1';
+  mat.customProgramCacheKey = () => `${ownKey.call(mat)}|aeloria-character-style-2${perVertex ? '-pv' : ''}`;
   mat.needsUpdate = true;
 }
 

@@ -9,6 +9,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GRADE_SHADER, SUN_DIRECTION } from '../../render/Renderer';
 import { Animator, Rig } from '../../render/characters';
 import { HERO_BUILD, HumanoidSpec, bodyFor, buildHumanoid } from '../../render/human';
+import { mergeAttachments } from '../../render/attachments';
 import { Outfit, billowCape, dressRig } from '../../render/outfit';
 import { raceExtras } from '../../render/raceGear';
 import { characterStyle, setRimDirection, styleCharacter } from '../../render/characterStyle';
@@ -270,6 +271,7 @@ export class CharacterLab {
     const rig = buildHumanoid(spec);
     const outfit = dressRig(rig, cfg.equipment);
     if (outfit.weapon) enchant(outfit.weapon);
+    if (cfg.merged && mergeAttachments(rig)) outfit.cape = undefined; // the cloth is baked; nothing to billow
     styleCharacter(rig.group);
     this.turntable.add(rig.group);
     this.rig = rig;

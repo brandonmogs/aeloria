@@ -559,6 +559,7 @@ export function eyeMaterial(iris: number, glow: boolean): THREE.MeshStandardMate
     envMapIntensity: 0.9,
     ...(glow ? { emissive: new THREE.Color(iris), emissiveMap: map, emissiveIntensity: 1.4 } : {}),
   });
+  m.userData.iris = iris;
   eyeCache.set(key, m);
   return m;
 }

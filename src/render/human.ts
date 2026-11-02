@@ -772,6 +772,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     group,
     joints: bones,
     bones: boneList,
+    body: mesh,
     sockets,
     barHeight: spec.height + 0.22,
     dims,

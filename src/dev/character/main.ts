@@ -374,6 +374,11 @@ async function main(): Promise<void> {
     buttons(anim, [['Replay', () => lab.replay()]]);
 
     const view = section('View');
+    check(view, 'Merged attachments (2 draw calls)', cfg.merged, (v) => {
+      cfg.merged = v;
+      rebuild();
+      syncUrl();
+    });
     check(view, 'Turntable', cfg.turntable, (v) => {
       cfg.turntable = v;
       lab.turning = v;

@@ -127,6 +127,7 @@ function createCape(rig: Rig): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cap
   const s = rig.dims.scale;
   const cape = makeCape();
   const cloth = new THREE.Mesh(cape.geo, makeCapeMaterial());
+  cloth.name = 'cape-cloth'; // the attachments baker hangs it on the cape chain by name
   cloth.scale.setScalar(s);
   cloth.position.set(0, rig.dims.torso - 0.06 * s, -(rig.dims.chestR * rig.dims.torsoFlatten + 0.01 * s)); // off the back of the shoulders
   cloth.rotation.x = 0.18;

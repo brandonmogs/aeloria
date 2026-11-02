@@ -122,6 +122,10 @@ export interface Rig {
   hair?: THREE.Object3D;
   /** Every bone of the skeleton in skin order, when the body is a skinned template. */
   bones?: THREE.Bone[];
+  /** The skinned body mesh, when the body is a skinned template. */
+  body?: THREE.SkinnedMesh;
+  /** Everything worn or grown, merged into one skinned mesh (see attachments.ts). */
+  attachments?: THREE.SkinnedMesh;
 }
 
 export interface RigDims {

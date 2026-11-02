@@ -69,7 +69,7 @@ const fold = (a: number): number => Math.abs(Math.atan2(Math.sin(a), Math.cos(a)
 
 // --- Textures -------------------------------------------------------------------------
 
-interface StrandTextures {
+export interface StrandTextures {
   /** Opaque: pale streaks the material's colour multiplies. */
   albedo: THREE.CanvasTexture;
   /** The same streaks, solid for the upper half and thinning to wisps toward the bottom. */
@@ -107,7 +107,7 @@ function paintStrands(ctx: CanvasRenderingContext2D, W: number, H: number, count
   }
 }
 
-function strandTextures(): StrandTextures {
+export function strandTextures(): StrandTextures {
   if (strands) return strands;
   const W = 256;
   const H = 512;

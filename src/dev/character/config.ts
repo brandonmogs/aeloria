@@ -186,6 +186,8 @@ export interface LabConfig {
   turntable: boolean;
   framing: Framing;
   style: Record<StyleFeature, boolean>;
+  /** Merge gear, hair and eyes into one skinned mesh beside the body (two draw calls), or hang each piece on its bone. */
+  merged: boolean;
   /** Show the control panel (off for clean screenshots). */
   ui: boolean;
 }
@@ -208,6 +210,7 @@ export function defaultConfig(race: Race = 'human', sex: Sex = 'male'): LabConfi
     turntable: true,
     framing: 'full',
     style: { wrap: true, spec: true, rim: true, glow: true },
+    merged: true,
     ui: true,
   };
 }
@@ -346,6 +349,7 @@ export function configToSearch(c: LabConfig): string {
   p.set('frame', c.framing);
   const on = STYLE_FEATURES.filter((f) => c.style[f]);
   p.set('style', on.length === STYLE_FEATURES.length ? 'all' : on.length ? on.join(',') : 'off');
+  if (!c.merged) p.set('gear', 'props');
   if (!c.ui) p.set('ui', '0');
   return p.toString();
 }
@@ -396,6 +400,7 @@ export function configFromSearch(search: string): LabConfig {
     const on = style.split(',');
     for (const f of STYLE_FEATURES) c.style[f] = on.includes(f);
   }
+  if (p.get('gear') === 'props') c.merged = false;
   if (p.get('ui') === '0') c.ui = false;
   return c;
 }
