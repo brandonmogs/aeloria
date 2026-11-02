@@ -51,6 +51,8 @@ const LOD_TARGETS = [
   { head: 1000, hands: 200, body: 1300 },
   { head: 300, hands: 60, body: 440 },
 ];
+/** The body whose decimation every other body reuses (see buildBody). */
+const PLAN_BODY = 'human_m';
 
 // ---- The bodies -------------------------------------------------------------------
 // Each is a list of MakeHuman targets (path under data/targets, weight) layered
@@ -341,7 +343,14 @@ await MeshoptSimplifier.ready;
 mkdirSync(OUT_DIR, { recursive: true });
 
 // ---- One body ---------------------------------------------------------------------
-async function buildBody(id, targets) {
+/**
+ * Build one body. `plan` is the decimation worked out on the human man: the
+ * same vertex choices and index buffers are reused for every other body, so
+ * all bodies share one topology at every LOD and a vertex index means the
+ * same spot on every one of them (equipment anchors to those). The first
+ * body built makes the plan and returns it.
+ */
+async function buildBody(id, targets, plan = null) {
   verts = baseVerts.map((v) => v.clone());
   for (const [name, w] of targets) {
     for (const [vi, dx, dy, dz] of await loadTarget(name)) {
@@ -665,7 +674,7 @@ async function buildBody(id, targets) {
    * two regions share are borders of both, so they are locked on both sides
    * and the parts still meet exactly when merged back together.
    */
-  function decimate(budget) {
+  function planLod(budget) {
     const parts = REGIONS.map((r) => simplify(regionIndices[r], budget[r], r === 'body' ? 0.1 : 0.05));
     const idx = new Uint32Array(parts.reduce((sum, [out]) => sum + out.length, 0));
     const kept = {};
@@ -677,6 +686,11 @@ async function buildBody(id, targets) {
     });
     const error = Math.max(...parts.map(([, e]) => e));
     const [remap, unique] = MeshoptSimplifier.compactMesh(idx); // renumbers idx in place
+    return { indices: idx, remap, unique, kept, error };
+  }
+  /** This body's vertices gathered through a plan's choices. */
+  function decimate({ indices: idx, remap, unique, kept, error }) {
+    if (remap.length !== n) throw new Error(`${id}: ${n} vertices, but the ${PLAN_BODY} plan has ${remap.length}`);
     const gather = (src, stride, Ctor) => {
       const out = new Ctor(unique * stride);
       for (let i = 0; i < n; i++) {
@@ -697,7 +711,8 @@ async function buildBody(id, targets) {
       error,
     };
   }
-  const lods = LOD_TARGETS.map(decimate);
+  plan ??= LOD_TARGETS.map(planLod);
+  const lods = plan.map(decimate);
 
   // ---- Write the GLB --------------------------------------------------------------
   const v3 = (v) => [+v.x.toFixed(4), +v.y.toFixed(4), +v.z.toFixed(4)];
@@ -739,6 +754,8 @@ async function buildBody(id, targets) {
     torsoProfile,
     torsoFlatten: +(flattenSum / Math.max(1, flattenN)).toFixed(4),
     lods: lods.map((l) => ({ triangles: l.indices.length / 3, ...l.kept, error: +l.error.toFixed(4) })),
+    /** Every body shares this body's vertex order and index buffers at each LOD. */
+    topology: PLAN_BODY,
   };
 
   const g = new GltfBuilder('aeloria scripts/build-characters.mjs');
@@ -775,12 +792,15 @@ async function buildBody(id, targets) {
   console.log(`${id}.glb: ${(glb.length / 1024).toFixed(0)} KB, ${meta.height.toFixed(2)} m, ${n} vertices / ${indices.length / 3} triangles (${split(regionTris)})`);
   for (const [i, l] of lods.entries()) console.log(`  LOD${i}: ${l.positions.length / 3} vertices, ${l.indices.length / 3} triangles (${split(l.kept)}), error ${l.error.toFixed(4)}`);
   console.log(`  shoulders ${(2 * J.shoulderL.x).toFixed(3)} m, hips ${(2 * J.thighL.x).toFixed(3)} m, legs ${J.thighL.y.toFixed(3)} m, ears at x ${earL.x.toFixed(3)} / ${earR.x.toFixed(3)}, skull half-width ${skullHalfWidth.toFixed(3)}`);
+  return plan;
 }
 
 const wanted = process.argv.slice(2);
+for (const id of wanted) if (!BODIES[id]) throw new Error(`unknown body ${id}; have ${Object.keys(BODIES).join(', ')}`);
+// The human man always goes first: his decimation is the topology of every body.
+const plan = await buildBody(PLAN_BODY, BODIES[PLAN_BODY]);
 for (const id of wanted.length ? wanted : Object.keys(BODIES)) {
-  if (!BODIES[id]) throw new Error(`unknown body ${id}; have ${Object.keys(BODIES).join(', ')}`);
-  await buildBody(id, BODIES[id]);
+  if (id !== PLAN_BODY) await buildBody(id, BODIES[id], plan);
 }
 writeFileSync(
   path.join(OUT_DIR, 'ATTRIBUTION.md'),
