@@ -725,6 +725,8 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     torso: posed.neck.y - posed.spine.y,
     headR: lm.skullHalfWidth * s * headK,
     shoulderHalf: posed.shoulderL.x,
+    shoulderY: posed.shoulderL.y - posed.spine.y,
+    torsoCentreZ: ((lm.chestFront.z + lm.chestBack.z) / 2 - rest.spine.z) * s,
     hipHalf: posed.thighL.x,
     headFlatten: (lm.skullFront - lm.skullBack) / (2 * lm.skullHalfWidth),
     torsoProfile: chestBands.map(([r, y]) => [r * s * torsoK * (1 + belly * 0.25), y * s] as const),

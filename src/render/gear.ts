@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { ItemStack, itemDef } from '../sim/items';
 import { Rig, lathe, material, put, shade } from './characters';
+import { kiteShield, plateCuirass, plateHelm, plateLegs } from './plateArmor';
 
 /**
  * Worn equipment and NPC costume pieces, sized against the rig they attach
@@ -30,7 +31,7 @@ function finishOf(id: string): 'metal' | 'leather' {
   return id.includes('leather') || id.includes('cowl') || id.includes('goblin') ? 'leather' : 'metal';
 }
 
-function box(w: number, h: number, d: number): THREE.BufferGeometry {
+export function box(w: number, h: number, d: number): THREE.BufferGeometry {
   return shade(new THREE.BoxGeometry(w, h, d), 1.02, 0.94);
 }
 
@@ -48,13 +49,13 @@ export function wedge(w: number, h: number, d: number, topX: number, topZ = topX
   return shade(geo);
 }
 
-function prism(rTop: number, rBottom: number, height: number, sides = 8): THREE.BufferGeometry {
+export function prism(rTop: number, rBottom: number, height: number, sides = 8): THREE.BufferGeometry {
   return shade(new THREE.CylinderGeometry(rTop, rBottom, height, sides));
 }
 
 // --- Head ---------------------------------------------------------------------------
 
-interface HeadFrame {
+export interface HeadFrame {
   /** Skull half-width. */
   hr: number;
   top: number;
@@ -67,7 +68,7 @@ interface HeadFrame {
 }
 
 /** Where the skull is, relative to the head socket, so hats sit on it. */
-function headFrame(rig: Rig): HeadFrame {
+export function headFrame(rig: Rig): HeadFrame {
   const d = rig.dims;
   const hr = d.headR;
   const f = d.face;
@@ -96,35 +97,7 @@ export function buildHelmet(item: ItemStack, rig: Rig): THREE.Object3D {
   const hr = h.hr;
   const c = metalColor(item.id);
   const span = h.top - h.brow;
-  if (item.id.includes('full_helm')) {
-    // The whole head boxed in, with a T-shaped face slit.
-    const g = new THREE.Group();
-    const m = material(c, 'metal');
-    g.add(
-      onSkull(
-        h,
-        lathe(
-          [
-            [0.8 * hr, h.chin - 0.012],
-            [1.1 * hr, h.chin + (h.brow - h.chin) * 0.4],
-            [1.14 * hr, h.brow],
-            [1.12 * hr, h.brow + span * 0.5],
-            [0.98 * hr, h.brow + span * 0.88],
-            [0.5 * hr, h.top + 0.025],
-            [0, h.top + 0.04],
-          ],
-          24,
-          h.flatten,
-        ),
-        m,
-      ),
-    );
-    const dark = material(0x14120f, 'dark');
-    const front = h.cz + 1.06 * hr * h.flatten;
-    g.add(put(box(0.16 * hr, (h.brow - h.chin) * 0.8, 0.1 * hr), dark, 0, (h.brow + h.chin) / 2, front));
-    g.add(put(box(0.9 * hr, 0.14 * hr, 0.1 * hr), dark, 0, h.brow - 0.03, front));
-    return g;
-  }
+  if (item.id.includes('full_helm')) return plateHelm(h, c);
   if (item.id.includes('cowl')) {
     const g = new THREE.Group();
     g.add(onSkull(h, lathe([[1.06 * hr, h.chin + 0.02], [1.15 * hr, h.brow - 0.01], [1.0 * hr, h.brow + span * 0.85], [0.5 * hr, h.top + 0.02], [0, h.top + 0.035]], 20, h.flatten), material(c, 'leather')));
@@ -180,21 +153,12 @@ export function buildChest(item: ItemStack, rig: Rig): THREE.Object3D {
   const s = rig.dims.scale;
   const d = rig.dims;
   const c = metalColor(item.id);
-  const plate = item.id.includes('platebody');
-  const finish = finishOf(item.id);
-  const m = material(c, finish);
+  if (item.id.includes('platebody')) return plateCuirass(rig, c);
+  const m = material(c, finishOf(item.id));
   const g = new THREE.Group();
   // The body's own tunic profile, let out a little so the armour sits over it.
-  const profile = d.torsoProfile.filter(([, y]) => y > -0.1 * s).map(([r, y]) => [r * 1.06 + 0.004 * s, y] as const);
-  g.add(put(lathe(profile, plate ? 28 : 20, d.torsoFlatten), m));
-  if (plate) {
-    // Pauldrons over the shoulders.
-    for (const sx of [-1, 1]) {
-      const p = put(shade(new THREE.SphereGeometry(d.deltoidR * 1.3, 14, 8, 0, Math.PI * 2, 0, Math.PI * 0.55)), m, sx * d.shoulderHalf, d.torso - 0.05 * s, 0);
-      p.scale.set(1, 0.85, 1);
-      g.add(p);
-    }
-  }
+  const profile = d.torsoProfile.filter(([, y]) => y > -0.1 * s).map(([r, y]) => [r * 1.06 + 0.006 * s, y] as const);
+  g.add(put(lathe(profile, 20, d.torsoFlatten), m, 0, 0, d.torsoCentreZ));
   return g;
 }
 
@@ -206,9 +170,10 @@ export function apron(rig: Rig): THREE.Object3D {
 
 // --- Legs, feet, hands --------------------------------------------------------------
 
-/** Guards for one leg: returns [thigh piece, shin piece]. */
-export function buildLegGuard(item: ItemStack, rig: Rig): [THREE.Object3D, THREE.Object3D] {
+/** Guards for one leg (`side` 1 for the left, -1 for the right): returns [thigh piece, shin piece]. */
+export function buildLegGuard(item: ItemStack, rig: Rig, side: 1 | -1 = 1): [THREE.Object3D, THREE.Object3D] {
   const s = rig.dims.scale;
+  if (item.id.includes('platelegs')) return plateLegs(rig, metalColor(item.id), side);
   const m = material(metalColor(item.id), finishOf(item.id));
   const d = rig.dims;
   const thigh = put(prism(d.thighR * 1.1, d.shinR * 1.06, d.thigh * 0.94, 14), m, 0, -d.thigh / 2, 0);
@@ -363,16 +328,7 @@ export function buildShield(item: ItemStack, rig: Rig): THREE.Object3D {
   const g = new THREE.Group();
   const m = material(metalColor(item.id), finishOf(item.id));
   if (item.id.includes('kiteshield')) {
-    const shape = new THREE.Shape();
-    shape.moveTo(-0.17, 0.2);
-    shape.lineTo(0.17, 0.2);
-    shape.lineTo(0.19, 0.02);
-    shape.lineTo(0.0, -0.3);
-    shape.lineTo(-0.19, 0.02);
-    shape.closePath();
-    const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.04, bevelEnabled: true, bevelThickness: 0.02, bevelSize: 0.015, bevelSegments: 2 });
-    geo.computeVertexNormals();
-    g.add(put(shade(geo), m));
+    g.add(kiteShield(metalColor(item.id)));
   } else if (item.id.includes('sq_shield')) {
     const sq = put(wedge(0.34, 0.06, 0.38, 0.85), m);
     sq.rotation.x = Math.PI / 2;

@@ -143,6 +143,10 @@ export interface RigDims {
   /** The tunic's revolve profile ([radius, height above the spine joint]) and its front-back squash, for armour to hug. */
   torsoProfile: ReadonlyArray<readonly [number, number]>;
   torsoFlatten: number;
+  /** The chest's centre front-to-back, ahead of the spine joint, so a revolve over the torso is centred on the body. */
+  torsoCentreZ: number;
+  /** The shoulder joints' height above the spine joint. */
+  shoulderY: number;
   chestR: number;
   waistR: number;
   /** Limb radii at their thickest. */
@@ -443,6 +447,8 @@ export function buildRat(): Rig {
       torso: 0.3,
       headR: 0.06,
       shoulderHalf: 0.11,
+      shoulderY: 0.22,
+      torsoCentreZ: 0,
       hipHalf: 0.11,
       headFlatten: 1,
       torsoProfile: [],

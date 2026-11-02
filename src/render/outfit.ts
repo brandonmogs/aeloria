@@ -56,8 +56,8 @@ export function dressRig(rig: Rig, eq: Equipment): Outfit {
   if (eq.helmet) add(buildHelmet(eq.helmet, rig), s.head);
   if (eq.chestplate) add(buildChest(eq.chestplate, rig), s.torso);
   if (eq.legs) {
-    const [tl, sl] = buildLegGuard(eq.legs, rig);
-    const [tr, sr] = buildLegGuard(eq.legs, rig);
+    const [tl, sl] = buildLegGuard(eq.legs, rig, 1);
+    const [tr, sr] = buildLegGuard(eq.legs, rig, -1);
     add(tl, s.thighL);
     add(sl, s.shinL);
     add(tr, s.thighR);
