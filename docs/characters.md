@@ -117,7 +117,11 @@ set:
    `dims.torsoCentreZ`, leg pieces along -y from the hip or knee, hands and
    feet from the wrist and ankle. Use `lathe`, `strip`, `wedge`, `prism`,
    `box` and `put`; geometry gets a baked top-to-bottom shade through
-   `shade`. Materials come from `material(colour, finish)`; the merged path
+   `shade`. A limb's bone does not run down its middle (the shin's sits at
+   the front of the calf, the thigh's at the back), so anything wrapping a
+   limb is an elliptical `tube` offset from the socket, with rings measured
+   off the bodies (`plateLegs` has the proportions in units of the limb's
+   radius). Materials come from `material(colour, finish)`; the merged path
    turns the finish into an atlas tile (cloth, leather, metal, rust, dark ->
    plain) and the colour into vertex colour, so stick to those finishes or
    add a tile in `attachmentAtlas.ts` and map it in `surfaceOf`.

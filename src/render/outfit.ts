@@ -138,12 +138,12 @@ function createCape(rig: Rig): { cloth: THREE.Mesh; clasp: THREE.Mesh; cape: Cap
 /**
  * The max cape cloth: a panel that flares wider toward the hem and is coloured
  * like the OSRS max cape, a rich red body with a thin rainbow trim running
- * down both side edges and along the bottom. Built with vertex colours and
- * recorded `base` positions so {@link billowCape} can ripple it.
+ * down both side edges and along the bottom. Built with vertex colours on a
+ * grid that is dense where the trim is, and recorded `base` positions so
+ * {@link billowCape} can ripple it.
  */
 function makeCape(): Cape {
-  const geo = new THREE.PlaneGeometry(CAPE_TOP_WIDTH, CAPE_HEIGHT, 4, 8);
-  geo.translate(0, -CAPE_HEIGHT / 2, 0); // pivot at the top edge
+  const geo = capePanel();
 
   const pos = geo.attributes.position as THREE.BufferAttribute;
   const colors = new Float32Array(pos.count * 3);
@@ -166,7 +166,7 @@ function makeCape(): Cape {
 
     // Rainbow trim hugging the two side edges and the bottom hem.
     const side = Math.abs(u - 0.5) * 2; // 0 centre → 1 edge
-    const edge = Math.max(f > 0.85 ? (f - 0.85) / 0.15 : 0, side > 0.75 ? (side - 0.75) / 0.25 : 0);
+    const edge = Math.max(clamp01((f - 0.93) / 0.04), clamp01((side - 0.8) / 0.1));
     if (edge > 0) {
       trim.setHSL((u * 0.55 + f * 0.45) % 1, 0.85, 0.56);
       c.lerp(trim, clamp01(edge));
@@ -179,6 +179,40 @@ function makeCape(): Cape {
   geo.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
   return { geo, base: Float32Array.from(pos.array) };
+}
+
+/**
+ * The cape's panel, hanging from the origin: columns crowd the two side edges
+ * and rows crowd the hem, so the trim painted there stays a narrow band
+ * instead of blending a quarter of the way across the cloth.
+ */
+function capePanel(): THREE.BufferGeometry {
+  const cols = [0, 0.05, 0.1, 0.22, 0.36, 0.5, 0.64, 0.78, 0.9, 0.95, 1];
+  const rows = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.94, 0.97, 1];
+  const position: number[] = [];
+  const normal: number[] = [];
+  const uv: number[] = [];
+  for (const f of rows) {
+    for (const u of cols) {
+      position.push((u - 0.5) * CAPE_TOP_WIDTH, -f * CAPE_HEIGHT, 0);
+      normal.push(0, 0, 1);
+      uv.push(u, 1 - f);
+    }
+  }
+  const index: number[] = [];
+  const w = cols.length;
+  for (let r = 0; r < rows.length - 1; r++) {
+    for (let c = 0; c < w - 1; c++) {
+      const a = r * w + c;
+      index.push(a, a + w, a + 1, a + 1, a + w, a + w + 1);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(position, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(normal, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(index);
+  return geo;
 }
 
 function makeCapeMaterial(): THREE.MeshStandardMaterial {

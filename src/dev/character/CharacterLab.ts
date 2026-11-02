@@ -219,6 +219,10 @@ export class CharacterLab {
     this.composer.addPass(new RenderPass(this.scene, this.camera));
     const gtao = new GTAOPass(this.scene, this.camera, size.x, size.y);
     gtao.output = GTAOPass.OUTPUT.Default;
+    // The normal/depth pre-pass draws both faces: single-sided it would cull
+    // the back of a cape or a hair card and take the occlusion of the body
+    // behind it, printing the wearer's silhouette onto the cloth.
+    gtao.normalMaterial.side = THREE.DoubleSide;
     gtao.blendIntensity = 0.5;
     gtao.updateGtaoMaterial({
       radius: 0.28,

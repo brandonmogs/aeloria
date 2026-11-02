@@ -167,6 +167,9 @@ export class Renderer {
 
     this.gtao = new GTAOPass(this.scene, this.camera.camera, size.x, size.y);
     this.gtao.output = GTAOPass.OUTPUT.Default;
+    // Both faces in the normal/depth pre-pass, or a cape seen from behind
+    // takes the occlusion of the body behind it (see CharacterLab).
+    this.gtao.normalMaterial.side = THREE.DoubleSide;
     this.gtao.blendIntensity = 0.5;
     this.gtao.updateGtaoMaterial({
       radius: 0.28,
