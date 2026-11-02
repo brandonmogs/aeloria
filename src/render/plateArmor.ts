@@ -34,21 +34,24 @@ function cap(r: number, theta: number, w = 16, h = 7): THREE.BufferGeometry {
   return shade(new THREE.SphereGeometry(r, w, h, 0, Math.PI * 2, 0, theta));
 }
 
+/** A ring of a {@link tube}: its height, half-widths across and front to back, and its centre's offset from the socket (z, then x). */
+type Ring = readonly [y: number, rx: number, rz: number, zc: number, xc?: number];
+
 /**
- * An elliptical tube down a limb: rings of `[y, rx, rz, zc]` from the top
- * down (the half-widths across and front to back, and the centre's offset
- * from the socket, since a limb's bone does not run down its middle: the
- * shin's sits at the front of the calf, the thigh's at the back), swept
- * `phiLength` wide around `phiCentre` (0 = the front, +z).
+ * An elliptical tube down a limb: rings from the top down, each offset from
+ * the socket, since a limb's bone does not run down its middle (measured on
+ * the bodies: the shin's sits at the front of the calf and along its inner
+ * side, the thigh's at the back), swept `phiLength` wide around `phiCentre`
+ * (0 = the front, +z).
  */
-function tube(rings: ReadonlyArray<readonly [number, number, number, number]>, segments: number, phiCentre = 0, phiLength = Math.PI * 2): THREE.BufferGeometry {
+function tube(rings: ReadonlyArray<Ring>, segments: number, phiCentre = 0, phiLength = Math.PI * 2): THREE.BufferGeometry {
   const cols = segments + 1;
   const position: number[] = [];
   const uv: number[] = [];
-  rings.forEach(([y, rx, rz, zc], i) => {
+  rings.forEach(([y, rx, rz, zc, xc = 0], i) => {
     for (let c = 0; c < cols; c++) {
       const phi = phiCentre - phiLength / 2 + (c / segments) * phiLength;
-      position.push(rx * Math.sin(phi), y, zc + rz * Math.cos(phi));
+      position.push(xc + rx * Math.sin(phi), y, zc + rz * Math.cos(phi));
       uv.push(c / segments, i / (rings.length - 1));
     }
   });
@@ -153,27 +156,21 @@ export function plateLegs(rig: Rig, color: number, side: 1 | -1): [THREE.Object3
   const trim = material(TRIM, 'metal');
 
   const thigh = new THREE.Group();
-  // The cuisse follows the thigh, measured on the bodies: the bone runs down
-  // its back, so the plate's ellipse is centred a third of a radius forward.
+  // The cuisse follows the thigh, measured on the bodies (in thigh radii):
+  // the bone runs down its back, so the plate's ellipse is centred forward,
+  // and the knee end drifts a little toward the outside.
   const tr = d.thighR;
   const tl = d.thigh;
-  thigh.add(
-    put(
-      tube(
-        [
-          [-0.02 * tl, tr * 1.0, tr * 0.85, tr * 0.35],
-          [-0.25 * tl, tr * 1.08, tr * 1.0, tr * 0.28],
-          [-0.5 * tl, tr * 1.05, tr * 0.92, tr * 0.38],
-          [-0.72 * tl, tr * 0.95, tr * 0.82, tr * 0.35],
-          [-0.94 * tl, tr * 0.9, tr * 0.75, tr * 0.3],
-        ],
-        16,
-      ),
-      m,
-    ),
-  );
-  const cuisseTrim = bead(tr * 1.0, -0.04 * s, 0.006 * s, 16, 0.85, trim);
-  cuisseTrim.position.z = tr * 0.35;
+  const cuisse: Ring[] = [
+    [-0.02 * tl, tr * 0.95, tr * 1.0, tr * 0.27, -tr * 0.1 * side],
+    [-0.25 * tl, tr * 1.0, tr * 0.96, tr * 0.4, 0],
+    [-0.5 * tl, tr * 0.95, tr * 0.88, tr * 0.43, tr * 0.05 * side],
+    [-0.72 * tl, tr * 0.88, tr * 0.8, tr * 0.42, tr * 0.1 * side],
+    [-0.94 * tl, tr * 0.82, tr * 0.78, tr * 0.4, tr * 0.14 * side],
+  ];
+  thigh.add(put(tube(cuisse, 16), m));
+  const cuisseTrim = bead(tr * 0.96, -0.04 * s, 0.006 * s, 16, 1.0 / 0.96, trim);
+  cuisseTrim.position.set(-tr * 0.09 * side, 0, tr * 0.28);
   thigh.add(cuisseTrim);
   // Tassets: curved plates hung from the hip, hugging the thigh and flaring
   // toward their gold-edged hems, one over the front and one over the outside.
@@ -195,25 +192,26 @@ export function plateLegs(rig: Rig, color: number, side: 1 | -1): [THREE.Object3
   thigh.add(cop);
 
   const shin = new THREE.Group();
-  // The greave, measured the same way: the shin bone runs down the front of
-  // the leg and the calf swells more than a radius behind it, so the plate
-  // sits back from the socket, widest a third of the way down.
+  // The greave, measured the same way (in shin radii): the shin bone runs
+  // down the front of the leg along its inner side, the calf swells more
+  // than a radius behind it, and the ankle sits a third of a radius to the
+  // outside, so the plate sits back and drifts outward on the way down.
   const r = d.shinR;
   const sl = d.shin;
-  const rings: Array<readonly [number, number, number, number]> = [
-    [-0.02 * s, r * 1.05, r * 0.85, -r * 0.18],
-    [-0.3 * sl, r * 1.12, r * 0.9, -r * 0.42],
-    [-0.55 * sl, r * 1.04, r * 0.8, -r * 0.4],
-    [-0.75 * sl, r * 0.9, r * 0.68, -r * 0.3],
-    [-0.92 * sl, r * 0.88, r * 0.68, -r * 0.25],
+  const greave: Ring[] = [
+    [-0.02 * s, r * 0.95, r * 0.95, -r * 0.32, r * 0.15 * side],
+    [-0.25 * sl, r * 0.92, r * 0.94, -r * 0.4, r * 0.22 * side],
+    [-0.45 * sl, r * 0.85, r * 0.9, -r * 0.42, r * 0.28 * side],
+    [-0.65 * sl, r * 0.66, r * 0.74, -r * 0.42, r * 0.34 * side],
+    [-0.92 * sl, r * 0.66, r * 0.72, -r * 0.32, r * 0.34 * side],
   ];
-  shin.add(put(tube(rings, 16), m));
+  shin.add(put(tube(greave, 16), m));
   // The ridge down the shin.
-  shin.add(put(tube(rings.map(([y, rx, rz, zc]) => [y, rx * 1.04, rz * 1.04, zc] as const), 16, 0, 0.3), m));
-  const greaveTop = bead(r * 1.05, -0.02 * s, 0.006 * s, 16, 0.85 / 1.05, trim);
-  greaveTop.position.z = -r * 0.18;
-  const greaveHem = bead(r * 0.88, -0.92 * sl, 0.005 * s, 16, 0.68 / 0.88, trim);
-  greaveHem.position.z = -r * 0.25;
+  shin.add(put(tube(greave.map(([y, rx, rz, zc, xc]) => [y, rx * 1.04, rz * 1.04, zc, xc] as const), 16, 0, 0.3), m));
+  const greaveTop = bead(r * 0.95, -0.02 * s, 0.006 * s, 16, 1, trim);
+  greaveTop.position.set(r * 0.15 * side, 0, -r * 0.32);
+  const greaveHem = bead(r * 0.66, -0.92 * sl, 0.005 * s, 16, 0.72 / 0.66, trim);
+  greaveHem.position.set(r * 0.34 * side, 0, -r * 0.32);
   shin.add(greaveTop, greaveHem);
   return [thigh, shin];
 }
