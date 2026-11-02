@@ -8,12 +8,10 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { GRADE_SHADER, SUN_DIRECTION } from '../../render/Renderer';
 import { Animator, Rig } from '../../render/characters';
-import { HERO_BUILD, HumanoidSpec, bodyFor, buildHumanoid } from '../../render/human';
-import { mergeAttachments } from '../../render/attachments';
-import { Outfit, billowCape, dressRig } from '../../render/outfit';
-import { raceExtras } from '../../render/raceGear';
-import { characterStyle, setRimDirection, styleCharacter } from '../../render/characterStyle';
-import { AnimationName, Framing, LabConfig, LightingPreset, Locomotion, RACES } from './config';
+import { CharacterBuilder } from '../../render/characterBuilder';
+import { Outfit, billowCape } from '../../render/outfit';
+import { characterStyle, setRimDirection } from '../../render/characterStyle';
+import { AnimationName, Framing, LabConfig, LightingPreset, Locomotion } from './config';
 
 /**
  * The character preview stage: one figure on a turntable under a choice of
@@ -161,6 +159,15 @@ export class CharacterLab {
   private character = { calls: 0, triangles: 0, skinnedVertices: 0 };
 
   private readonly orbit = { yaw: 0.35, pitch: 0.1, distance: 3.6, targetY: 0.95 };
+
+  /** The view's turn about the figure (0 faces it), for linked views and screenshots. */
+  get yaw(): number {
+    return this.orbit.yaw;
+  }
+
+  set yaw(v: number) {
+    this.orbit.yaw = v;
+  }
   private drag: { button: number; x: number; y: number } | null = null;
 
   constructor(private readonly canvas: HTMLCanvasElement) {
@@ -257,26 +264,25 @@ export class CharacterLab {
   /** Build (or rebuild) the figure from the config: body, hair, painted outfit and worn gear. */
   setCharacter(cfg: LabConfig): void {
     this.clearCharacter();
-    const race = RACES[cfg.race];
-    const spec: HumanoidSpec = {
-      ...HERO_BUILD,
-      ...race.build[cfg.sex],
-      body: bodyFor(cfg.race, cfg.sex),
+    const character = CharacterBuilder.build({
+      race: cfg.race,
+      sex: cfg.sex,
       height: cfg.height,
       hair: cfg.hair,
-      bracers: true,
-      palette: { skin: cfg.skin, hair: cfg.hairColor, tunic: cfg.tunic, trouser: cfg.trouser, boots: 0x3b2a1c, eyes: cfg.eyes },
-      extras: raceExtras(cfg.race, cfg.sex, cfg.hairColor),
-    };
-    const rig = buildHumanoid(spec);
-    const outfit = dressRig(rig, cfg.equipment);
-    if (outfit.weapon) enchant(outfit.weapon);
-    if (cfg.merged && mergeAttachments(rig)) outfit.cape = undefined; // the cloth is baked; nothing to billow
-    styleCharacter(rig.group);
+      hairColor: cfg.hairColor,
+      skinTone: cfg.skin,
+      eyes: cfg.eyes,
+      tunic: cfg.tunic,
+      trouser: cfg.trouser,
+      equipment: cfg.equipment,
+      enchant: true,
+      merged: cfg.merged,
+    });
+    const { rig, outfit } = character;
     this.turntable.add(rig.group);
     this.rig = rig;
     this.outfit = outfit;
-    this.anim = new Animator(rig);
+    this.anim = character.animator;
     this.height = cfg.height;
     this.measure();
     this.setAnimation(this.animation);
@@ -527,21 +533,6 @@ function studioRoom(intensity: number): THREE.Object3D[] {
   panel(2, 6, new THREE.Vector3(-7, 4, -6), 8);
   panel(2, 6, new THREE.Vector3(7, 4, -7), 5);
   return objects;
-}
-
-/**
- * Flag a weapon's metal for the enchant glow. Its materials are shared with
- * every other piece of that metal, so the weapon gets its own copies here;
- * the real thing is a painted emissive mask once equipment has an atlas.
- */
-function enchant(weapon: THREE.Object3D): void {
-  weapon.traverse((o) => {
-    if (!(o instanceof THREE.Mesh) || !(o.material instanceof THREE.MeshStandardMaterial)) return;
-    if (o.material.metalness < 0.5) return;
-    const m = o.material.clone();
-    m.userData.enchant = true;
-    o.material = m;
-  });
 }
 
 function clamp(v: number, lo: number, hi: number): number {

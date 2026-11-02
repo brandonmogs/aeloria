@@ -56,8 +56,26 @@ the CPU (limb bulk, shoulders, waist, hips, jaw, head and limb scale), scales
 it to height, and builds one `THREE.Bone` per template bone. The skin, face
 and underlayer clothing are painted per look onto the body's UV atlas
 (`humanSkin.ts`); hair is geometry measured against the skull (`hair.ts`);
-worn gear is rigid props on joint sockets (`gear.ts`), hung by `outfit.ts`,
-which the game's entity view and the lab both use.
+worn gear is built piece by piece in a joint socket's frame (`gear.ts`, and
+`plateArmor.ts` for the plate set), hung by `outfit.ts`.
+
+`CharacterBuilder.build({ race, sex, hair, skinTone, equipment, ... })`
+(`src/render/characterBuilder.ts`) does all of that in one call and, by
+default, merges everything hanging on the skeleton (gear, hair, eyes, base
+boots, an orc's tusks) into **one skinned mesh beside the body**, so a
+character at full detail is two draw calls (`attachments.ts`). Each prop is
+baked into the body's bind space and skinned rigidly to the bone it hung
+from; what used to be its material becomes per-vertex data: a colour, a tile
+of the shared attachment atlas (`attachmentAtlas.ts`: plain, cloth, leather,
+metal, rust, hair, strands, eye; colour, normal and roughness/metalness
+maps) and an enchant flag for the glow. The shader wraps each part's uv
+inside its tile with explicit gradients, so there are no mip seams and no
+tile bleed, and one material serves every character: nothing is cloned per
+player. Long hair's fall and the cape cloth are instead weighted down the
+`Hair1-3` and `Cape1-3` chains by height, and the animator swings those
+chains with the gait. The preview page's "Merged attachments" toggle (or
+`gear=props` in its URL) shows the old one-mesh-per-piece path for
+comparison.
 
 The procedural animator (`characters.ts`) drives the game's sixteen joints
 (hips, spine, neck, head and three per limb). On the shared skeleton each
@@ -69,15 +87,47 @@ unchanged.
 
 A race is a body from the pipeline (its sex, build and face baked in) plus
 proportion knobs on top of `HERO_BUILD` and default colours
-(`RACES` in `src/dev/character/config.ts`), and what the body cannot carry
+(`RACES` in `src/render/races.ts`), and what the body cannot carry
 (`src/render/raceGear.ts`): an orc's tusks, a dwarf's beard. Dark elves share
 the elf body and differ only in skin, hair and eye colour.
 
 The style pass (`src/render/characterStyle.ts`) patches the PBR materials
 through `onBeforeCompile`: soft wrap diffuse on non-metals, a specular boost
 through the metal mask, a coloured fresnel rim light biased toward the back
-light, and an emissive glow on materials flagged `userData.enchant`. All
-values are shared uniforms; nothing is cloned per character.
+light, and an emissive glow on materials flagged `userData.enchant` (or, on
+the merged attachments material, wherever the per-vertex flag is set). All
+values are shared uniforms; nothing is cloned per character. A material's
+own `onBeforeCompile` still runs after the pass.
+
+### Adding an armour set
+
+Equipment is procedural: an item id picks a builder and a finish. To add a
+set:
+
+1. Give the items ids the builders can read (`items.ts`): the metal tier is
+   taken from the id (`metalColor` in `gear.ts`: bronze, iron, ... rune) and
+   the finish from words like `leather` or `cowl` (`finishOf`). A new metal
+   is one line in `metalColor`; the tier is only a tint.
+2. Build the pieces. `buildHelmet`, `buildChest`, `buildLegGuard`,
+   `buildBoot`, `buildGlove`, `buildWeapon` and `buildShield` in `gear.ts`
+   dispatch on the id; add a branch, or a module like `plateArmor.ts` with
+   its own builders. Each builder gets the `Rig` and returns an object in its
+   socket's frame: head pieces around the `HeadFrame` (skull half-width, brow,
+   chin, top), body pieces around `dims.torsoProfile` placed at
+   `dims.torsoCentreZ`, leg pieces along -y from the hip or knee, hands and
+   feet from the wrist and ankle. Use `lathe`, `strip`, `wedge`, `prism`,
+   `box` and `put`; geometry gets a baked top-to-bottom shade through
+   `shade`. Materials come from `material(colour, finish)`; the merged path
+   turns the finish into an atlas tile (cloth, leather, metal, rust, dark ->
+   plain) and the colour into vertex colour, so stick to those finishes or
+   add a tile in `attachmentAtlas.ts` and map it in `surfaceOf`.
+3. Name the set in the lab (`outfitSet` in `src/dev/character/config.ts`)
+   so `?set=<name>:<tier>` dresses it, and add a line to
+   `scripts/character-shot.mjs` if it should be in the milestone shots.
+
+Cloth that should swing goes on a chain: name the mesh `cape-cloth` (or
+`hair-fall`) and the baker weights it down the Cape (or Hair) bones by
+height; everything else is rigid to its socket's bone.
 
 ## The asset pipeline
 
@@ -103,7 +153,11 @@ one GLB per body in `public/models/characters/`:
    brows, skull, torso profile, feet, hands);
 5. decimates the body with meshoptimizer into three LODs, each region to its
    own budget (`LOD_TARGETS`): the head and the hands keep their detail, the
-   rest of the body is decimated hard. The regions are simplified separately
+   rest of the body is decimated hard. The decimation is worked out once, on
+   the human man, and every other body is gathered through the same vertex
+   choices and index buffers, so all bodies share one topology at every LOD
+   (`topology` in the GLB extras) and a vertex index means the same spot on
+   each of them. The regions are simplified separately
    with their borders locked, so they still meet exactly.
 
 | LOD | triangles | head | hands | body |

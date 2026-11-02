@@ -18,6 +18,8 @@ const SHOTS = [
   ['pbr', 'set=plate:steel&style=off&light=golden&frame=torso&ui=0&turntable=0'],
   ['styled', 'set=plate:steel&style=all&light=golden&frame=torso&ui=0&turntable=0'],
   ['moonlit', 'set=plate:mithril&light=moonlit&frame=torso&ui=0&turntable=0'],
+  ['plate-back', 'set=plate:rune&yaw=2.8&light=studio&ui=0&turntable=0'],
+  ['run', 'hair=long&cape=max_cape&anim=run&yaw=1.6&light=golden&ui=0&turntable=0'],
 ];
 
 let url = process.argv[2];

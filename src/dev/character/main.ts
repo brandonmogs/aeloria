@@ -60,6 +60,10 @@ const statsEl = document.getElementById('stats') as HTMLElement;
 const canvas = document.getElementById('view') as HTMLCanvasElement;
 
 const cfg = configFromSearch(location.search);
+
+// Read before the panel syncs the URL (which drops what the config does not carry).
+
+const yawParam = parseFloat(new URLSearchParams(location.search).get('yaw') ?? '');
 if (!cfg.ui) document.body.classList.add('no-ui');
 
 /** Style strengths behind the toggles, so switching one off and on restores its value. */
@@ -457,6 +461,7 @@ async function main(): Promise<void> {
   applyStyle();
   rebuild();
   lab.frame(cfg.framing);
+  if (Number.isFinite(yawParam)) lab.yaw = yawParam;
 
   setInterval(() => {
     const s = lab.stats;
