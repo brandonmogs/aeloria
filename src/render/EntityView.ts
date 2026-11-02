@@ -358,7 +358,7 @@ function rigFor(entity: Entity): Rig {
         return buildHumanoid({
           ...HERO_BUILD,
           height: 1.86,
-          bulk: 1.2,
+          bulk: 1.1,
           shoulders: 1.18,
           waist: 0.9,
           hair: 'short',
@@ -371,7 +371,7 @@ function rigFor(entity: Entity): Rig {
         return buildHumanoid({
           ...HERO_BUILD,
           height: 1.88,
-          bulk: 1.22,
+          bulk: 1.12,
           shoulders: 1.2,
           waist: 0.9,
           hair: 'short',
@@ -400,7 +400,7 @@ function rigFor(entity: Entity): Rig {
         return buildHumanoid({
           ...HERO_BUILD,
           height: 1.9,
-          bulk: 1.28,
+          bulk: 1.15,
           shoulders: 1.2,
           waist: 0.92,
           hair: 'long',

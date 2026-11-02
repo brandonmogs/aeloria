@@ -43,13 +43,14 @@ Two body templates exist; one is chosen when the page loads:
 
 - **The pipeline's bodies** (`public/models/characters/<race>_<m|f>.glb`,
   written by `npm run build:characters`, see the pipeline below): the default
-  in the preview page, and in the game behind `?chars=new`. Each carries the
-  shared humanoid skeleton and one body at three levels of detail; a spec
-  names its body (`body: bodyFor(race, sex)`) and the human man is the
-  default.
+  in the preview page and in the game. Each carries the shared humanoid
+  skeleton and one body at three levels of detail; a spec names its body
+  (`body: bodyFor(race, sex)`) and the human man is the default.
 - **The legacy template** (`public/models/human.{json,bin}` from
-  `scripts/build-human.mjs`): the game's default until the new path is
-  integrated; `?chars=legacy` shows it in the preview page.
+  `scripts/build-human.mjs`): the old body, still loadable in the game with
+  `?chars=legacy` until the integration milestone removes it. Its base mesh
+  keeps a crease under the chest that no reshape smooths away, which is why
+  it read as a bust under a tunic; the preview page does not show it.
 
 Either way, `src/render/human.ts` reshapes the finest mesh per character on
 the CPU (limb bulk, shoulders, waist, hips, jaw, head and limb scale), scales

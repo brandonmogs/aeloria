@@ -135,9 +135,9 @@ export function body(id: BodyId): HumanTemplate {
 }
 
 /**
- * Fetch the bodies before the world is built: the legacy json/bin pair, or
- * every body the character pipeline writes (`?chars=new` in the game), with
- * the human man as the default for a spec that names no body.
+ * Fetch the bodies before the world is built: every body the character
+ * pipeline writes (the game's default), with the human man as the default for
+ * a spec that names no body, or the legacy json/bin pair (`?chars=legacy`).
  */
 export async function loadHumanTemplate(source: TemplateSource = 'legacy', base = '/models/'): Promise<HumanTemplate> {
   if (source === 'legacy') {
@@ -505,6 +505,75 @@ const smooth = (x: number, a: number, b: number): number => {
   return t * t * (3 - 2 * t);
 };
 
+/**
+ * Which vertex each vertex welds to: the build scripts split vertices along
+ * the UV seams, so normals must be gathered on the unsplit body or every seam
+ * shades as a crease. Built once per template from the rest positions.
+ */
+const welds = new WeakMap<HumanTemplate, Uint32Array>();
+function weldOf(T: HumanTemplate): Uint32Array {
+  let weld = welds.get(T);
+  if (weld) return weld;
+  const n = T.vertexCount;
+  weld = new Uint32Array(n);
+  const first = new Map<string, number>();
+  const p = T.positions;
+  for (let i = 0; i < n; i++) {
+    const key = `${Math.round(p[i * 3] * 1e5)},${Math.round(p[i * 3 + 1] * 1e5)},${Math.round(p[i * 3 + 2] * 1e5)}`;
+    const j = first.get(key);
+    if (j === undefined) {
+      first.set(key, i);
+      weld[i] = i;
+    } else weld[i] = j;
+  }
+  welds.set(T, weld);
+  return weld;
+}
+
+/**
+ * Smooth normals of the reshaped body. The template's normals describe the
+ * unreshaped mesh, so without this a chest pressed flat still shades as the
+ * base mesh's breasts and a swollen belly shades as a flat one.
+ */
+function reshapedNormals(T: HumanTemplate, pos: Float32Array): THREE.BufferAttribute {
+  const index = T.shared.index;
+  if (!index) return T.shared.normal;
+  const weld = weldOf(T);
+  const n = T.vertexCount;
+  const acc = new Float32Array(n * 3);
+  const idx = index.array;
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3;
+    const b = idx[t + 1] * 3;
+    const c = idx[t + 2] * 3;
+    const abx = pos[b] - pos[a];
+    const aby = pos[b + 1] - pos[a + 1];
+    const abz = pos[b + 2] - pos[a + 2];
+    const acx = pos[c] - pos[a];
+    const acy = pos[c + 1] - pos[a + 1];
+    const acz = pos[c + 2] - pos[a + 2];
+    // Area-weighted: the cross product's length is twice the triangle's area.
+    const nx = aby * acz - abz * acy;
+    const ny = abz * acx - abx * acz;
+    const nz = abx * acy - aby * acx;
+    for (const v of [idx[t], idx[t + 1], idx[t + 2]]) {
+      const r = weld[v] * 3;
+      acc[r] += nx;
+      acc[r + 1] += ny;
+      acc[r + 2] += nz;
+    }
+  }
+  const out = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    const r = weld[i] * 3;
+    const len = Math.hypot(acc[r], acc[r + 1], acc[r + 2]) || 1;
+    out[i * 3] = acc[r] / len;
+    out[i * 3 + 1] = acc[r + 1] / len;
+    out[i * 3 + 2] = acc[r + 2] / len;
+  }
+  return new THREE.BufferAttribute(out, 3);
+}
+
 /** A person built from the human template, reshaped and dressed for `spec`. */
 export function buildHumanoid(spec: HumanoidSpec): Rig {
   const T = spec.body ? body(spec.body) : humanTemplate();
@@ -524,7 +593,10 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const jaw = spec.jaw ?? 1;
   const seat = spec.seat ?? 0;
   const shirt = spec.shirt ?? !spec.goblin;
-  const sternum = spec.sternum ?? (shirt ? 1 : 0);
+  // The pipeline's men have a real hollow between the pectorals for a shirt
+  // to bridge; the legacy mesh's chest is flat once pressed, and a fill
+  // there would stand as a ridge.
+  const sternum = spec.sternum ?? (shirt && T.source !== 'legacy' ? 1 : 0);
   const rest = T.joints;
   const lm = T.landmarks;
   const n = T.vertexCount;
@@ -581,10 +653,13 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
           d.z += (v.z - rest.spine.z) * (kz - 1) * w;
           if (v.z > rest.spine.z + 0.05) {
             if (chest < 1) {
-              // Press the base mesh's breasts back toward the ribcage.
-              const bx = gauss(Math.abs(v.x) - 0.072, 0.045);
+              // Press the base mesh's slight breasts back to the sternum's
+              // level: a broad, shallow press, measured on the legacy mesh
+              // (its mounds stand about a centimetre proud). The deep, narrow
+              // one before left dimples that read as a bust under a lit shirt.
+              const bx = gauss(Math.abs(v.x) - 0.072, 0.05);
               const by = gauss(v.y - breastY, 0.05);
-              d.z -= 0.034 * (1 - chest) * bx * by * w;
+              d.z -= 0.016 * (1 - chest) * bx * by * w;
             }
             if (pecs > 0) {
               // Pectorals: a broad, flat plate from the sternum out to the
@@ -688,7 +763,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const bones = Object.fromEntries(JOINTS.map((j) => [j, boneList[T.jointBone[j]]])) as Record<JointName, THREE.Bone>;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('normal', T.shared.normal);
+  geo.setAttribute('normal', reshape || moved ? reshapedNormals(T, pos) : T.shared.normal);
   geo.setAttribute('uv', T.shared.uv);
   geo.setAttribute('skinIndex', T.shared.skinIndex);
   geo.setAttribute('skinWeight', T.shared.skinWeight);

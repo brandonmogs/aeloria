@@ -196,8 +196,8 @@ const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 // --- The page --------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  // The pipeline's bodies: the builder dresses those, not the old json/bin
-  // body the game still shows without ?chars=new (photograph that in-game).
+  // The pipeline's bodies: the builder dresses those, not the legacy json/bin
+  // body (`?chars=legacy` in the game, until integration removes it).
   await loadHumanTemplate('glb');
   const lab = new CharacterLab(canvas);
 
