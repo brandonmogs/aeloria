@@ -26,6 +26,8 @@ const FEMALE: Partial<HumanoidSpec> = {
   waist: 0.84,
   chestWidth: 1.02,
   pecs: 0,
+  sternum: 0,
+  seat: 0.25,
   jaw: 0.88,
   neck: 1.06,
   bulk: 0.95,
@@ -41,7 +43,7 @@ const ELF_MALE: Partial<HumanoidSpec> = {
   shoulders: 1.04,
   waist: 0.86,
   chestWidth: 1.02,
-  pecs: 0.3,
+  pecs: 0.2,
   jaw: 0.88,
   neck: 1.14,
 };
@@ -51,7 +53,7 @@ export const RACES: Record<Race, RaceDef> = {
   human: {
     label: 'Human',
     // The man's body already carries a man's frame, so the heroic knobs ease off; the neck of the base target is short.
-    build: { male: { bulk: 1.0, shoulders: 1.08, chestWidth: 1.06, waist: 0.9, pecs: 0.5, neck: 1.12, jaw: 0.94 }, female: FEMALE },
+    build: { male: { bulk: 1.0, shoulders: 1.08, chestWidth: 1.06, waist: 0.9, pecs: 0.25, neck: 1.12, jaw: 0.94 }, female: FEMALE },
     height: { male: 1.84, female: 1.74 },
     hairStyle: { male: 'long', female: 'long' },
     skin: 0xe3b48d,

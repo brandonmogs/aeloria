@@ -196,8 +196,9 @@ const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 // --- The page --------------------------------------------------------------------------
 
 async function main(): Promise<void> {
-  // The pipeline's GLB template by default; ?chars=legacy shows the old json/bin body.
-  await loadHumanTemplate(new URLSearchParams(location.search).get('chars') === 'legacy' ? 'legacy' : 'glb');
+  // The pipeline's bodies: the builder dresses those, not the old json/bin
+  // body the game still shows without ?chars=new (photograph that in-game).
+  await loadHumanTemplate('glb');
   const lab = new CharacterLab(canvas);
 
   let rebuildTimer = 0;

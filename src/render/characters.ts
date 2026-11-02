@@ -512,10 +512,13 @@ function idlePose(t: number, out: Pose): void {
   const breath = Math.sin(t * 2.1) * 0.5 + 0.5;
   set(out, 'spine', 0.02 + breath * 0.02, Math.sin(t * 0.37) * 0.03, 0);
   set(out, 'neck', -0.03 + Math.sin(t * 0.61) * 0.02, Math.sin(t * 0.45) * 0.06, 0);
-  set(out, 'shoulderL', 0.04, 0, -0.12);
-  set(out, 'shoulderR', 0.04, 0, 0.12);
-  set(out, 'elbowL', -0.16, 0, 0.02);
-  set(out, 'elbowR', -0.16, 0, -0.02);
+  // The bodies are baked with the upper arm leaning a little outward and the
+  // forearm a little forward, so only a touch more is added here: the hands
+  // hang beside the thighs, not pressed against their fronts.
+  set(out, 'shoulderL', 0.0, 0, -0.02);
+  set(out, 'shoulderR', 0.0, 0, 0.02);
+  set(out, 'elbowL', -0.05, 0, 0.03);
+  set(out, 'elbowR', -0.05, 0, -0.03);
   const shift = Math.sin(t * 0.3);
   set(out, 'hips', 0, 0, shift * 0.02);
   set(out, 'thighL', 0.02, 0, -shift * 0.02);
@@ -546,8 +549,8 @@ function gaitPose(phase: number, run: number, out: Pose): void {
   set(out, 'footR', -leg * 0.25 - kneeR * 0.3 + 0.05);
   // Arms swing opposite the legs, elbows more bent when running.
   const armSwing = 0.35 + run * 0.45;
-  set(out, 'shoulderL', leg * armSwing, 0, -0.12 - run * 0.1);
-  set(out, 'shoulderR', -leg * armSwing, 0, 0.12 + run * 0.1);
+  set(out, 'shoulderL', leg * armSwing, 0, -0.03 - run * 0.08);
+  set(out, 'shoulderR', -leg * armSwing, 0, 0.03 + run * 0.08);
   set(out, 'elbowL', -0.25 - run * 0.9 + Math.max(0, leg) * 0.25, 0, 0);
   set(out, 'elbowR', -0.25 - run * 0.9 + Math.max(0, -leg) * 0.25, 0, 0);
   // Hips sway and dip, the spine counter-rotates, the head stays level.
@@ -971,12 +974,12 @@ function heroStance(out: Pose, gait: number): void {
   };
   add('thighL', 0, 0.1, 0.035);
   add('thighR', 0, -0.1, -0.035);
-  add('spine', -0.05);
+  add('spine', -0.025);
   add('neck', 0.01);
-  add('shoulderL', 0.02, 0, -0.09);
-  add('shoulderR', 0.02, 0, 0.09);
-  add('elbowL', -0.1, 0, 0.04);
-  add('elbowR', -0.1, 0, -0.04);
+  add('shoulderL', 0.02, 0, 0.04);
+  add('shoulderR', 0.02, 0, -0.04);
+  add('elbowL', -0.04, 0, 0.02);
+  add('elbowR', -0.04, 0, -0.02);
 }
 
 /** out = out * (1 - w) + b * w, for every channel. */

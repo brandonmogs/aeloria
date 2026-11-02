@@ -378,6 +378,14 @@ export interface HumanoidSpec {
   neck?: number;
   /** Jaw width toward the chin relative to the template: 0.9 gives the sharp chin of a Lineage 2 face. */
   jaw?: number;
+  /** Seat: 0 keeps the base mesh's buttocks, 1 presses them a third of the way into the pelvis. */
+  seat?: number;
+  /**
+   * How far a shirt bridges the hollow between the pectorals: 1 fills it so
+   * the cloth reads as one chest (the default under a shirt), 0 lets the
+   * skin's groove show through (the default bare-chested, and on the women).
+   */
+  sternum?: number;
   /** Green skin, no shirt, ragged breeches, bare feet; ears and nose are added by the caller. */
   goblin?: boolean;
   /** Hair style: built as geometry on the skull, with a painted scalp beneath. */
@@ -400,12 +408,14 @@ export const HERO_BUILD = {
   headScale: 0.93,
   legScale: 1.06,
   armScale: 1.03,
-  bulk: 1.1,
-  shoulders: 1.16,
-  waist: 0.86,
-  chestWidth: 1.12,
-  pecs: 1,
+  bulk: 1.06,
+  shoulders: 1.12,
+  waist: 0.9,
+  chestWidth: 1.08,
+  // Athletic, not sculpted: a shirt over a strongly cut chest reads as a bust.
+  pecs: 0.3,
   hips: 0.95,
+  seat: 0.6,
   neck: 1.05,
   jaw: 0.9,
   stance: 'hero',
@@ -512,6 +522,9 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const hipsK = spec.hips ?? 1;
   const neckK = spec.neck ?? 1;
   const jaw = spec.jaw ?? 1;
+  const seat = spec.seat ?? 0;
+  const shirt = spec.shirt ?? !spec.goblin;
+  const sternum = spec.sternum ?? (shirt ? 1 : 0);
   const rest = T.joints;
   const lm = T.landmarks;
   const n = T.vertexCount;
@@ -536,7 +549,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const proj = new THREE.Vector3();
   /** Width factors of the torso by height, shared with the armour profile below. */
   const torsoWidthAt = (y: number): number => 1 + (waist - 1) * gauss(y - waistY, 0.075) + (chestWidth - 1) * gauss(y - ribY, 0.09);
-  const reshape = limbK !== 1 || torsoK !== 1 || belly !== 0 || headK !== 1 || chest !== 1 || waist !== 1 || chestWidth !== 1 || pecs !== 0 || hipsK !== 1 || jaw !== 1;
+  const reshape = limbK !== 1 || torsoK !== 1 || belly !== 0 || headK !== 1 || chest !== 1 || waist !== 1 || chestWidth !== 1 || pecs !== 0 || hipsK !== 1 || jaw !== 1 || seat > 0 || sternum > 0;
   if (reshape) {
     for (let i = 0; i < n; i++) {
       v.fromArray(pos, i * 3);
@@ -546,6 +559,11 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
         if (w <= 0) continue;
         const j = T.owner[T.skinIndex[i * 4 + k]];
         const c = CHILD[j];
+        if (seat > 0 && (j === 'hips' || j === 'thighL' || j === 'thighR') && v.z < rest.hips.z - 0.02) {
+          // The seat: buttocks pressed toward the pelvis.
+          const gy = gauss(v.y - (rest.hips.y - 0.04), 0.07);
+          d.z += (rest.hips.z - 0.02 - v.z) * 0.35 * seat * gy * w;
+        }
         if (c) {
           const a = rest[j];
           axis.copy(rest[c]).sub(a);
@@ -575,8 +593,13 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
               const ax = Math.abs(v.x);
               const px = smooth(ax, 0.012, 0.04) * (1 - smooth(ax, 0.095, 0.135));
               const dy = v.y - pecY;
-              const py = dy > 0 ? gauss(dy, 0.055) : gauss(dy, 0.028);
+              const py = dy > 0 ? gauss(dy, 0.055) : gauss(dy, 0.038);
               d.z += 0.011 * pecs * px * py * w;
+            }
+            if (sternum > 0) {
+              // Under a shirt the cloth bridges the hollow between the
+              // pectorals instead of dipping into it.
+              d.z += 0.014 * sternum * gauss(v.x, 0.03) * gauss(v.y - pecY, 0.045) * w;
             }
           }
         } else if (j === 'head') {
@@ -681,7 +704,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     hairStyle: spec.hair ?? (spec.goblin ? 'bald' : 'short'),
     sleeves: spec.sleeves ?? (spec.goblin ? 'none' : 'short'),
     trousers: spec.trousers ?? (spec.goblin ? 'ragged' : 'full'),
-    shirt: spec.shirt ?? !spec.goblin,
+    shirt,
     booted: spec.booted ?? !spec.goblin,
     bracers: spec.bracers ?? false,
     goblin: !!spec.goblin,
