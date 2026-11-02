@@ -27,6 +27,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import * as THREE from 'three';
+import { relaxHands } from './hands.mjs';
 import { MeshoptSimplifier } from 'meshoptimizer';
 import { GltfBuilder } from './gltf.mjs';
 
@@ -362,6 +363,7 @@ async function buildBody(id, targets, plan = null) {
       }
     }
   }
+  relaxHands(verts, skel, weights);
   const bonePos = {};
   for (const [name, , at] of BONES) if (at) bonePos[name] = at();
 

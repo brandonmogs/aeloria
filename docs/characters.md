@@ -91,6 +91,15 @@ proportion knobs on top of `HERO_BUILD` and default colours
 (`src/render/raceGear.ts`): an orc's tusks, a dwarf's beard. Dark elves share
 the elf body and differ only in skin, hair and eye colour.
 
+The knobs (`HumanoidSpec` in `src/render/human.ts`) reshape the body at
+build time: head, arm and leg scale, `bulk`, `belly`, `shoulders`, `waist`,
+`chestWidth`, `pecs`, `hips`, `neck`, `jaw`, plus two that keep a clothed
+figure reading right: `seat` presses the buttocks toward the pelvis, and
+`sternum` has a shirt bridge the hollow between the pectorals instead of
+dipping into it (on by default under a shirt, off on the women). Keep `pecs`
+low on anyone wearing a shirt: cloth shrink-wrapped over a sculpted chest
+reads as a bust.
+
 The style pass (`src/render/characterStyle.ts`) patches the PBR materials
 through `onBeforeCompile`: soft wrap diffuse on non-metals, a specular boost
 through the metal mask, a coloured fresnel rim light biased toward the back
@@ -150,8 +159,13 @@ one GLB per body in `public/models/characters/`:
    the standard humanoid names (Hips, Spine, Spine1, Spine2, Neck, Head,
    Left/RightShoulder, Arm, ForeArm, Hand, UpLeg, Leg, Foot, ToeBase) plus
    Hair1 to Hair3 and Cape1 to Cape3, short chains for sway;
-3. bakes a canonical standing pose, grounds the model and converts it to
-   metres;
+3. relaxes the hands (`scripts/hands.mjs`: the base mesh's straight, spread
+   fingers are curled gently toward the palm and drawn together through
+   their painted finger weights, before those weights fold into the hand
+   bone), bakes a canonical standing pose with the upper arms leaning a
+   little outward and the forearms a little forward, grounds the model and
+   converts it to metres. The animator's rest poses assume that bake: they
+   add only a few degrees, so the hands hang beside the thighs;
 4. computes smooth normals, splits vertices along UV seams and measures the
    landmarks and radii the renderer needs (eyes, nose, mouth, chin, ears,
    brows, skull, torso profile, feet, hands);

@@ -18,6 +18,7 @@ import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import * as THREE from 'three';
+import { relaxHands } from './hands.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(here, '..', 'public', 'models');
@@ -117,6 +118,7 @@ const jointOf = (bone) => {
 
 // Merged weights per vertex: Map<jointIndex, weight>.
 const weights = JSON.parse(weightsText).weights;
+relaxHands(verts, skel, weights);
 const merged = Array.from({ length: verts.length }, () => new Map());
 for (const [bone, list] of Object.entries(weights)) {
   const j = JOINTS.indexOf(jointOf(bone));
