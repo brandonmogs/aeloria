@@ -34,6 +34,10 @@ export interface CharacterOptions {
   build?: Partial<HumanoidSpec>;
   /** The creator's sliders by id (see morphs.ts). */
   morphs?: MorphValues;
+  /** Eyebrow weight (0 fine to 1 heavy) and colour; lash length in metres at the figure's scale, 0 for none. */
+  brows?: number;
+  browColor?: number;
+  lashes?: number;
   /** Leather bracers on bare forearms. */
   bracers?: boolean;
   /** Glow the main-hand weapon's metal. */
@@ -61,6 +65,9 @@ export class CharacterBuilder {
       ...o.build,
       body: bodyFor(o.race, o.sex),
       morphs: o.morphs,
+      browWeight: o.brows,
+      browColor: o.browColor,
+      lashes: o.lashes,
       height: o.height ?? race.height[o.sex],
       hair: o.hair ?? race.hairStyle[o.sex],
       bracers: o.bracers ?? true,

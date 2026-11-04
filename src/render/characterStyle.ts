@@ -12,6 +12,9 @@ import * as THREE from 'three';
  * - specBoost: extra specular through the metal mask, so armour glints
  * - rim: a coloured rim light with a fresnel falloff, strongest facing `rimDir`
  * - glow: emissive on enchanted gear (materials flagged `userData.enchant`)
+ * - skin: on materials flagged `userData.skin`, where the roughness map's red
+ *   channel says skin, more wrap and a red shift in the wrapped light: light
+ *   bleeding through the terminator the way it does through flesh
  */
 export const characterStyle = {
   wrap: { value: 0.35 },
@@ -23,6 +26,9 @@ export const characterStyle = {
   rimDir: { value: new THREE.Vector3(0, 0.35, -1).normalize() },
   glow: { value: 1.6 },
   glowColor: { value: new THREE.Color(0x58c8ff) },
+  /** Extra wrap on skin and the colour of the light that wraps round it. */
+  skinWrap: { value: 0.3 },
+  sssTint: { value: new THREE.Color(1.0, 0.56, 0.48) },
   time: { value: 0 },
 };
 
@@ -45,7 +51,10 @@ uniform float uGlow;
 uniform vec3 uGlowColor;
 uniform float uEnchant;
 uniform float uStyleTime;
+uniform float uSkinWrap;
+uniform vec3 uSssTint;
 float gStyleMetal = 0.0;
+float gStyleSkin = 0.0;
 `;
 
 const GLOW = /* glsl */ `
@@ -84,7 +93,7 @@ function physicalChunk(): string {
       'float dotNLraw = dot( geometryNormal, directLight.direction );',
       '\tfloat dotNL = saturate( dotNLraw );',
       '\tvec3 irradiance = dotNL * directLight.color;',
-      '\tfloat styleWrap = uWrap * ( 1.0 - gStyleMetal );',
+      '\tfloat styleWrap = ( uWrap + uSkinWrap * gStyleSkin ) * ( 1.0 - gStyleMetal );',
       '\tvec3 irradianceWrap = saturate( ( dotNLraw + styleWrap ) / ( 1.0 + styleWrap ) ) * directLight.color;',
     ].join('\n'),
   );
@@ -96,7 +105,7 @@ function physicalChunk(): string {
   chunk = patch(
     chunk,
     'reflectedLight.directDiffuse += irradiance * BRDF_Lambert( material.diffuseColor );',
-    'reflectedLight.directDiffuse += irradianceWrap * BRDF_Lambert( material.diffuseColor );',
+    'reflectedLight.directDiffuse += ( irradiance + ( irradianceWrap - irradiance ) * mix( vec3( 1.0 ), uSssTint, gStyleSkin ) ) * BRDF_Lambert( material.diffuseColor );',
   );
   return chunk;
 }
@@ -116,6 +125,7 @@ export function applyCharacterStyle(mat: THREE.Material): void {
   mat.userData.styled = true;
   const enchant = { value: mat.userData.enchant ? 1 : 0 };
   const perVertex = mat.userData.perVertexEnchant === true;
+  const skin = mat.userData.skin === true;
   const own = mat.onBeforeCompile;
   const ownKey = mat.customProgramCacheKey;
   mat.onBeforeCompile = (shader, renderer) => {
@@ -130,6 +140,8 @@ export function applyCharacterStyle(mat: THREE.Material): void {
       uGlow: s.glow,
       uGlowColor: s.glowColor,
       uStyleTime: s.time,
+      uSkinWrap: s.skinWrap,
+      uSssTint: s.sssTint,
       uEnchant: enchant,
     });
     physical ??= physicalChunk();
@@ -137,12 +149,13 @@ export function applyCharacterStyle(mat: THREE.Material): void {
     f = patch(f, '#include <common>', '#include <common>\n' + PARS);
     f = patch(f, '#include <lights_physical_pars_fragment>', physical);
     f = patch(f, '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n\tgStyleMetal = metalnessFactor;');
+    if (skin) f = patch(f, '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n\t#ifdef USE_ROUGHNESSMAP\n\tgStyleSkin = texelRoughness.r;\n\t#endif');
     f = patch(f, '#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + (perVertex ? GLOW.replace('uEnchant', 'vEnchant') : GLOW));
     f = patch(f, '#include <opaque_fragment>', RIM + '#include <opaque_fragment>');
     shader.fragmentShader = f;
     own.call(mat, shader, renderer);
   };
-  mat.customProgramCacheKey = () => `${ownKey.call(mat)}|aeloria-character-style-2${perVertex ? '-pv' : ''}`;
+  mat.customProgramCacheKey = () => `${ownKey.call(mat)}|aeloria-character-style-3${perVertex ? '-pv' : ''}${skin ? '-skin' : ''}`;
   mat.needsUpdate = true;
 }
 

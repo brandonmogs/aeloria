@@ -204,7 +204,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
   const buckle = rgb(0xc9a85a);
   const piping = rgb(0xb8963f);
   const undershirt = rgb(0xe9e1cc);
-  const lip = mix(skin, rgb(look.goblin ? 0x3a3020 : 0x8a3a3a), 0.5);
+  const lip = mix(skin, rgb(look.goblin ? 0x3a3020 : 0x9a4444), 0.45);
   const dark = rgb(0x1a1210);
   const white = rgb(0xffffff);
   const smooth = (v: number, a: number, b: number): number => {
@@ -258,6 +258,8 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
     let col: RGB = skin;
     let rough = 0.52;
     let mottle = look.goblin ? 0.18 : 0.07;
+    /** Painted cloth, leather or hair rather than skin: left out of the skin mask. */
+    let cloth = false;
 
     switch (name) {
       case 'head': {
@@ -272,6 +274,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
             col = hair;
             rough = 0.62;
             mottle = 0.22;
+            cloth = true;
             break;
           }
         }
@@ -288,22 +291,20 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           // Brows: thin and arched, peaking past the middle and tapering into a tail.
           if (ax > 0.009 && ax < 0.057) {
             const t = (ax - 0.009) / 0.048;
-            const arch = eye.y + 0.029 + 0.005 * Math.sin(Math.PI * Math.min(1, t * 1.15));
+            const arch = eye.y + 0.02 + 0.006 * Math.sin(Math.PI * Math.min(1, t * 1.15)) - 0.003 * smooth(t, 0.8, 1);
             const half = (0.0028 + 0.0008 * Math.sin(Math.PI * t)) * (1 - 0.55 * smooth(t, 0.6, 1));
             const d = Math.abs(y - arch) / half;
-            if (d < 1) col = mix(col, scale(hair, 0.6), (look.goblin ? 0.6 : 0.85) * (1 - smooth(d, 0.55, 1)));
+            // Faint: the brow itself is strands (see faceFeatures.ts); this is the shadow under them.
+            if (d < 1) col = mix(col, scale(hair, 0.6), (look.goblin ? 0.6 : 0.4) * (1 - smooth(d, 0.3, 1)));
           }
-          // Lids: a soft shadow in the crease above the eye, a lash line
-          // along the upper lid winging up at the outer corner, and a fainter
-          // line under the eye.
+          // Lids: a soft shadow in the crease above the eye and a faint one
+          // below it. The lashes are strands (see faceFeatures.ts); a painted
+          // line at this texture's resolution is a staircase.
           const de = Math.hypot(dxe, dy);
           if (dy > 0.003 && dy < 0.017 && Math.abs(dxe) < 0.017) {
             col = mix(col, scale(skin, 0.7), 0.16 * (1 - smooth(dy, 0.009, 0.017)) * (1 - smooth(Math.abs(dxe), 0.011, 0.017)));
           }
           if (de < 0.02 && dy < 0) col = mix(col, scale(skin, 0.75), 0.07 * (1 - de / 0.02));
-          const lashY = eye.y + 0.008 + 0.0025 * smooth(dxe, 0.006, 0.014);
-          if (Math.abs(y - lashY) < 0.0011 + 0.0004 * smooth(dxe, 0, 0.012) && dxe > -0.0135 && dxe < 0.015) col = mix(col, dark, 0.7);
-          if (Math.abs(dy + 0.0078) < 0.0006 && Math.abs(dxe) < 0.011) col = mix(col, dark, 0.3);
           // Nose: the sides of the bridge fall into shade; the nostrils are dark.
           const dny = y - nose.y;
           if (dny > 0.004 && dny < 0.045 && ax > 0.004 && ax < 0.02 && z > nose.z - 0.05) {
@@ -326,7 +327,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
               col = mix(col, white, 0.14 * hl);
               rough = 0.38;
             }
-            if (Math.abs(dm) < 0.0008) col = mix(col, dark, 0.4 * (0.4 + 0.6 * edge));
+            if (Math.abs(dm) < 0.0005) col = mix(col, dark, 0.32 * (0.3 + 0.7 * edge));
           }
           // Cheek warmth.
           const dc = Math.hypot(ax - 0.046, y - (eye.y - 0.04));
@@ -350,6 +351,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           col = leather;
           rough = 0.6;
           mottle = 0.12;
+          cloth = true;
           if (Math.abs(dBelt) > 0.016) col = mix(col, buckle, 0.18);
           if (front && ax < 0.026 && Math.abs(dBelt) < 0.017) {
             const frame = ax > 0.019 || Math.abs(dBelt) > 0.011 || (ax < 0.003 && Math.abs(dBelt) < 0.012);
@@ -362,6 +364,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
             col = tunic;
             rough = 0.82;
             mottle = 0.14;
+            cloth = true;
             if (front && vT > 0 && ySpine < vTop + 0.03) {
               if (ax < vHalf) {
                 // Inside the V: the undershirt, laced across three times.
@@ -390,10 +393,12 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           col = edge ? piping : scale(tunic, 0.88);
           rough = edge ? 0.5 : 0.82;
           mottle = edge ? 0.05 : 0.14;
+          cloth = true;
         } else if (look.trousers !== 'none') {
           col = trouser;
           rough = 0.88;
           mottle = 0.14;
+          cloth = true;
         }
         break;
       }
@@ -404,6 +409,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
             col = tunic;
             rough = 0.82;
             mottle = 0.14;
+            cloth = true;
             if (look.sleeves === 'short' && y < sleeveEnd + 0.006) {
               col = piping;
               rough = 0.5;
@@ -418,6 +424,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           col = tunic;
           rough = 0.82;
           mottle = 0.14;
+          cloth = true;
           if (y < cuff + 0.014 && y > cuff) {
             col = piping;
             rough = 0.5;
@@ -429,6 +436,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           col = Math.abs(d - 0.03) < 0.004 || Math.abs(d - 0.09) < 0.004 ? strap : leather;
           rough = 0.6;
           mottle = 0.12;
+          cloth = true;
         }
         break;
       case 'thighL':
@@ -438,6 +446,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           col = trouser;
           rough = 0.88;
           mottle = look.trousers === 'ragged' ? 0.24 : 0.14;
+          cloth = true;
         }
         break;
       }
@@ -449,10 +458,12 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           col = d < 0.035 ? scale(boots, 1.3) : d < 0.038 ? scale(boots, 0.6) : boots;
           rough = d < 0.035 ? 0.55 : 0.6;
           mottle = 0.12;
+          cloth = true;
         } else if (look.trousers === 'full') {
           col = trouser;
           rough = 0.88;
           mottle = 0.14;
+          cloth = true;
         }
         break;
       case 'footL':
@@ -461,6 +472,7 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           col = y < soleFoot ? scale(boots, 0.55) : boots;
           rough = 0.6;
           mottle = 0.12;
+          cloth = true;
         }
         break;
       default:
@@ -472,7 +484,8 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
     cd[i * 4 + 2] = Math.min(255, col[2] * k);
     cd[i * 4 + 3] = 255;
     const rv = Math.round(rough * 255);
-    rd[i * 4] = rv;
+    // R carries the skin mask for the shading pass (see characterStyle.ts); G is what three reads as roughness.
+    rd[i * 4] = cloth ? 0 : 255;
     rd[i * 4 + 1] = rv;
     rd[i * 4 + 2] = rv;
     rd[i * 4 + 3] = 255;
@@ -509,54 +522,93 @@ export function lookMaterial(T: HumanTemplate, look: LookSpec): THREE.MeshStanda
     normalMap: skinDetail().normal,
     normalScale: new THREE.Vector2(0.18, 0.18),
   });
+  // The style pass reads the skin mask out of the roughness map's red channel.
+  m.userData.skin = true;
   materialCache.set(key, m);
   return m;
 }
 
-/** An eyeball: white with a coloured iris and pupil facing +z, faintly glowing for goblins. */
+const sstep = (v: number, a: number, b: number): number => {
+  const t = clamp01((v - a) / (b - a));
+  return t * t * (3 - 2 * t);
+};
+
+/**
+ * The brightness of an iris at radius `rr` (0 at the pupil's centre, 1 at
+ * the limbus) and angle, multiplying the iris colour: a soft-edged pupil, a
+ * lighter collarette round it, radial fibres with crypts between them, and
+ * a dark limbal ring.
+ */
+export function irisShade(rr: number, angle: number): number {
+  if (rr < 0.33) return 0.02;
+  const pupilEdge = sstep(rr, 0.33, 0.4);
+  const spokes = 0.5 + 0.5 * Math.sin(angle * 41 + 2.3 * Math.sin(angle * 13 + rr * 9));
+  const finer = 0.5 + 0.5 * Math.sin(angle * 97 + 1.7 * Math.cos(angle * 5 - rr * 6));
+  const fibre = 0.72 + 0.4 * (0.6 * spokes + 0.4 * finer);
+  const collarette = 1 + 0.3 * sstep(rr, 0.36, 0.46) * (1 - sstep(rr, 0.5, 0.64));
+  const crypts = 1 - 0.35 * Math.max(0, Math.sin(angle * 17 + 1.2) * Math.sin(rr * 25 + angle * 3)) * sstep(rr, 0.5, 0.75);
+  const limbus = 1 - 0.85 * sstep(rr, 0.8, 1);
+  return Math.max(0.02, pupilEdge * fibre * collarette * crypts * limbus * (1.15 - 0.4 * rr));
+}
+
+/** How much darker the white of the eye gets toward the iris, under the lids' shadow and the cornea's curve. */
+export function scleraShade(rr: number): number {
+  return 1 - 0.18 * (1 - sstep(rr, 1, 1.5));
+}
+
+/** An eyeball: the white with a painted iris and pupil facing +z, a slit pupil and a faint glow for goblins. */
 export function eyeMaterial(iris: number, glow: boolean): THREE.MeshStandardMaterial {
   const key = `${iris}:${glow ? 1 : 0}`;
   const hit = eyeCache.get(key);
   if (hit) return hit;
-  const w = 256;
-  const h = 128;
+  const w = 512;
+  const h = 256;
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext('2d')!;
-  ctx.fillStyle = glow ? '#e8dfc4' : '#f3efe9';
-  ctx.fillRect(0, 0, w, h);
-  // A hint of pink toward the corners.
-  const tint = ctx.createRadialGradient(w * 0.25, h / 2, 10, w * 0.25, h / 2, 60);
-  tint.addColorStop(0, 'rgba(255,255,255,0)');
-  tint.addColorStop(1, 'rgba(210,150,140,0.35)');
-  ctx.fillStyle = tint;
-  ctx.fillRect(0, 0, w, h);
+  const img = ctx.createImageData(w, h);
+  const d = img.data;
   const cx = w * 0.25;
   const cy = h * 0.5;
-  const ir = glow ? 26 : 22;
-  const [r, g, b] = rgb(iris);
-  const irisG = ctx.createRadialGradient(cx, cy, ir * 0.15, cx, cy, ir);
-  irisG.addColorStop(0, `rgb(${Math.min(255, r * 1.3)}, ${Math.min(255, g * 1.3)}, ${Math.min(255, b * 1.3)})`);
-  irisG.addColorStop(0.85, `rgb(${r}, ${g}, ${b})`);
-  irisG.addColorStop(1, `rgb(${r * 0.35}, ${g * 0.35}, ${b * 0.35})`);
-  ctx.fillStyle = irisG;
-  ctx.beginPath();
-  ctx.arc(cx, cy, ir, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#0b0908';
-  ctx.beginPath();
-  if (glow) ctx.ellipse(cx, cy, 5, ir * 0.7, 0, 0, Math.PI * 2);
-  else ctx.arc(cx, cy, ir * 0.42, 0, Math.PI * 2);
-  ctx.fill();
+  const ir = glow ? 52 : 44;
+  const irisRgb = rgb(iris);
+  const sclera: RGB = glow ? [232, 223, 196] : [243, 239, 233];
+  const flush: RGB = [205, 130, 120];
+  const vein = tileableNoise(64, 3, 57, 6);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = x - cx;
+      const dy = y - cy;
+      const rr = Math.hypot(dx, dy) / ir;
+      let col: RGB;
+      if (rr < 1) {
+        const slit = glow && Math.abs(dx) < ir * 0.12 && Math.abs(dy) < ir * 0.72;
+        const k = slit ? 0.02 : Math.min(1, 0.8 * irisShade(glow ? Math.max(rr, 0.41) : rr, Math.atan2(dy, dx)));
+        col = scale(irisRgb, k);
+      } else {
+        // The white, flushed pink toward the corners (u near 0 and 0.5) with faint veins.
+        const u = x / w;
+        const corner = Math.max(0, 1 - Math.min(u, Math.abs(u - 0.5), 1 - u) / 0.09);
+        const veins = Math.max(0, vein[(y % 64) * 64 + (x % 64)] - 0.62) * 2.5 * corner;
+        col = scale(mix(sclera, flush, 0.3 * corner + veins), scleraShade(rr));
+      }
+      const i = (y * w + x) * 4;
+      d[i] = Math.min(255, col[0]);
+      d[i + 1] = Math.min(255, col[1]);
+      d[i + 2] = Math.min(255, col[2]);
+      d[i + 3] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
   const map = new THREE.CanvasTexture(canvas);
   map.colorSpace = THREE.SRGBColorSpace;
   map.anisotropy = 4;
   const m = new THREE.MeshStandardMaterial({
     map,
-    roughness: 0.25,
+    roughness: 0.12,
     metalness: 0,
-    envMapIntensity: 0.9,
+    envMapIntensity: 1.2,
     ...(glow ? { emissive: new THREE.Color(iris), emissiveMap: map, emissiveIntensity: 1.4 } : {}),
   });
   m.userData.iris = iris;

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { strandTextures } from './hair';
+import { irisShade, scleraShade } from './humanSkin';
 import { normalMap, tileableNoise } from './texgen';
 
 /**
@@ -149,9 +150,9 @@ export function attachmentAtlas(): AttachmentAtlas {
   }
 
   {
-    // Eye: the sclera, pink toward the corners, and a grey iris the iris cap's
-    // vertex colour tints, with a black pupil and a dark limbus.
-    const streak = tileableNoise(TILE_PX, 3, 53, 24);
+    // Eye: the sclera, pink toward the corners and shaded toward the iris,
+    // and the iris in grey for the iris cap's vertex colour to tint (the same
+    // painted iris as the eyeball material's, see humanSkin.ts).
     const cx = EYE_IRIS.u * TILE_PX;
     const cy = EYE_IRIS.v * TILE_PX;
     const R = EYE_IRIS.radius * TILE_PX;
@@ -160,20 +161,13 @@ export function attachmentAtlas(): AttachmentAtlas {
         const x = i % TILE_PX;
         const y = Math.floor(i / TILE_PX);
         const rr = Math.hypot(x - cx, y - cy) / R;
-        if (rr < 1.05) {
-          if (rr < 0.4) return 0.03;
-          // Faint radial fibres: the noise read along the iris's angle.
-          const spoke = streak[(Math.round((Math.atan2(y - cy, x - cx) / Math.PI + 1) * 64) % TILE_PX) * TILE_PX + (Math.round(rr * 40) % TILE_PX)];
-          const lum = 0.6 + 0.4 * (1 - rr) + 0.1 * (spoke - 0.5);
-          const limbus = rr > 0.86 ? 1 - (rr - 0.86) / 0.19 : 1;
-          return Math.max(0.08, lum * limbus);
-        }
-        // Sclera: the corners (u near 0 and 0.5) flush a little pink.
+        if (rr < 1) return Math.min(1, 0.8 * irisShade(rr, Math.atan2(y - cy, x - cx)));
         const u = x / TILE_PX;
-        const corner = Math.max(0, 1 - Math.min(u, Math.abs(u - 0.5), 1 - u) / 0.08);
-        return [0.95 - 0.1 * corner, 0.94 - 0.28 * corner, 0.92 - 0.3 * corner];
+        const corner = Math.max(0, 1 - Math.min(u, Math.abs(u - 0.5), 1 - u) / 0.09);
+        const k = scleraShade(rr);
+        return [(0.95 - 0.1 * corner) * k, (0.94 - 0.28 * corner) * k, (0.92 - 0.3 * corner) * k];
       },
-      roughness: 0.25,
+      roughness: 0.14,
       metalness: 0,
     });
   }

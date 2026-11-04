@@ -193,10 +193,37 @@ function hairMaterial(color: number, cards: boolean): THREE.MeshPhysicalMaterial
   return m;
 }
 
+/**
+ * The alpha-tested strand material of the brows and lashes: the hair cards'
+ * texture, but matte, so the fine hair of the face never catches the sky.
+ * Merged into the attachments, it takes the hair cards' tile.
+ */
+export function strandMaterial(color: number): THREE.MeshPhysicalMaterial {
+  const key = `${color}:fine`;
+  const hit = materialCache.get(key);
+  if (hit) return hit;
+  const m = new THREE.MeshPhysicalMaterial({
+    color,
+    map: strandTextures().card,
+    vertexColors: true,
+    roughness: 0.8,
+    metalness: 0,
+    envMapIntensity: 0.06,
+    specularIntensity: 0.1,
+    alphaTest: 0.5,
+    alphaToCoverage: true,
+    side: THREE.DoubleSide,
+  });
+  m.name = 'face-strands';
+  m.userData.tile = 'strand';
+  materialCache.set(key, m);
+  return m;
+}
+
 // --- Geometry -------------------------------------------------------------------------
 
 /** Accumulates triangles with position, normal, uv and colour. */
-class Builder {
+export class Builder {
   readonly pos: number[] = [];
   readonly nor: number[] = [];
   readonly uv: number[] = [];

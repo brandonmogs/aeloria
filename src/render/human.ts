@@ -3,6 +3,7 @@ import { JOINTS, JointName, Rig, RigDims, Sockets, Stance } from './characters';
 import { eyeMaterial, lookMaterial, LookSpec } from './humanSkin';
 import { buildBaseBoots } from './gear';
 import { HairStyle, SCALP_COLS, SCALP_ROWS, ScalpShape, buildHair } from './hair';
+import { FaceField, buildBrows, buildLashes } from './faceFeatures';
 import { Glb, parseGlb, readFloat, readUint16, readUint32 } from './glb';
 import { MorphValues, addMeasures, applyMorphs, cloneMeasures, hasMorphs, loadMorphs, morphSet } from './morphs';
 
@@ -439,6 +440,12 @@ export interface HumanoidSpec {
    * sculpted on top of the race's body, before the proportion knobs above.
    */
   morphs?: MorphValues;
+  /** Eyebrow weight, 0 fine to 1 heavy; half by default. */
+  browWeight?: number;
+  /** Eyebrow colour; the hair's, darkened, by default. */
+  browColor?: number;
+  /** Upper eyelash length in metres at the figure's scale; the sex's usual by default, 0 for none. */
+  lashes?: number;
   /** Green skin, no shirt, ragged breeches, bare feet; ears and nose are added by the caller. */
   goblin?: boolean;
   /** Hair style: built as geometry on the skull, with a painted scalp beneath. */
@@ -882,6 +889,12 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     eye.castShadow = false;
     bones.head.add(eye);
   }
+  // The skin round each eye, read off the finished head into the head bone's space: the lids' edges for the lashes, the surface for the brows.
+  const fieldOf = (l: THREE.Vector3, sign: number): FaceField | undefined => (T.source === 'legacy' ? undefined : new FaceField(pos, T.indices, posed.head, onHead(l), eyeR, sign));
+  const skinL = fieldOf(lm.eyeL, 1);
+  const skinR = fieldOf(lm.eyeR, -1);
+  const lidL = skinL?.lidMargin() ?? undefined;
+  const lidR = skinR?.lidMargin() ?? undefined;
 
   // 6. Measurements for equipment, in the rig's units. The scalp is measured
   //    from the finished head so hair hugs whatever skull this figure has.
@@ -933,6 +946,15 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
       back: (lm.skullBack - rest.head.z) * headK * s,
       earL,
       earR,
+      eyeL: onHead(lm.eyeL),
+      eyeR: onHead(lm.eyeR),
+      eyeRadius: eyeR,
+      lidL,
+      lidR,
+      skinL,
+      skinR,
+      browPoints: lm.brow.map((v) => onHead(v)),
+      headScale: s * headK,
       scalp,
     },
   };
@@ -969,6 +991,14 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   if (hair) {
     bones.head.add(hair);
     rig.hair = hair;
+  }
+  // Brows and lashes as strands; the painter leaves only a faint shadow under the brow.
+  if (!look.goblin) {
+    const browColor = spec.browColor ?? new THREE.Color(p.hair).multiplyScalar(0.7).getHex();
+    const brows = buildBrows(rig, browColor, spec.browWeight ?? 0.5);
+    if (brows) bones.head.add(brows);
+    const lashes = buildLashes(rig, (spec.lashes ?? (T.sex === 'female' ? 0.0052 : 0.0038)) * s * headK);
+    if (lashes) bones.head.add(lashes);
   }
   spec.extras?.(rig);
   return rig;

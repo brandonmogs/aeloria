@@ -123,6 +123,17 @@ and underlayer clothing are painted per look onto the body's UV atlas
 worn gear is built piece by piece in a joint socket's frame (`gear.ts`, and
 `plateArmor.ts` for the plate set), hung by `outfit.ts`.
 
+The eyes are real spheres with a painted iris, and the brows and lashes are
+strands on the head bone (`faceFeatures.ts`), placed by reading the finished
+head itself: a small depth field round each eye (`FaceField`) is rasterised
+from the final mesh, so the edge of each eye's opening (where the lashes
+grow) and the skin under the brow's arch (where the ribbon lies) follow
+every slider and race. Nothing about the lids is guessed from the eyeball,
+whose centre sits some four millimetres behind the lid margins in the
+MakeHuman mesh. The skin texture no longer paints a lash line: at its
+resolution any line across the face is a staircase, so the painter keeps to
+soft shading there and leaves the lines to geometry.
+
 `CharacterBuilder.build({ race, sex, hair, skinTone, equipment, ... })`
 (`src/render/characterBuilder.ts`) does all of that in one call and, by
 default, merges everything hanging on the skeleton (gear, hair, eyes, base
@@ -247,7 +258,7 @@ one GLB per body in `public/models/characters/`:
 
 | LOD | triangles | head | hands | body |
 | --- | --- | --- | --- | --- |
-| 0 | 7000 | 3400 | 600 | 3000 |
+| 0 | about 12000 | 8090 (all of it) | 1000 | 3000 |
 | 1 | 2500 | 1000 | 200 | 1300 |
 | 2 | about 900 | 300 | about 150 | 440 |
 

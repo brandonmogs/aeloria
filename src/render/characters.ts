@@ -128,6 +128,18 @@ export interface Rig {
   attachments?: THREE.SkinnedMesh;
 }
 
+/** The edge of an eye's opening: runs of points along the upper and lower lid from the inner corner to the outer. */
+export interface LidMargin {
+  upper: THREE.Vector3[];
+  lower: THREE.Vector3[];
+}
+
+/** The skin round an eye, read off the finished head. */
+export interface SkinField {
+  /** The surface point and its normal under (x, y) of the head's space, seen from the front; false off the mesh. */
+  surface(x: number, y: number, point: THREE.Vector3, normal: THREE.Vector3): boolean;
+}
+
 export interface RigDims {
   scale: number;
   thigh: number;
@@ -174,6 +186,19 @@ export interface RigDims {
     back: number;
     earL: THREE.Vector3;
     earR: THREE.Vector3;
+    /** The eyeballs' centres and radius, and the edges of the lids, for the lashes. */
+    eyeL?: THREE.Vector3;
+    eyeR?: THREE.Vector3;
+    eyeRadius?: number;
+    lidL?: LidMargin;
+    lidR?: LidMargin;
+    /** The skin round each eye, for the brows. */
+    skinL?: SkinField;
+    skinR?: SkinField;
+    /** The left brow's landmarks, inner end outward, for the brows. */
+    browPoints?: THREE.Vector3[];
+    /** Metres per template metre on the head. */
+    headScale?: number;
     /** The skull's surface by direction, for hair to sit on. */
     scalp?: ScalpShape;
   };

@@ -53,8 +53,10 @@ const TARGET_DIR = 'makehuman/data/targets/';
  * which carries most of the painted detail), the hands (the fingers go first
  * otherwise) and the rest of the body, which is smooth enough to decimate hard.
  */
+// LOD0 keeps the whole head (8090 triangles in the base mesh): the character
+// screen looks it in the face, and a decimated cheek shades in facets.
 const LOD_TARGETS = [
-  { head: 3400, hands: 600, body: 3000 },
+  { head: 8090, hands: 1000, body: 3000 },
   { head: 1000, hands: 200, body: 1300 },
   { head: 300, hands: 60, body: 440 },
 ];
