@@ -15,6 +15,10 @@ import * as THREE from 'three';
  * - skin: on materials flagged `userData.skin`, where the roughness map's red
  *   channel says skin, more wrap and a red shift in the wrapped light: light
  *   bleeding through the terminator the way it does through flesh
+ * - hair: on materials flagged `userData.hair` (or, for the merged
+ *   attachments, on the tiles listed in `userData.hairTiles`), two highlights
+ *   running across the strands instead of the usual specular dot, less of
+ *   the sky in the hair, and a rim tinted by the hair's own colour
  */
 export const characterStyle = {
   wrap: { value: 0.35 },
@@ -55,6 +59,37 @@ uniform float uSkinWrap;
 uniform vec3 uSssTint;
 float gStyleMetal = 0.0;
 float gStyleSkin = 0.0;
+float gStyleHair = 0.0;
+vec3 gStyleTangent = vec3( 0.0, 1.0, 0.0 );
+// Hair: two highlights across the strands (Kajiya-Kay, each lobe shifted along
+// the strand): a pale one toward the roots and a coloured one toward the tips.
+vec3 styleHairSpecular( const in vec3 lightDir, const in vec3 viewDir, const in vec3 normal, const in vec3 base ) {
+	vec3 halfDir = normalize( lightDir + viewDir );
+	vec3 t1 = normalize( gStyleTangent - normal * 0.2 );
+	vec3 t2 = normalize( gStyleTangent + normal * 0.15 );
+	float th1 = dot( t1, halfDir );
+	float th2 = dot( t2, halfDir );
+	float s1 = pow( sqrt( max( 0.0, 1.0 - th1 * th1 ) ), 140.0 );
+	float s2 = pow( sqrt( max( 0.0, 1.0 - th2 * th2 ) ), 28.0 );
+	float facing = smoothstep( -0.3, 0.3, dot( normal, lightDir ) );
+	return ( mix( base, vec3( 1.0 ), 0.55 ) * s1 * 0.45 + base * s2 * 0.7 ) * facing;
+}
+`;
+
+// The strand direction, read from how the texture's v runs across the screen.
+const TANGENT = /* glsl */ `
+#ifdef USE_MAP
+{
+	vec3 sdx = dFdx( vViewPosition );
+	vec3 sdy = dFdy( vViewPosition );
+	vec2 tdx = dFdx( vMapUv );
+	vec2 tdy = dFdy( vMapUv );
+	vec3 along = sdy * tdx.x - sdx * tdy.x;
+	along -= normal * dot( along, normal );
+	float alongLen = length( along );
+	if ( alongLen > 1e-8 ) gStyleTangent = along / alongLen;
+}
+#endif
 `;
 
 const GLOW = /* glsl */ `
@@ -65,7 +100,7 @@ const RIM = /* glsl */ `
 {
 	float styleFresnel = pow( 1.0 - saturate( dot( normal, geometryViewDir ) ), uRimPower );
 	float styleBehind = 0.3 + 0.7 * saturate( dot( normal, uRimDir ) );
-	outgoingLight += uRimColor * ( uRim * styleFresnel * styleBehind );
+	outgoingLight += mix( uRimColor, uRimColor * ( 0.35 + 1.3 * diffuseColor.rgb ), gStyleHair ) * ( uRim * styleFresnel * styleBehind );
 }
 `;
 
@@ -100,7 +135,10 @@ function physicalChunk(): string {
   chunk = patch(
     chunk,
     'reflectedLight.directSpecular += irradiance * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material );',
-    'reflectedLight.directSpecular += irradiance * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material ) * ( 1.0 + uSpecBoost * gStyleMetal );',
+    [
+      'reflectedLight.directSpecular += irradiance * BRDF_GGX( directLight.direction, geometryViewDir, geometryNormal, material ) * ( 1.0 + uSpecBoost * gStyleMetal ) * ( 1.0 - 0.6 * gStyleHair );',
+      '\treflectedLight.directSpecular += irradianceWrap * gStyleHair * styleHairSpecular( directLight.direction, geometryViewDir, geometryNormal, material.diffuseColor );',
+    ].join('\n'),
   );
   chunk = patch(
     chunk,
@@ -126,6 +164,8 @@ export function applyCharacterStyle(mat: THREE.Material): void {
   const enchant = { value: mat.userData.enchant ? 1 : 0 };
   const perVertex = mat.userData.perVertexEnchant === true;
   const skin = mat.userData.skin === true;
+  const hair = mat.userData.hair === true;
+  const hairTiles = Array.isArray(mat.userData.hairTiles) ? (mat.userData.hairTiles as number[]) : null;
   const own = mat.onBeforeCompile;
   const ownKey = mat.customProgramCacheKey;
   mat.onBeforeCompile = (shader, renderer) => {
@@ -148,14 +188,19 @@ export function applyCharacterStyle(mat: THREE.Material): void {
     let f = shader.fragmentShader;
     f = patch(f, '#include <common>', '#include <common>\n' + PARS);
     f = patch(f, '#include <lights_physical_pars_fragment>', physical);
-    f = patch(f, '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n\tgStyleMetal = metalnessFactor;');
+    const hairFlag = hair ? '\n\tgStyleHair = 1.0;' : hairTiles ? `\n\tgStyleHair = ( ${hairTiles.map((t) => `abs( vTile - ${t.toFixed(1)} ) < 0.5`).join(' || ')} ) ? 1.0 : 0.0;` : '';
+    f = patch(f, '#include <metalnessmap_fragment>', '#include <metalnessmap_fragment>\n\tgStyleMetal = metalnessFactor;' + hairFlag);
+    if (hair || hairTiles) {
+      f = patch(f, '#include <normal_fragment_maps>', '#include <normal_fragment_maps>\n' + TANGENT);
+      f = patch(f, '#include <lights_fragment_end>', 'radiance *= 1.0 - 0.65 * gStyleHair;\n\t#include <lights_fragment_end>');
+    }
     if (skin) f = patch(f, '#include <roughnessmap_fragment>', '#include <roughnessmap_fragment>\n\t#ifdef USE_ROUGHNESSMAP\n\tgStyleSkin = texelRoughness.r;\n\t#endif');
     f = patch(f, '#include <emissivemap_fragment>', '#include <emissivemap_fragment>' + (perVertex ? GLOW.replace('uEnchant', 'vEnchant') : GLOW));
     f = patch(f, '#include <opaque_fragment>', RIM + '#include <opaque_fragment>');
     shader.fragmentShader = f;
     own.call(mat, shader, renderer);
   };
-  mat.customProgramCacheKey = () => `${ownKey.call(mat)}|aeloria-character-style-3${perVertex ? '-pv' : ''}${skin ? '-skin' : ''}`;
+  mat.customProgramCacheKey = () => `${ownKey.call(mat)}|aeloria-character-style-4${perVertex ? '-pv' : ''}${skin ? '-skin' : ''}${hair ? '-hair' : ''}${hairTiles ? '-ht' + hairTiles.join('.') : ''}`;
   mat.needsUpdate = true;
 }
 

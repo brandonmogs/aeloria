@@ -60,7 +60,7 @@ const TABS: ReadonlyArray<readonly [Tab, string]> = [
 /** Where the view goes when a tab opens, and how much room it leaves round the figure. */
 const TAB_FRAMING: Record<Tab, [Framing, number]> = { preset: ['full', 1], body: ['full', 1], face: ['head', 1.3], hair: ['head', 1.45], style: ['head', 1.7] };
 
-const HAIR_LABELS: Record<HairStyle, string> = { long: 'Long', short: 'Short', bald: 'Shaved' };
+const HAIR_LABELS: Record<HairStyle, string> = { long: 'Long', bob: 'Bob', ponytail: 'Ponytail', short: 'Short', cropped: 'Cropped', bald: 'Shaved' };
 const BEARD_LABELS: Record<BeardStyle, string> = { none: 'Clean', stubble: 'Stubble', goatee: 'Goatee', short: 'Short', full: 'Full' };
 const SCAR_LABELS: Record<ScarStyle, string> = { none: 'None', brow: 'Brow', cheek: 'Cheek', lip: 'Lip', eye: 'Eye' };
 const PAINT_LABELS: Record<PaintStyle, string> = { none: 'None', stripe: 'Stripe', bars: 'Bars', claw: 'Claw', dots: 'Dots' };

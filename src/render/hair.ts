@@ -7,7 +7,10 @@ import { seeded } from './texgen';
  * Hair as geometry, in the manner of a Lineage 2 character: a glossy,
  * volumetric cap shrink-wrapped to the actual skull, a sheet of hair falling
  * down the back for long styles, and strand cards (alpha-tested ribbons)
- * for a swept fringe and the locks in front of the ears.
+ * for a swept fringe and the locks in front of the ears. The styles: cropped,
+ * short, long (a fall down the back that lies along it from the shoulders),
+ * bob (to the jaw all round) and ponytail (gathered through a band at the
+ * back of the crown).
  *
  * The scalp is measured from the finished head mesh (see human.ts): for
  * every direction out of a point inside the skull, the furthest skin. The
@@ -17,7 +20,7 @@ import { seeded } from './texgen';
  * half-width, so it fits whatever head the figure was built with.
  */
 
-export type HairStyle = 'short' | 'long' | 'bald';
+export type HairStyle = 'bald' | 'cropped' | 'short' | 'long' | 'bob' | 'ponytail';
 
 /** The scalp seen from inside the skull: the furthest skin per direction. */
 export interface ScalpShape {
@@ -67,19 +70,24 @@ function direction(a: number, e: number, out: THREE.Vector3): THREE.Vector3 {
 /** Fold an azimuth to 0 (front) .. π (back). */
 const fold = (a: number): number => Math.abs(Math.atan2(Math.sin(a), Math.cos(a)));
 
+/** Styles whose hair hangs past the nape: a longer hairline and a thicker cap. */
+const longish = (style: HairStyle): boolean => style === 'long' || style === 'bob';
+
 // --- Textures -------------------------------------------------------------------------
 
 export interface StrandTextures {
   /** Opaque: pale streaks the material's colour multiplies. */
   albedo: THREE.CanvasTexture;
-  /** The same streaks, solid for the upper half and thinning to wisps toward the bottom. */
+  /** The streaks with gaps between the strands, solid at the roots and letting go strand by strand toward the tips. */
   card: THREE.CanvasTexture;
+  /** The streaks solid across, only the tips thinning: for the fine hair of the face. */
+  fine: THREE.CanvasTexture;
 }
 
 let strands: StrandTextures | null = null;
 
 /** Paint streaks running down a canvas, wrapping horizontally so they tile around the head. */
-function paintStrands(ctx: CanvasRenderingContext2D, W: number, H: number, count: number, seed: number, minWidth: number): void {
+function paintStrands(ctx: CanvasRenderingContext2D, W: number, H: number, count: number, seed: number, minWidth: number, colourOf?: (i: number, lum: number) => string): void {
   const r = seeded(seed);
   ctx.lineCap = 'round';
   for (let i = 0; i < count; i++) {
@@ -87,7 +95,7 @@ function paintStrands(ctx: CanvasRenderingContext2D, W: number, H: number, count
     const width = minWidth + r() * 2.4;
     const lum = Math.round(255 * (0.62 + 0.5 * r()));
     ctx.lineWidth = width;
-    ctx.strokeStyle = `rgb(${lum},${lum},${lum})`;
+    ctx.strokeStyle = colourOf ? colourOf(i, lum) : `rgb(${lum},${lum},${lum})`;
     const step = 24;
     for (let y = -step; y < H; y += step) {
       const nx = x + (r() - 0.5) * 6;
@@ -120,35 +128,59 @@ export function strandTextures(): StrandTextures {
   paintStrands(actx, W, H, 220, 7, 0.8);
 
   // Cards: the solid streaks, then an alpha that holds at 1 for the roots and
-  // decays strand by strand toward the tips.
-  const cardCanvas = document.createElement('canvas');
-  cardCanvas.width = W;
-  cardCanvas.height = H;
-  const cctx = cardCanvas.getContext('2d')!;
-  cctx.drawImage(albedoCanvas, 0, 0);
-  const img = cctx.getImageData(0, 0, W, H);
-  const d = img.data;
-  const r = seeded(11);
-  // Strand ends: a slow wave across the width (locks) plus a little per-strand
-  // scatter, so the hem tapers into soft locks rather than a comb of spikes.
-  // Every strand reaches the bottom fifth of the texture, so a ribbon is a
-  // solid lock until its last stretch, where the strands let go one by one.
-  const ends = new Float32Array(W);
-  for (let x = 0; x < W; x += 3) {
-    const wave = 0.5 + 0.5 * Math.sin((x / W) * Math.PI * 2 * 2 + 0.7) * Math.sin((x / W) * Math.PI * 2 * 3.3);
-    const e = 0.74 + 0.23 * wave + 0.03 * r();
-    for (let k = 0; k < 3 && x + k < W; k++) ends[x + k] = e;
-  }
-  for (let y = 0; y < H; y++) {
+  // lets go lock by lock toward the tips. Where each lock ends is painted as
+  // a grey level, so the hem is wisps at their own lengths rather than a
+  // comb of teeth or a razor cut; a slow wave across the width gathers them
+  // a little further.
+  const endsCanvas = document.createElement('canvas');
+  endsCanvas.width = W;
+  endsCanvas.height = H;
+  const ectx = endsCanvas.getContext('2d')!;
+  // Locks a few millimetres wide, so the wisps survive at a distance: single
+  // strands would average away to nothing in the mipmaps and leave a razor hem.
+  ectx.fillStyle = 'rgb(204,204,204)';
+  ectx.fillRect(0, 0, W, H);
+  const re = seeded(23);
+  const strandEnd = Array.from({ length: 48 }, () => 0.8 + 0.18 * re());
+  const endGrey = (i: number): string => {
+    const g = Math.round(255 * strandEnd[i]);
+    return `rgb(${g},${g},${g})`;
+  };
+  paintStrands(ectx, W, H, 24, 7, 5, endGrey);
+  paintStrands(ectx, W, H, 24, 11, 9, (i) => endGrey(24 + i));
+  const ends = ectx.getImageData(0, 0, W, H).data;
+  // What the hair cards cover at all: coarser locks on nothing, solid at the
+  // roots and parting down their length, so a ribbon reads as strands of
+  // hair with air between them rather than a board.
+  const coverCanvas = document.createElement('canvas');
+  coverCanvas.width = W;
+  coverCanvas.height = H;
+  const kctx = coverCanvas.getContext('2d')!;
+  paintStrands(kctx, W, H, 130, 13, 3.5, () => 'rgb(255,255,255)');
+  const cover = kctx.getImageData(0, 0, W, H).data;
+  const alphaAt = (x: number, y: number, gaps: boolean): number => {
     const t = y / H;
-    for (let x = 0; x < W; x++) {
-      const e = ends[x];
-      const fade = 0.16;
-      const a = t < e - fade ? 1 : t > e ? 0 : (e - t) / fade;
-      d[(y * W + x) * 4 + 3] = Math.round(255 * a * a);
-    }
-  }
-  cctx.putImageData(img, 0, 0);
+    const wave = Math.sin((x / W) * Math.PI * 2 * 2 + 0.7) * Math.sin((x / W) * Math.PI * 2 * 3.3);
+    const e = Math.min(1, ends[(y * W + x) * 4] / 255 + 0.03 * wave);
+    const fade = 0.08;
+    const a = t < e - fade ? 1 : t > e ? 0 : (e - t) / fade;
+    const c = gaps ? Math.max(cover[(y * W + x) * 4 + 3] / 255, 1 - smooth(t, 0.12, 0.5)) : 1;
+    return a * a * c;
+  };
+  const withAlpha = (gaps: boolean): HTMLCanvasElement => {
+    const canvas = document.createElement('canvas');
+    canvas.width = W;
+    canvas.height = H;
+    const ctx = canvas.getContext('2d')!;
+    ctx.drawImage(albedoCanvas, 0, 0);
+    const img = ctx.getImageData(0, 0, W, H);
+    const d = img.data;
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) d[(y * W + x) * 4 + 3] = Math.round(255 * alphaAt(x, y, gaps));
+    ctx.putImageData(img, 0, 0);
+    return canvas;
+  };
+  const cardCanvas = withAlpha(true);
+  const fineCanvas = withAlpha(false);
 
   const albedo = new THREE.CanvasTexture(albedoCanvas);
   albedo.colorSpace = THREE.SRGBColorSpace;
@@ -159,7 +191,12 @@ export function strandTextures(): StrandTextures {
   card.wrapS = THREE.RepeatWrapping;
   card.wrapT = THREE.ClampToEdgeWrapping;
   card.anisotropy = 8;
-  strands = { albedo, card };
+  const fine = new THREE.CanvasTexture(fineCanvas);
+  fine.colorSpace = THREE.SRGBColorSpace;
+  fine.wrapS = THREE.RepeatWrapping;
+  fine.wrapT = THREE.ClampToEdgeWrapping;
+  fine.anisotropy = 8;
+  strands = { albedo, card, fine };
   return strands;
 }
 
@@ -179,7 +216,7 @@ function hairMaterial(color: number, cards: boolean): THREE.MeshPhysicalMaterial
     vertexColors: true,
     roughness: 0.62,
     metalness: 0,
-    envMapIntensity: 0.22,
+    envMapIntensity: 0.7,
     specularIntensity: 0.35,
     specularColor: new THREE.Color(color).lerp(new THREE.Color(0xffffff), 0.5),
     normalMap: hairDetail().normal,
@@ -189,14 +226,25 @@ function hairMaterial(color: number, cards: boolean): THREE.MeshPhysicalMaterial
     ...(cards ? { alphaTest: 0.5, alphaToCoverage: true, side: THREE.DoubleSide } : {}),
   });
   m.name = cards ? 'hair-cards' : 'hair-cap';
+  m.userData.hair = true; // the style pass lays its strand highlight on it
   materialCache.set(key, m);
   return m;
 }
 
+/** The leather tie of a ponytail; merged into the attachments, it takes the leather tile. */
+let tie: THREE.MeshStandardMaterial | null = null;
+function tieMaterial(): THREE.MeshStandardMaterial {
+  if (tie) return tie;
+  const m = (tie = new THREE.MeshStandardMaterial({ color: 0x4a3222, roughness: 0.75, metalness: 0 }));
+  m.name = 'hair-tie';
+  m.userData.tile = 'leather';
+  return m;
+}
+
 /**
- * The alpha-tested strand material of the brows and lashes: the hair cards'
- * texture, but matte, so the fine hair of the face never catches the sky.
- * Merged into the attachments, it takes the hair cards' tile.
+ * The alpha-tested strand material of the brows and lashes: the hair's
+ * streaks without the gaps, and matte, so the fine hair of the face never
+ * catches the sky. Merged into the attachments, it takes the fine tile.
  */
 export function strandMaterial(color: number): THREE.MeshPhysicalMaterial {
   const key = `${color}:fine`;
@@ -204,7 +252,7 @@ export function strandMaterial(color: number): THREE.MeshPhysicalMaterial {
   if (hit) return hit;
   const m = new THREE.MeshPhysicalMaterial({
     color,
-    map: strandTextures().card,
+    map: strandTextures().fine,
     vertexColors: true,
     roughness: 0.8,
     metalness: 0,
@@ -215,7 +263,7 @@ export function strandMaterial(color: number): THREE.MeshPhysicalMaterial {
     side: THREE.DoubleSide,
   });
   m.name = 'face-strands';
-  m.userData.tile = 'strand';
+  m.userData.tile = 'fine';
   materialCache.set(key, m);
   return m;
 }
@@ -279,7 +327,8 @@ export function hairlineY(a: number, h: HairlineFrame, style: HairStyle): number
   const front = h.browY + (style === 'long' ? 0.64 : 0.74) * h.hr;
   const temple = h.browY + 0.46 * h.hr;
   const side = h.earY + 0.3 * h.hr;
-  const nape = h.earY - (style === 'long' ? 0.9 : 1.0) * h.hr;
+  // A ponytail is pulled up off the nape, so its hairline sits higher there.
+  const nape = h.earY - (style === 'long' ? 0.9 : style === 'ponytail' ? 0.65 : 1.0) * h.hr;
   const keys: Array<[number, number]> = [
     [0, front],
     [0.7, temple],
@@ -318,30 +367,46 @@ function rimElevation(scalp: ScalpShape, a: number, targetY: number): number {
   return maxE;
 }
 
-/** How far the hair falls below the nape at azimuth `a`, in skull widths (long styles only). */
+/**
+ * How far the hair falls below the nape at azimuth `a`, in skull widths:
+ * long hair from behind the ears down the back, a bob from the temples all
+ * round to the jaw.
+ */
 function fallLength(a: number, style: HairStyle): number {
-  if (style !== 'long') return 0;
   const t = fold(a);
-  const back = smooth(t, 1.45, 1.95);
-  return back * (2.4 + 1.0 * ((t - 1.45) / (Math.PI - 1.45)));
+  if (style === 'long') return smooth(t, 1.7, 2.15) * (3.9 + 0.6 * ((t - 1.7) / (Math.PI - 1.7)));
+  if (style === 'bob') return smooth(t, 0.95, 1.35) * (1.05 + 0.25 * ((t - 0.95) / (Math.PI - 0.95)));
+  return 0;
 }
 
 /** Hair thickness over the scalp at azimuth `a` and cap parameter `v` (0 crown, 1 rim). */
 function thickness(a: number, v: number, style: HairStyle, hr: number): number {
   const t = fold(a);
-  const base = style === 'long' ? hr * (0.17 + 0.13 * (t / Math.PI)) : hr * (0.085 + 0.06 * (t / Math.PI));
+  const body = longish(style)
+    ? 0.17 + 0.13 * (t / Math.PI)
+    : style === 'cropped'
+      ? 0.045 + 0.03 * (t / Math.PI)
+      : style === 'ponytail'
+        ? 0.07 + 0.05 * (t / Math.PI)
+        : 0.085 + 0.06 * (t / Math.PI);
+  const base = hr * body;
   // Short hair thins toward the skin at its edge (never quite to it, so the
   // skin can't poke through); long hair keeps its body into the fall.
   const keeps = smooth(fallLength(a, style), 0, 0.8);
   const taper = 1 - (1 - keeps) * v * v * v * 0.85;
-  // Clumps: locks swelling and parting around the head, more so toward the rim.
-  const clump = 1 + (0.14 + 0.16 * v) * Math.sin(a * 7 + 1.3) * Math.sin(a * 3.1 + v * 4) + 0.1 * Math.sin(a * 11 + v * 6);
+  // Clumps: locks swelling and parting around the head, more so toward the rim; sleek styles less so.
+  const clumpK = style === 'cropped' || style === 'ponytail' ? 0.4 : 1;
+  const clump = 1 + clumpK * ((0.12 + 0.08 * v) * Math.sin(a * 3 + 1.3) * Math.sin(a * 2.1 + v * 4) + 0.08 * Math.sin(a * 5 + v * 6));
   return base * taper * clump;
 }
 
-/** A ragged hairline: the rim wanders up and down a little around the head. */
+/**
+ * The rim wanders up and down a little around the head, slowly: a ragged
+ * hairline is the skin painter's job, and a fast wobble here puts teeth on
+ * every hem hung from the rim.
+ */
 function rimNoise(a: number): number {
-  return 0.035 * Math.sin(a * 9 + 0.4) + 0.025 * Math.sin(a * 4.7 + 2.1);
+  return 0.015 * Math.sin(a * 2 + 0.4) + 0.01 * Math.sin(a * 3.3 + 2.1);
 }
 
 /** A flat ribbon of hair along a curve, facing out from the skull. */
@@ -371,6 +436,66 @@ function ribbon(b: Builder, curve: THREE.Curve<THREE.Vector3>, centre: THREE.Vec
 }
 
 /**
+ * A sheet of hair from a grid of columns (each a run of points, top to
+ * bottom), lit by normals taken from the neighbouring points, so locks that
+ * swell and part shade as such. Columns may be empty; the sheet skips the gaps.
+ */
+function sheet(
+  b: Builder,
+  grid: THREE.Vector3[][],
+  uOf: (c: number) => number,
+  vOf: (t: number) => number,
+  shadeOf: (c: number, t: number) => number,
+  alphaOf: (t: number) => number,
+  outward: (c: number) => THREE.Vector3,
+): void {
+  const ids: number[][] = [];
+  const down = new THREE.Vector3();
+  const across = new THREE.Vector3();
+  const n = new THREE.Vector3();
+  for (let c = 0; c < grid.length; c++) {
+    const col = grid[c];
+    const own: number[] = [];
+    const out = outward(c);
+    for (let k = 0; k < col.length; k++) {
+      const t = col.length > 1 ? k / (col.length - 1) : 0;
+      down.subVectors(col[Math.min(col.length - 1, k + 1)], col[Math.max(0, k - 1)]);
+      across.subVectors(grid[c + 1]?.[k] ?? col[k], grid[c - 1]?.[k] ?? col[k]);
+      if (across.lengthSq() < 1e-10 || down.lengthSq() < 1e-10) n.copy(out);
+      else {
+        n.crossVectors(down, across).normalize();
+        if (n.dot(out) < 0) n.negate();
+        n.lerp(out, 0.35).normalize();
+      }
+      own.push(b.vertex(col[k], n, uOf(c), vOf(t), shadeOf(c, t), alphaOf(t)));
+    }
+    ids.push(own);
+  }
+  for (let c = 0; c + 1 < grid.length; c++) {
+    const l = ids[c];
+    const r = ids[c + 1];
+    const rows = Math.min(l.length, r.length);
+    for (let k = 0; k + 1 < rows; k++) b.quad(l[k], l[k + 1], r[k + 1], r[k]);
+  }
+}
+
+/** Where the body is under the hair, in the head's space: the neck and the left shoulder (bind pose). */
+function bodyFrame(rig: Rig, hr: number): { neck: THREE.Vector3; shoulder: THREE.Vector3; depth: number } {
+  const head = rig.joints.head;
+  const local = (o: THREE.Object3D | undefined, fallback: THREE.Vector3): THREE.Vector3 => {
+    if (!o || !head) return fallback;
+    head.updateWorldMatrix(true, false);
+    o.updateWorldMatrix(true, false);
+    return head.worldToLocal(o.getWorldPosition(new THREE.Vector3()));
+  };
+  return {
+    neck: local(rig.joints.neck, new THREE.Vector3(0, -2 * hr, -0.7 * hr)),
+    shoulder: local(rig.joints.shoulderL, new THREE.Vector3(3 * hr, -3.6 * hr, -0.4 * hr)),
+    depth: rig.dims.chestR * rig.dims.torsoFlatten,
+  };
+}
+
+/**
  * Build hair for a rig built from the human template. Returns a group to
  * hang on the head bone, or null for bald heads and rigs without a scalp.
  */
@@ -385,6 +510,8 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
   const group = new THREE.Group();
   group.name = 'hair';
   group.userData.scalp = scalp;
+  const long = longish(style);
+  const sleek = style === 'cropped';
 
   // --- Cap: an azimuth × depth grid over the scalp, thinning to the hairline.
   const COLS = 48;
@@ -398,6 +525,8 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
   for (let c = 0; c <= COLS; c++) {
     const a = (c / COLS) * TWO_PI;
     const eRim = rimElevation(scalp, a, hairlineY(a, h, style)) + rimNoise(a);
+    // A little lighter or darker per lock, so the mass reads as many strands rather than one tone.
+    const tint = 1 + 0.06 * Math.sin(a * 13 + seed) * Math.sin(a * 5.3 + 1.1);
     const column: number[] = [];
     for (let r = 0; r <= ROWS; r++) {
       const v = r / ROWS;
@@ -407,7 +536,7 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
       p.copy(C).addScaledVector(dir, scalpRadius(scalp, a, e) + off);
       // Lighting normals lean radial so the cap shades as one rounded mass.
       n.copy(dir);
-      column.push(cap.vertex(p, n, (c / COLS) * 4, v * 0.9, 1 - 0.18 * v));
+      column.push(cap.vertex(p, n, (c / COLS) * 4, v * 0.9, (1 - 0.18 * v) * tint));
       if (r === ROWS) rimPoint.push(p.clone());
     }
     grid.push(column);
@@ -427,56 +556,108 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
     group.add(mesh);
   }
 
-  // --- Cards: fall, fringe and side locks, all strand-textured ribbons.
-  const cards = new Builder();
+  /** A mesh that hangs from the head and sways down the hair chain (see attachments.ts). */
+  const hang = (geo: THREE.BufferGeometry | null, cards: boolean): void => {
+    if (!geo) return;
+    const mesh = new THREE.Mesh(geo, hairMaterial(color, cards));
+    mesh.name = 'hair-fall';
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    mesh.userData.noAO = true;
+    group.add(mesh);
+  };
 
-  // The fall: from the nape down the back, widening a little and hanging just
-  // clear of the shoulders, ending in wisps. Its own mesh: a helmet hides the
-  // cap and fringe but long hair still falls out the back.
-  if (style === 'long') {
-    const fall = new Builder();
-    const K = 8;
-    const fallGrid: number[][] = [];
+  // --- The fall: long hair from behind the ears down the back, lying along
+  // it from the shoulders; a bob all round to the jaw, turning in at the ends.
+  // Each column is a lock with a length and a bulge of its own, so the hem is
+  // layered and the surface swells and parts; an opaque sheet a little inside
+  // backs the strands where they thin, so the mass never looks hollow.
+  if (fallLength(Math.PI, style) > 0) {
+    const bob = style === 'bob';
+    const body = bodyFrame(rig, hr);
+    const K = 10;
+    const outer: THREE.Vector3[][] = [];
+    const inner: THREE.Vector3[][] = [];
+    const radial = new THREE.Vector3();
+    const locks: number[] = [];
+    // The body under the head, from the template's measurements: the back of
+    // the neck, then the shoulder blades, and how wide the body is at each
+    // height (the neck, then the trapezius out to the shoulders). A column
+    // hangs straight from the rim until it is over the body, then lies a
+    // finger's width off it.
+    const neckBack = body.neck.z - 0.4 * hr;
+    const bladeBack = body.shoulder.z - 0.62 * body.depth;
+    const backOf = (y: number): number => neckBack + (bladeBack - neckBack) * smooth(-y, -body.neck.y, -body.shoulder.y - 0.5 * hr);
+    const halfWidthOf = (y: number): number => 0.9 * hr + (body.shoulder.x + 0.1 * hr) * clamp01((body.neck.y - y) / (body.neck.y - body.shoulder.y + 0.3 * hr));
+    const drape = (x: number, y: number, zHang: number): number => {
+      const over = smooth(halfWidthOf(y) - Math.abs(x), -0.5 * hr, 0.3 * hr);
+      return Math.min(zHang, zHang + (backOf(y) - 0.2 * hr - zHang) * over);
+    };
     for (let c = 0; c <= COLS; c++) {
       const a = (c / COLS) * TWO_PI;
-      const len = fallLength(a, style) * hr;
-      const column: number[] = [];
-      if (len > 0.01 * hr) {
+      const len0 = fallLength(a, style) * hr;
+      const col: THREE.Vector3[] = [];
+      const colIn: THREE.Vector3[] = [];
+      const lock = Math.sin(a * 5 + 1.3 + seed) * Math.sin(a * 2.3 + 0.7);
+      locks.push(lock);
+      if (len0 > 0.01 * hr) {
         const base = rimPoint[c];
-        n.set(Math.sin(a), 0.15, Math.cos(a)).normalize();
+        const behind = clamp01(-Math.cos(a)); // 1 straight back, 0 at the sides
+        const top = base.y + 0.1 * hr;
+        // The hem is a height, not a length, so it runs level whatever the rim
+        // does: a bob's at the jaw, a little under the nape's low hairline at
+        // the back; long hair's down the back in a shallow U. The columns at
+        // the fall's front edge are cut shorter, so it starts behind the ear
+        // rather than with a wall.
+        const hemY = bob ? f.chin + 0.1 * hr - 0.35 * hr * behind : f.chin - 3.7 * hr - 0.7 * hr * behind * behind;
+        const edge = 0.7 + 0.3 * Math.min(1, len0 / ((bob ? 1.05 : 3.9) * hr));
+        const len = Math.max(0.3 * hr, (top - hemY) * edge * (0.985 + 0.015 * Math.sin(a * 2.5 + seed)));
+        const bulge = (bob ? 0.05 : 0.1) * (1 + 0.5 * lock) * hr;
+        radial.set(Math.sin(a), 0, Math.cos(a));
         for (let k = 0; k <= K; k++) {
           const t = k / K;
-          const sway = Math.sin(a * 4 + seed) * 0.08 * hr * t;
-          p.set(base.x * (1 + 0.5 * t) + sway, base.y + 0.12 * hr - len * t, base.z - (0.35 * t + 0.25 * t * t) * hr);
-          column.push(fall.vertex(p, n, (c / COLS) * 4, 0.2 + 0.8 * t, 0.78 + 0.14 * t, 1 - 0.45 * smooth(t, 0.7, 1)));
+          const y = top - len * t;
+          let x: number;
+          let z: number;
+          if (bob) {
+            // Straight down, a little back, turning in under the jaw.
+            const turn = smooth(t, 0.45, 1);
+            x = base.x * (1 - 0.12 * turn);
+            z = drape(x, y, base.z - 0.08 * hr * t - 0.04 * hr * turn * behind);
+          } else {
+            // Straight down, spreading a little where it reaches the shoulders.
+            x = base.x * (1 + 0.35 * smooth(-y, -body.neck.y - 0.5 * hr, -body.shoulder.y));
+            z = drape(x, y, base.z - 0.05 * hr * t);
+          }
+          p.set(x, y, z).addScaledVector(radial, bulge * Math.sin(Math.PI * t));
+          col.push(p.clone());
+          if (t <= (bob ? 0.8 : 0.75) + 1e-6) colIn.push(p.clone().addScaledVector(radial, -0.06 * hr));
         }
       }
-      fallGrid.push(column);
+      outer.push(col);
+      inner.push(colIn);
     }
-    for (let c = 0; c < COLS; c++) {
-      const l = fallGrid[c];
-      const r = fallGrid[c + 1];
-      if (l.length === 0 || r.length === 0) continue;
-      for (let k = 0; k < K; k++) fall.quad(l[k], l[k + 1], r[k + 1], r[k]);
-    }
-    const fallGeo = fall.build();
-    if (fallGeo) {
-      const mesh = new THREE.Mesh(fallGeo, hairMaterial(color, true));
-      mesh.name = 'hair-fall';
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.userData.noAO = true;
-      group.add(mesh);
-    }
+    const outwardOf = (c: number): THREE.Vector3 => {
+      const a = (c / COLS) * TWO_PI;
+      return new THREE.Vector3(Math.sin(a), 0.15, Math.cos(a)).normalize();
+    };
+    const fall = new Builder();
+    sheet(fall, outer, (c) => (c / COLS) * 4, (t) => 0.2 + 0.8 * t, (c, t) => (0.78 + 0.14 * t) * (1 + 0.08 * locks[c]), (t) => 1 - 0.3 * smooth(t, 0.8, 1), outwardOf);
+    hang(fall.build(), true);
+    const backing = new Builder();
+    sheet(backing, inner, (c) => (c / COLS) * 4 + 0.3, (t) => 0.1 + 0.8 * t, (c, t) => (0.7 + 0.1 * t) * (1 + 0.08 * locks[c]), () => 1, outwardOf);
+    hang(backing.build(), false);
   }
+
+  // --- Cards: fringe and locks, all strand-textured ribbons.
+  const cards = new Builder();
 
   // The fringe: curtain bangs from under the cap's front rim, parted a little
   // right of centre. Each column follows the skull down the forehead, slides
   // away from the parting as it falls and lifts off toward tips that thin out
   // above the brows; the columns nearest the parting are the shortest, the
-  // ones at the temples the longest.
-  const long = style === 'long';
-  {
+  // ones at the temples the longest. Cropped hair has none.
+  if (!sleek) {
     const FC = 26;
     const FK = 6;
     const span = 0.9;
@@ -517,7 +698,7 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
     const mid = start.clone().add(new THREE.Vector3(sweep * 0.35, -drop * 0.4, out));
     return new THREE.QuadraticBezierCurve3(start, mid, end);
   };
-  const locks: Array<[number, number]> = long ? [[-0.3, 1.0], [0.05, 0.8], [-0.5, -0.45]] : [[-0.2, 0.9], [-0.45, -0.4]];
+  const locks: Array<[number, number]> = sleek ? [] : long ? [[-0.3, 1.0], [0.05, 0.8], [-0.5, -0.45]] : [[-0.2, 0.9], [-0.45, -0.4]];
   for (const [a0, sweepK] of locks) {
     const a = a0 + (rand() - 0.5) * 0.08;
     const eRim = rimElevation(scalp, a, hairlineY(a, h, style));
@@ -526,13 +707,16 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
     ribbon(cards, curve(a, eRim - 0.12, 0.14 * hr, sweep, drop, 0.16 * hr), C, 0.5 * hr, 0.22 * hr, 0.92 + 0.08 * rand(), rand() * 0.5);
   }
 
-  // Side locks in front of the ears, down to the jaw.
-  if (style === 'long') {
+  // Side locks in front of the ears: a few narrow strands a side at their own
+  // lengths, the front ones over the collarbone for long hair, to the jaw for
+  // a bob. Azimuth, length and width in skull widths.
+  if (long) {
+    const sideLocks: ReadonlyArray<readonly [number, number, number]> = style === 'long' ? [[1.2, 2.2, 0.32], [1.38, 1.6, 0.26], [1.55, 1.2, 0.22]] : [[1.2, 1.8, 0.3], [1.4, 1.65, 0.24]];
     for (const sign of [1, -1]) {
-      for (const [t, len] of [[1.12, 1.5], [1.32, 1.15]] as const) {
-        const a0 = sign * t;
+      for (const [t, len, w] of sideLocks) {
+        const a0 = sign * (t + (rand() - 0.5) * 0.06);
         const eRim = rimElevation(scalp, a0, hairlineY(a0, h, style));
-        ribbon(cards, curve(a0, eRim - 0.08, 0.08 * hr, sign * 0.08 * hr, len * hr * (0.9 + 0.2 * rand()), 0.2 * hr), C, 0.38 * hr, 0.14 * hr, 0.85, rand() * 0.5);
+        ribbon(cards, curve(a0, eRim - 0.08, 0.08 * hr, sign * 0.06 * hr, len * hr * (0.9 + 0.2 * rand()), 0.12 * hr), C, w * hr, 0.12 * hr, 0.85 + 0.1 * rand(), rand() * 0.5);
       }
     }
   }
@@ -545,6 +729,54 @@ export function buildHair(rig: Rig, style: HairStyle, color: number, seed = 1): 
     mesh.receiveShadow = true;
     mesh.userData.noAO = true; // alpha-tested ribbons would smear the AO buffer
     group.add(mesh);
+  }
+
+  // --- The ponytail: gathered at the back of the crown through a band, then
+  // a fan of ribbons swinging down the back.
+  if (style === 'ponytail') {
+    direction(Math.PI, 1.12, dir);
+    const gather = new THREE.Vector3().copy(C).addScaledVector(dir, scalpRadius(scalp, Math.PI, 1.12) + 0.3 * hr);
+    const tail = new Builder();
+    const N = 13;
+    const swing = (0.15 + 0.12 * rand()) * hr;
+    for (let i = 0; i < N; i++) {
+      const s = (i / (N - 1)) * 2 - 1; // -1 .. 1 across the fan
+      const depth = Math.sin(i * 2.4) * 0.14 * hr; // stacked front to back
+      const len = (3.0 + 1.0 * rand()) * hr;
+      const a0 = gather.clone().add(new THREE.Vector3(0.12 * hr * s, 0.03 * hr * (1 - s * s), depth));
+      const a1 = a0.clone().add(new THREE.Vector3(0.1 * hr * s, -0.3 * len, -0.9 * hr));
+      const a2 = a0.clone().add(new THREE.Vector3(0.3 * hr * s + swing * 0.4, -0.7 * len, -1.0 * hr));
+      const a3 = a0.clone().add(new THREE.Vector3(0.4 * hr * s + swing, -len, -0.8 * hr));
+      const curve3 = new THREE.CatmullRomCurve3([a0, a1, a2, a3], false, 'centripetal');
+      ribbon(tail, curve3, C, 0.3 * hr, 0.1 * hr, 0.86 + 0.1 * rand(), rand() * 0.5);
+    }
+    hang(tail.build(), true);
+    // The tie: a short leather band round the gather, facing out.
+    const band = new Builder();
+    const axis = new THREE.Vector3(0, -0.45, -0.9).normalize();
+    const u = new THREE.Vector3().crossVectors(axis, new THREE.Vector3(0, 1, 0)).normalize();
+    const v = new THREE.Vector3().crossVectors(axis, u).normalize();
+    const SEG = 10;
+    const ring: number[][] = [];
+    for (let i = 0; i <= SEG; i++) {
+      const th = (i / SEG) * TWO_PI;
+      const out = new THREE.Vector3().addScaledVector(u, Math.cos(th)).addScaledVector(v, Math.sin(th));
+      const row: number[] = [];
+      for (const along of [-0.07, 0.07]) {
+        p.copy(gather).addScaledVector(axis, along * hr).addScaledVector(out, 0.24 * hr);
+        row.push(band.vertex(p, out, (i / SEG) * 2, 0.3 + (along > 0 ? 0.2 : 0), 0.6));
+      }
+      ring.push(row);
+    }
+    for (let i = 0; i < SEG; i++) band.quad(ring[i][0], ring[i][1], ring[i + 1][1], ring[i + 1][0]);
+    const bandGeo = band.build();
+    if (bandGeo) {
+      const tie = new THREE.Mesh(bandGeo, tieMaterial());
+      tie.name = 'hair-tie';
+      tie.castShadow = true;
+      tie.receiveShadow = true;
+      group.add(tie);
+    }
   }
   return group;
 }

@@ -39,11 +39,13 @@ attribute float aEnchant;
 uniform vec2 uTileSize;
 varying vec2 vTileOrigin;
 varying float vEnchant;
+varying float vTile;
 `;
 
 const VERT_MAIN = /* glsl */ `
 vTileOrigin = vec2( mod( aTile, ${TILE_COLS}.0 ), floor( aTile / ${TILE_COLS}.0 ) ) * uTileSize;
 vEnchant = aEnchant;
+vTile = aTile;
 `;
 
 const FRAG_PARS = /* glsl */ `
@@ -52,6 +54,7 @@ uniform vec2 uTexel;
 uniform float uMaxGrad;
 varying vec2 vTileOrigin;
 varying float vEnchant;
+varying float vTile;
 // A sample from this fragment's tile, the uv wrapped inside it. The mip level
 // is chosen from the unwrapped uv so the wrap seam does not show, and capped
 // so coarse mips do not bleed the neighbouring tiles in.
@@ -97,6 +100,7 @@ export function attachmentsMaterial(): THREE.MeshStandardMaterial {
   });
   m.name = 'attachments';
   m.userData.perVertexEnchant = true;
+  m.userData.hairTiles = [TILE_INDEX.hair, TILE_INDEX.strand]; // the style pass lays its strand highlight on these
   const uniforms = {
     uTileSize: { value: new THREE.Vector2(1 / TILE_COLS, 1 / TILE_ROWS) },
     uTexel: { value: new THREE.Vector2(1 / ATLAS_W, 1 / ATLAS_H) },
@@ -116,7 +120,7 @@ export function attachmentsMaterial(): THREE.MeshStandardMaterial {
     f = expand(f, 'metalnessmap_fragment', (c) => c.replace('texture2D( metalnessMap, vMetalnessMapUv )', 'atlasTex( metalnessMap, vMetalnessMapUv )'));
     shader.fragmentShader = f;
   };
-  m.customProgramCacheKey = () => 'aeloria-attachments-1';
+  m.customProgramCacheKey = () => 'aeloria-attachments-2';
   shared = m;
   return m;
 }

@@ -13,7 +13,7 @@ import { RACES } from '../render/races';
 
 export const RACE_IDS: readonly Race[] = ['human', 'elf', 'darkelf', 'orc', 'dwarf'];
 export const SEXES: readonly Sex[] = ['male', 'female'];
-export const HAIR_STYLES: readonly HairStyle[] = ['long', 'short', 'bald'];
+export const HAIR_STYLES: readonly HairStyle[] = ['long', 'bob', 'ponytail', 'short', 'cropped', 'bald'];
 export const NAME_MAX = 12;
 export const SLOT_COUNT = 8;
 

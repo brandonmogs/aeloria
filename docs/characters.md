@@ -151,6 +151,29 @@ beard also hangs as geometry from the chin (`chinBeard` in `gear.ts`; the
 dwarf keeps his larger `beard`). Hair-coloured brows, lashes and beards
 follow the hair swatch unless given a colour of their own.
 
+Hair (`hair.ts`; bald, cropped, short, long, bob, ponytail) is built against
+the measured skull. A cap covers the scalp down to a hairline it shares with
+the skin painter (`hairlineY`), so the painted hairline and the geometry
+agree; the fringe and side locks are strand-textured ribbons; long hair and
+the bob add a fall, a sheet of columns hung from the cap's rim. Each column
+hangs straight until it is over the body and then lies a finger's width off
+it: the body under the head is read from the rig (the neck and shoulder
+joints and the chest depth), so the fall drapes over the trapezius and down
+the shoulder blades on every race instead of flaring out beside the face.
+Hems are heights rather than lengths (a bob's at the jaw, long hair's a
+shallow U down the back), so they run level however the rim wanders, and
+the rim wanders only slowly: a ragged hairline is the painter's job, and a
+fast wobble puts teeth on every hem hung from it. The card texture lets go
+lock by lock toward the tips (locks a few millimetres wide, since single
+strands average away in the mipmaps and leave a razor cut) and opens gaps
+between the strands lower down; the brows and lashes use the same streaks
+without the gaps, the `fine` atlas tile. A ponytail is gathered through a
+leather tie behind the crown. The style pass (`characterStyle.ts`) lights
+hair with two highlights running across the strands instead of a specular
+dot (the strand direction is read from how the texture's v runs across the
+screen), gives it less of the sky, and tints its rim with the hair's own
+colour; the merged attachments do the same for their hair and strand tiles.
+
 `CharacterBuilder.build({ race, sex, hair, skinTone, equipment, ... })`
 (`src/render/characterBuilder.ts`) does all of that in one call and, by
 default, merges everything hanging on the skeleton (gear, hair, eyes, base
@@ -159,7 +182,7 @@ character at full detail is two draw calls (`attachments.ts`). Each prop is
 baked into the body's bind space and skinned rigidly to the bone it hung
 from; what used to be its material becomes per-vertex data: a colour, a tile
 of the shared attachment atlas (`attachmentAtlas.ts`: plain, cloth, leather,
-metal, rust, hair, strands, eye; colour, normal and roughness/metalness
+metal, rust, hair, strands, eye, fine; colour, normal and roughness/metalness
 maps) and an enchant flag for the glow. The shader wraps each part's uv
 inside its tile with explicit gradients, so there are no mip seams and no
 tile bleed, and one material serves every character: nothing is cloned per

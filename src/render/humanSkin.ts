@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { JOINTS, JointName } from './characters';
 import type { HumanTemplate } from './human';
 import { skinDetail } from './characterTextures';
-import { hairlineY } from './hair';
+import { HairStyle, hairlineY } from './hair';
 import { tileableNoise } from './texgen';
 
 /**
@@ -54,7 +54,7 @@ export interface LookSpec {
   tunic: number;
   trouser: number;
   boots: number;
-  hairStyle: 'short' | 'long' | 'bald';
+  hairStyle: HairStyle;
   sleeves: 'long' | 'short' | 'none';
   trousers: 'full' | 'ragged' | 'none';
   shirt: boolean;

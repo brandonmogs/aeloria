@@ -15,10 +15,10 @@ import { normalMap, tileableNoise } from './texgen';
  * - orm: alpha in R (only the hair strands use it), roughness in G, metalness in B
  */
 
-export type TileName = 'plain' | 'cloth' | 'leather' | 'metal' | 'rust' | 'hair' | 'strand' | 'eye';
-export const TILES: readonly TileName[] = ['plain', 'cloth', 'leather', 'metal', 'rust', 'hair', 'strand', 'eye'];
-export const TILE_COLS = 4;
-export const TILE_ROWS = 2;
+export type TileName = 'plain' | 'cloth' | 'leather' | 'metal' | 'rust' | 'hair' | 'strand' | 'eye' | 'fine';
+export const TILES: readonly TileName[] = ['plain', 'cloth', 'leather', 'metal', 'rust', 'hair', 'strand', 'eye', 'fine'];
+export const TILE_COLS = 3;
+export const TILE_ROWS = 3;
 export const TILE_PX = 256;
 export const ATLAS_W = TILE_COLS * TILE_PX;
 export const ATLAS_H = TILE_ROWS * TILE_PX;
@@ -28,7 +28,7 @@ export const ATLAS_H = TILE_ROWS * TILE_PX;
  * scaled so the weave or grain comes out this size whatever the part is.
  * 0 keeps the part's own uv (hair and eyes lay theirs out by hand).
  */
-export const TILE_METRES: Record<TileName, number> = { plain: 0, cloth: 0.12, leather: 0.16, metal: 0.3, rust: 0.2, hair: 0, strand: 0, eye: 0 };
+export const TILE_METRES: Record<TileName, number> = { plain: 0, cloth: 0.12, leather: 0.16, metal: 0.3, rust: 0.2, hair: 0, strand: 0, eye: 0, fine: 0 };
 
 /** Where the iris sits on the eye tile, in tile uv, for the iris cap geometry. */
 export const EYE_IRIS = { u: 0.75, v: 0.5, radius: 0.16 };
@@ -135,6 +135,7 @@ export function attachmentAtlas(): AttachmentAtlas {
     const read = (canvas: HTMLCanvasElement): Uint8ClampedArray => canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
     const cap = read(tex.albedo.image as HTMLCanvasElement);
     const card = read(tex.card.image as HTMLCanvasElement);
+    const fine = read(tex.fine.image as HTMLCanvasElement);
     const src = (i: number): number => {
       const y = TILE_PX - 1 - Math.floor(i / TILE_PX);
       return ((y * 2 + 1) * TILE_PX + (i % TILE_PX)) * 4;
@@ -147,6 +148,8 @@ export function attachmentAtlas(): AttachmentAtlas {
     };
     paint('hair', { albedo: colour(cap), height: streaks, strength: 0.5, roughness: 0.55, metalness: 0 });
     paint('strand', { albedo: colour(card), height: streaks, strength: 0.5, roughness: 0.55, metalness: 0, alpha: (i) => card[src(i) + 3] / 255 });
+    // The fine hair of the face: the same streaks without the gaps, and matte.
+    paint('fine', { albedo: colour(fine), height: streaks, strength: 0.3, roughness: 0.8, metalness: 0, alpha: (i) => fine[src(i) + 3] / 255 });
   }
 
   {
