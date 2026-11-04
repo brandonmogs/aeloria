@@ -3,7 +3,9 @@ import { mergeAttachments } from './attachments';
 import { Animator, Rig } from './characters';
 import { styleCharacter } from './characterStyle';
 import { HairStyle } from './hair';
+import { beard, chinBeard } from './gear';
 import { HERO_BUILD, HumanoidSpec, Race, Sex, bodyFor, buildHumanoid } from './human';
+import { FaceStyle, PLAIN_FACE } from './humanSkin';
 import { MorphValues } from './morphs';
 import { Equipment, Outfit, dressRig, emptyEquipment } from './outfit';
 import { raceExtras } from './raceGear';
@@ -34,10 +36,12 @@ export interface CharacterOptions {
   build?: Partial<HumanoidSpec>;
   /** The creator's sliders by id (see morphs.ts). */
   morphs?: MorphValues;
-  /** Eyebrow weight (0 fine to 1 heavy) and colour; lash length in metres at the figure's scale, 0 for none. */
+  /** Eyebrow weight (0 fine to 1 heavy) and colour; lash length as a fraction of the sex's usual (1 = usual, 0 none). */
   brows?: number;
   browColor?: number;
   lashes?: number;
+  /** Beard, makeup and marks; a dwarf man's full beard by default, otherwise plain. */
+  face?: Partial<FaceStyle>;
   /** Leather bracers on bare forearms. */
   bracers?: boolean;
   /** Glow the main-hand weapon's metal. */
@@ -56,9 +60,14 @@ export interface Character {
   dispose(): void;
 }
 
+/** The usual upper-lash length of each sex, in metres at the figure's scale (see faceFeatures.ts). */
+export const LASH_LENGTH: Record<Sex, number> = { male: 0.0038, female: 0.0052 };
+
 export class CharacterBuilder {
   static build(o: CharacterOptions): Character {
     const race = RACES[o.race];
+    const hairColor = o.hairColor ?? race.hair;
+    const face: FaceStyle = { ...PLAIN_FACE, beard: o.race === 'dwarf' && o.sex === 'male' ? 'full' : 'none', beardColor: hairColor, ...o.face };
     const spec: HumanoidSpec = {
       ...HERO_BUILD,
       ...race.build[o.sex],
@@ -67,7 +76,8 @@ export class CharacterBuilder {
       morphs: o.morphs,
       browWeight: o.brows,
       browColor: o.browColor,
-      lashes: o.lashes,
+      lashes: o.lashes === undefined ? undefined : LASH_LENGTH[o.sex] * o.lashes,
+      face,
       height: o.height ?? race.height[o.sex],
       hair: o.hair ?? race.hairStyle[o.sex],
       bracers: o.bracers ?? true,
@@ -79,7 +89,10 @@ export class CharacterBuilder {
         trouser: o.trouser ?? 0x4a4858,
         boots: 0x3b2a1c,
       },
-      extras: raceExtras(o.race, o.sex, o.hairColor ?? race.hair),
+      extras: (rig) => {
+        raceExtras(o.race)?.(rig);
+        if (face.beard === 'full') rig.sockets.head.add((o.race === 'dwarf' ? beard : chinBeard)(rig, face.beardColor));
+      },
     };
     const rig = buildHumanoid(spec);
     const equipment = { ...emptyEquipment(), ...o.equipment };

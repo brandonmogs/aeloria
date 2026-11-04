@@ -133,7 +133,21 @@ export function plume(rig: Rig): THREE.Object3D {
   return put(wedge(0.2 * hr, 1.4 * hr, 0.9 * hr, 0.6, 1.1), material(0xc0332a, 'cloth'), 0, h.top + 0.06, h.cz - 0.2 * hr);
 }
 
-/** A full beard hanging from the jaw. */
+/** A trimmed beard hanging from the chin: the bulk below the jaw of a painted full beard. */
+export function chinBeard(rig: Rig, color: number): THREE.Object3D {
+  const h = headFrame(rig);
+  const hr = h.hr;
+  const c = h.chin;
+  return put(
+    lathe([[0.06 * hr, c - 0.08], [0.28 * hr, c - 0.055], [0.44 * hr, c - 0.022], [0.5 * hr, c + 0.002], [0.34 * hr, c + 0.014], [0, c + 0.017]], 16, 0.75),
+    material(color, 'hair'),
+    0,
+    0,
+    h.chinZ - 0.46 * hr,
+  );
+}
+
+/** A dwarf's full beard hanging from the jaw. */
 export function beard(rig: Rig, color: number): THREE.Object3D {
   const h = headFrame(rig);
   const hr = h.hr;

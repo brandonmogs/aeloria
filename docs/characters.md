@@ -51,8 +51,11 @@ styled by `src/ui/creator.css`).
   build, torso, chest, waist and hips, arms, hands, legs, feet), *Face* (eye
   colour and the face sliders: face shape, head, forehead, brow, eyes, nose,
   cheeks, mouth, chin and jaw, ears, neck), *Hair* (style and colour), *Style*
-  (the colours of the clothes worn into the world). Colours come as swatches
-  plus a free picker; a slider label double-clicked goes back to rest.
+  (brow weight and colour, lash length, a man's beard and its colour, makeup:
+  lips, eyeshadow and blush with their colours, marks: freckles, a scar, war
+  paint and its colour, and the colours of the clothes worn into the world).
+  Colours come as swatches plus a free picker, and a brow or beard colour can
+  simply follow the hair; a slider label double-clicked goes back to rest.
 - **Bottom**: full / torso / head framing, a turntable toggle, random, reset,
   and *Enter Aeloria*. Opening a tab frames what it edits.
 
@@ -134,6 +137,20 @@ MakeHuman mesh. The skin texture no longer paints a lash line: at its
 resolution any line across the face is a staircase, so the painter keeps to
 soft shading there and leaves the lines to geometry.
 
+What the Style tab paints goes through the same skin painter (`FaceStyle`
+in `humanSkin.ts`, carried by `LookSpec.face`): lipstick over the lips,
+eyeshadow on the lid up to the crease, blush high on the cheeks, freckles as
+hashed dots a few millimetres apart, a scar as a thin pale seam with a darker
+rim, war paint weathered by the broad noise, and facial hair (stubble,
+goatee, short, full) as hashed hairs over the lip, chin and a cheek line that
+runs from the sideburn to the corner of the mouth. The lips are painted
+round the seam where they meet, which the atlas bake reads off the mesh
+(the densest ring of centreline vertices below the mouth landmark, which is
+the upper lip's most forward point, some eight millimetres higher). A full
+beard also hangs as geometry from the chin (`chinBeard` in `gear.ts`; the
+dwarf keeps his larger `beard`). Hair-coloured brows, lashes and beards
+follow the hair swatch unless given a colour of their own.
+
 `CharacterBuilder.build({ race, sex, hair, skinTone, equipment, ... })`
 (`src/render/characterBuilder.ts`) does all of that in one call and, by
 default, merges everything hanging on the skeleton (gear, hair, eyes, base
@@ -163,8 +180,9 @@ unchanged.
 A race is a body from the pipeline (its sex, build and face baked in) plus
 proportion knobs on top of `HERO_BUILD` and default colours
 (`RACES` in `src/render/races.ts`), and what the body cannot carry
-(`src/render/raceGear.ts`): an orc's tusks, a dwarf's beard. Dark elves share
-the elf body and differ only in skin, hair and eye colour.
+(`src/render/raceGear.ts`): an orc's tusks. A dwarf man's full beard is the
+character builder's default face style for that race, so the screen can trim
+it. Dark elves share the elf body and differ only in skin, hair and eye colour.
 
 The knobs (`HumanoidSpec` in `src/render/human.ts`) reshape the body at
 build time: head, arm and leg scale, `bulk`, `belly`, `shoulders`, `waist`,
@@ -280,8 +298,9 @@ scene-graph walk.
    `bodyFor` which race uses it.
 3. Add the race to `Race` (same file), its label, proportion knobs, heights
    and colours to `RACES` in `src/render/races.ts`, its id to `RACE_IDS` in
-   `src/ui/appearance.ts`, and anything the body cannot carry (tusks, a
-   beard) to `raceExtras` in `src/render/raceGear.ts`.
+   `src/ui/appearance.ts`, anything the body cannot carry (tusks) to
+   `raceExtras` in `src/render/raceGear.ts`, and a default beard, if the race
+   wears one, to `CharacterBuilder.build`.
 4. Add a look to `scripts/character-shot.mjs` so the lab's smoke test
    renders it, and check it under each lighting preset.
 

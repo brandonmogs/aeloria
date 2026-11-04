@@ -1,6 +1,7 @@
 import { CharacterOptions } from '../render/characterBuilder';
 import { HairStyle } from '../render/hair';
 import { Race, Sex } from '../render/human';
+import { BEARD_STYLES, BeardStyle, PAINT_STYLES, PaintStyle, SCAR_STYLES, ScarStyle } from '../render/humanSkin';
 import { MorphValues } from '../render/morphs';
 import { RACES } from '../render/races';
 
@@ -29,9 +30,31 @@ export interface Appearance {
   /** The starting clothes. */
   tunic: number;
   trouser: number;
+  /** Brow weight, 0 fine to 1 heavy; the colour is the hair's when null. */
+  brows: number;
+  browColor: number | null;
+  /** Lash length as a fraction of the sex's usual, 0 to 2. */
+  lashes: number;
+  /** Facial hair, its colour the hair's when null. */
+  beard: BeardStyle;
+  beardColor: number | null;
+  /** Makeup strengths 0 to 1 and their colours. */
+  lips: number;
+  lipColor: number;
+  shadow: number;
+  shadowColor: number;
+  blush: number;
+  /** Marks: freckles 0 to 1, a scar, war paint and its colour. */
+  freckles: number;
+  scar: ScarStyle;
+  paint: PaintStyle;
+  paintColor: number;
   /** The creator's sliders by id, -1 to 1 (see morphs.ts). */
   morphs: MorphValues;
 }
+
+export { BEARD_STYLES, PAINT_STYLES, SCAR_STYLES };
+export type { BeardStyle, PaintStyle, ScarStyle };
 
 export const SKIN_TONES: ReadonlyArray<readonly [string, number]> = [
   ['Pale', 0xf2dcc4],
@@ -77,6 +100,38 @@ export const CLOTH_COLORS: ReadonlyArray<readonly [string, number]> = [
   ['Cream', 0xd8ccb0],
   ['Charcoal', 0x2a2a2e],
 ];
+
+export const LIP_COLORS: ReadonlyArray<readonly [string, number]> = [
+  ['Rose', 0xb84a5a],
+  ['Red', 0x9a2f3a],
+  ['Wine', 0x6b2030],
+  ['Coral', 0xd4624a],
+  ['Plum', 0x5a2a4a],
+  ['Nude', 0xc48a74],
+  ['Black', 0x1a1014],
+];
+
+export const SHADOW_COLORS: ReadonlyArray<readonly [string, number]> = [
+  ['Smoke', 0x4a3a5a],
+  ['Plum', 0x5a2a5a],
+  ['Bronze', 0x8a5a2a],
+  ['Teal', 0x2a5a5a],
+  ['Charcoal', 0x2a2a30],
+  ['Gold', 0xb08a3a],
+  ['Rose', 0xa05060],
+];
+
+export const PAINT_COLORS: ReadonlyArray<readonly [string, number]> = [
+  ['Bone', 0xf0f0f0],
+  ['Blood', 0xc02a2a],
+  ['Ash', 0x303030],
+  ['Woad', 0x2a4a9a],
+  ['Ochre', 0xc08a2a],
+  ['Moss', 0x3a6a3a],
+];
+
+/** What a race and sex start with on the chin: a dwarf man's full beard, bare faces otherwise. */
+export const defaultBeard = (race: Race, sex: Sex): BeardStyle => (race === 'dwarf' && sex === 'male' ? 'full' : 'none');
 
 /** A named set of slider values for one tab of the creator. */
 export interface MorphPreset {
@@ -126,14 +181,28 @@ export function defaultAppearance(race: Race = 'human', sex: Sex = 'male'): Appe
     hairColor: r.hair,
     tunic: 0x3f7a4a,
     trouser: 0x4a4858,
+    brows: 0.5,
+    browColor: null,
+    lashes: 1,
+    beard: defaultBeard(race, sex),
+    beardColor: null,
+    lips: 0,
+    lipColor: 0x9a2f3a,
+    shadow: 0,
+    shadowColor: 0x4a3a5a,
+    blush: 0,
+    freckles: 0,
+    scar: 'none',
+    paint: 'none',
+    paintColor: 0xf0f0f0,
     morphs: {},
   };
 }
 
-/** Switch race or sex, taking that body's colours, hair and stature; the name, clothes and sliders stay. */
+/** Switch race or sex, taking that body's colours, hair, stature and beard; the name, clothes, makeup and sliders stay. */
 export function applyRace(a: Appearance, race: Race, sex: Sex): void {
   const d = defaultAppearance(race, sex);
-  Object.assign(a, { race, sex, height: d.height, skin: d.skin, eyes: d.eyes, hair: d.hair, hairColor: d.hairColor });
+  Object.assign(a, { race, sex, height: d.height, skin: d.skin, eyes: d.eyes, hair: d.hair, hairColor: d.hairColor, beard: d.beard });
 }
 
 export function cloneAppearance(a: Appearance): Appearance {
@@ -151,6 +220,22 @@ export function toCharacterOptions(a: Appearance): CharacterOptions {
     eyes: a.eyes,
     tunic: a.tunic,
     trouser: a.trouser,
+    brows: a.brows,
+    browColor: a.browColor ?? undefined,
+    lashes: a.lashes,
+    face: {
+      beard: a.sex === 'male' ? a.beard : 'none',
+      beardColor: a.beardColor ?? a.hairColor,
+      lips: a.lips,
+      lipColor: a.lipColor,
+      shadow: a.shadow,
+      shadowColor: a.shadowColor,
+      blush: a.blush,
+      freckles: a.freckles,
+      scar: a.scar,
+      paint: a.paint,
+      paintColor: a.paintColor,
+    },
     morphs: { ...a.morphs },
   };
 }
@@ -205,6 +290,21 @@ export function sanitizeAppearance(raw: unknown): Appearance | null {
   if (isColour(r.tunic)) a.tunic = r.tunic;
   if (isColour(r.trouser)) a.trouser = r.trouser;
   if (HAIR_STYLES.includes(r.hair as HairStyle)) a.hair = r.hair as HairStyle;
+  const unit = (v: unknown, hi = 1): number | undefined => (typeof v === 'number' && Number.isFinite(v) ? Math.max(0, Math.min(hi, v)) : undefined);
+  a.brows = unit(r.brows) ?? a.brows;
+  a.lashes = unit(r.lashes, 2) ?? a.lashes;
+  a.lips = unit(r.lips) ?? a.lips;
+  a.shadow = unit(r.shadow) ?? a.shadow;
+  a.blush = unit(r.blush) ?? a.blush;
+  a.freckles = unit(r.freckles) ?? a.freckles;
+  if (r.browColor === null || isColour(r.browColor)) a.browColor = r.browColor;
+  if (r.beardColor === null || isColour(r.beardColor)) a.beardColor = r.beardColor;
+  if (isColour(r.lipColor)) a.lipColor = r.lipColor;
+  if (isColour(r.shadowColor)) a.shadowColor = r.shadowColor;
+  if (isColour(r.paintColor)) a.paintColor = r.paintColor;
+  if (BEARD_STYLES.includes(r.beard as BeardStyle)) a.beard = r.beard as BeardStyle;
+  if (SCAR_STYLES.includes(r.scar as ScarStyle)) a.scar = r.scar as ScarStyle;
+  if (PAINT_STYLES.includes(r.paint as PaintStyle)) a.paint = r.paint as PaintStyle;
   if (r.morphs && typeof r.morphs === 'object') {
     for (const [id, v] of Object.entries(r.morphs as Record<string, unknown>)) {
       if (typeof v !== 'number' || !Number.isFinite(v) || !v || !/^[A-Za-z0-9]{1,40}$/.test(id)) continue;

@@ -1,19 +1,17 @@
 import * as THREE from 'three';
 import { Rig } from './characters';
-import { beard } from './gear';
-import { Race, Sex } from './human';
+import { Race } from './human';
 
 /**
- * What a race wears that its base body does not carry: an orc's tusks, a
- * dwarf's beard. Returned as the `extras` hook of a HumanoidSpec, so the
- * lab and the game dress a race the same way.
+ * What a race wears that its base body does not carry: an orc's tusks.
+ * Returned as the `extras` hook of a HumanoidSpec, so the lab and the game
+ * dress a race the same way. (A dwarf man's beard is the character builder's
+ * default face style, so the screen can trim it.)
  */
-export function raceExtras(race: Race, sex: Sex, hairColor: number): ((rig: Rig) => void) | undefined {
+export function raceExtras(race: Race): ((rig: Rig) => void) | undefined {
   switch (race) {
     case 'orc':
       return (rig) => rig.sockets.head.add(tusks(rig));
-    case 'dwarf':
-      return sex === 'male' ? (rig) => rig.sockets.head.add(beard(rig, hairColor)) : undefined;
     default:
       return undefined;
   }

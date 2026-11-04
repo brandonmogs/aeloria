@@ -20,6 +20,33 @@ import { tileableNoise } from './texgen';
  * skin soft.
  */
 
+/** Facial hair, from none to a full beard; stubble, goatee and short are painted, full is painted and grown. */
+export type BeardStyle = 'none' | 'stubble' | 'goatee' | 'short' | 'full';
+export const BEARD_STYLES: readonly BeardStyle[] = ['none', 'stubble', 'goatee', 'short', 'full'];
+/** A healed scar across the face. */
+export type ScarStyle = 'none' | 'brow' | 'cheek' | 'lip' | 'eye';
+export const SCAR_STYLES: readonly ScarStyle[] = ['none', 'brow', 'cheek', 'lip', 'eye'];
+/** War paint: a stripe down one eye, bars under both, claw marks on a cheek, a row of dots over the brows. */
+export type PaintStyle = 'none' | 'stripe' | 'bars' | 'claw' | 'dots';
+export const PAINT_STYLES: readonly PaintStyle[] = ['none', 'stripe', 'bars', 'claw', 'dots'];
+
+/** What is painted onto a face beyond its skin: makeup and marks, each strength 0 to 1. */
+export interface FaceStyle {
+  beard: BeardStyle;
+  beardColor: number;
+  lips: number;
+  lipColor: number;
+  shadow: number;
+  shadowColor: number;
+  blush: number;
+  freckles: number;
+  scar: ScarStyle;
+  paint: PaintStyle;
+  paintColor: number;
+}
+
+export const PLAIN_FACE: FaceStyle = { beard: 'none', beardColor: 0x2a1a10, lips: 0, lipColor: 0x9a2f3a, shadow: 0, shadowColor: 0x4a3a5a, blush: 0, freckles: 0, scar: 'none', paint: 'none', paintColor: 0xf0f0f0 };
+
 export interface LookSpec {
   skin: number;
   hair: number;
@@ -35,6 +62,8 @@ export interface LookSpec {
   /** Leather bracers on bare forearms. */
   bracers: boolean;
   goblin: boolean;
+  /** Beard, makeup and marks; plain when left out. */
+  face?: FaceStyle;
 }
 
 const SIZE = 1024;
@@ -69,6 +98,8 @@ interface Atlas {
   /** Fine noise for mottle, broad noise for hairlines and hems. */
   fine: Float32Array;
   broad: Float32Array;
+  /** Template y of the seam where the lips meet (the mouth landmark is the upper lip's most forward point). */
+  lipSplit: number;
 }
 
 const atlasCache = new WeakMap<HumanTemplate, Atlas>();
@@ -178,7 +209,25 @@ function bakeAtlas(T: HumanTemplate): Atlas {
     }
     covered.set(next);
   }
-  const atlas = { data, fine: tileableNoise(SIZE, 5, 91, 6), broad: tileableNoise(SIZE, 2, 92, 2) };
+  // The seam between the lips: the densest ring of vertices on the centreline
+  // below the mouth landmark, where the lip margins turn into the mouth.
+  const lm = T.landmarks;
+  const rings = new Map<number, number>();
+  for (let v = 0; v < P.length; v += 3) {
+    const y = P[v + 1];
+    if (Math.abs(P[v]) > 0.006 || y > lm.mouth.y - 0.003 || y < lm.mouth.y - 0.015 || P[v + 2] < lm.mouth.z - 0.014) continue;
+    const k = Math.round((lm.mouth.y - y) * 1000);
+    rings.set(k, (rings.get(k) ?? 0) + 1);
+  }
+  let lipSplit = lm.mouth.y - 0.008;
+  let fullest = 0;
+  for (const [k, n] of rings) {
+    if (n > fullest) {
+      fullest = n;
+      lipSplit = lm.mouth.y - k / 1000;
+    }
+  }
+  const atlas = { data, fine: tileableNoise(SIZE, 5, 91, 6), broad: tileableNoise(SIZE, 2, 92, 2), lipSplit };
   atlasCache.set(T, atlas);
   return atlas;
 }
@@ -188,6 +237,14 @@ const rgb = (hex: number): RGB => [(hex >> 16) & 255, (hex >> 8) & 255, hex & 25
 const mix = (a: RGB, b: RGB, t: number): RGB => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
 const scale = (a: RGB, k: number): RGB => [a[0] * k, a[1] * k, a[2] * k];
 const clamp01 = (v: number): number => (v < 0 ? 0 : v > 1 ? 1 : v);
+/** A 0..1 hash of an integer, for stubble and freckles: speckle finer than the noise. */
+const hash = (i: number): number => {
+  let h = Math.imul(i ^ 0x9e3779b9, 0x85ebca6b);
+  h ^= h >>> 13;
+  h = Math.imul(h, 0xc2b2ae35);
+  h ^= h >>> 16;
+  return (h >>> 0) / 4294967296;
+};
 
 /** The baked colour and roughness maps for a look. */
 function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture; roughnessMap: THREE.CanvasTexture } {
@@ -205,6 +262,15 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
   const piping = rgb(0xb8963f);
   const undershirt = rgb(0xe9e1cc);
   const lip = mix(skin, rgb(look.goblin ? 0x3a3020 : 0x9a4444), 0.45);
+  const f = look.face ?? PLAIN_FACE;
+  const beardCol = scale(rgb(f.beardColor), 0.7);
+  /** Distance from (px, py) to the segment (ax0, ay0)-(bx, by), for scars and paint. */
+  const segDist = (px: number, py: number, ax0: number, ay0: number, bx: number, by: number): number => {
+    const dx = bx - ax0;
+    const dy = by - ay0;
+    const t = clamp01(((px - ax0) * dx + (py - ay0) * dy) / (dx * dx + dy * dy));
+    return Math.hypot(px - ax0 - t * dx, py - ay0 - t * dy);
+  };
   const dark = rgb(0x1a1210);
   const white = rgb(0xffffff);
   const smooth = (v: number, a: number, b: number): number => {
@@ -216,6 +282,8 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
   const eye = { x: Math.abs(lm.eyeL.x - H.x), y: lm.eyeL.y - H.y };
   const nose = { y: lm.noseTip.y - H.y, z: lm.noseTip.z - H.z };
   const mouth = { y: lm.mouth.y - H.y, z: lm.mouth.z - H.z, half: lm.mouthHalfWidth };
+  const chin = { y: lm.chin.y - H.y, z: lm.chin.z - H.z, bottom: lm.chinBottom.y - H.y };
+  const lipSplit = atlas.lipSplit - H.y;
   const hairFrame = { hr: lm.skullHalfWidth, browY: lm.brow[1].y - H.y, earY: lm.earL.y - H.y };
   const skullCz = (lm.skullFront + lm.skullBack) / 2 - H.z;
   // Clothing lines, relative to the joints that own the surrounding triangles.
@@ -312,26 +380,125 @@ function lookMaps(T: HumanTemplate, look: LookSpec): { map: THREE.CanvasTexture;
           }
           const dn = Math.hypot(ax - 0.009, y - (nose.y - 0.006));
           if (dn < 0.0036 && z > nose.z - 0.035) col = mix(col, scale(skin, 0.45), 0.7 * (1 - dn / 0.0036));
-          // Lips: a thinner upper lip and a fuller lower one with a highlight,
-          // both tapering into the corners, split by a dark line.
+          // Lips: the upper lip from the seam (read off the mesh) up to its
+          // border just above the mouth landmark, a fuller lower lip with a
+          // highlight below it, both tapering into the corners.
           const halfW = mouth.half * 0.6;
           if (ax < halfW && z > mouth.z - 0.05) {
-            const dm = y - mouth.y;
+            const dm = y - lipSplit;
             const edge = clamp01(1 - (ax / halfW) * (ax / halfW));
-            const up = 0.0032 * (0.35 + 0.65 * edge);
-            const down = 0.0062 * (0.35 + 0.65 * edge);
+            const lipH = mouth.y + 0.0025 - lipSplit;
+            const up = lipH * (0.3 + 0.7 * edge);
+            const down = 0.9 * lipH * (0.3 + 0.7 * edge);
             if (dm > 0 && dm < up) col = mix(col, lip, 0.4 * (1 - smooth(dm / up, 0.7, 1)));
             if (dm < 0 && dm > -down) {
               col = mix(col, lip, 0.5 * (1 - smooth(-dm / down, 0.7, 1)));
-              const hl = (1 - smooth(Math.abs(dm + 0.0028), 0.0008, 0.0018)) * (1 - smooth(ax, 0.008, 0.016));
+              const hl = (1 - smooth(Math.abs(dm + 0.45 * down), 0.1 * down, 0.28 * down)) * (1 - smooth(ax, 0.008, 0.016));
               col = mix(col, white, 0.14 * hl);
               rough = 0.38;
             }
-            if (Math.abs(dm) < 0.0005) col = mix(col, dark, 0.32 * (0.3 + 0.7 * edge));
+            if (f.lips > 0) {
+              const band = dm > 0 ? (dm < up ? 1 - smooth(dm / up, 0.8, 1) : 0) : dm > -down ? 1 - smooth(-dm / down, 0.8, 1) : 0;
+              col = mix(col, rgb(f.lipColor), 0.85 * f.lips * band);
+              if (band > 0.5) rough = 0.3;
+            }
+            if (Math.abs(dm) < 0.0006) col = mix(col, dark, 0.32 * (0.3 + 0.7 * edge));
           }
           // Cheek warmth.
           const dc = Math.hypot(ax - 0.046, y - (eye.y - 0.04));
           if (dc < 0.035 && !look.goblin) col = mix(col, rgb(0xc86a5a), 0.16 * (1 - dc / 0.035));
+          if (!look.goblin) {
+            // Eyeshadow over the lids, up to the crease; blush high on the cheeks.
+            if (f.shadow > 0 && dy > 0.0005 && dy < 0.012 && Math.abs(dxe) < 0.016) {
+              const sh = smooth(dy, 0.0005, 0.0025) * (1 - smooth(dy, 0.0065, 0.012)) * (1 - smooth(Math.abs(dxe), 0.009, 0.016));
+              col = mix(col, rgb(f.shadowColor), 0.75 * f.shadow * sh);
+            }
+            const db = Math.hypot(ax - 0.042, y - (eye.y - 0.035));
+            if (f.blush > 0 && db < 0.03) col = mix(col, rgb(0xd4707a), 0.45 * f.blush * (1 - db / 0.03) * (1 - db / 0.03));
+            // Freckles: hashed dots a few millimetres apart over the cheeks and the nose, more of them the higher the slider.
+            if (f.freckles > 0 && y < eye.y - 0.004 && y > eye.y - 0.052 && ax < 0.056) {
+              const cell = 0.0042;
+              const cx = Math.floor(x / cell);
+              const cy = Math.floor(y / cell);
+              const seed = cx * 73856093 + cy * 19349663;
+              if (hash(seed) < 0.15 + 0.5 * f.freckles) {
+                const fx = (cx + 0.25 + 0.5 * hash(seed + 1)) * cell;
+                const fy = (cy + 0.25 + 0.5 * hash(seed + 2)) * cell;
+                const rr = 0.0009 + 0.0005 * hash(seed + 3);
+                const d = Math.hypot(x - fx, y - fy);
+                col = mix(col, mix(skin, rgb(0x9a5a34), 0.5), (0.3 + 0.3 * hash(seed + 4)) * (1 - smooth(d, rr * 0.3, rr * 1.2)));
+              }
+            }
+            // A scar: a pale, slightly glossy seam with a darker rim, soft enough to survive the texel grid.
+            if (f.scar !== 'none') {
+              const seg: [number, number, number, number] =
+                f.scar === 'brow' ? [0.02, eye.y + 0.034, 0.036, eye.y + 0.012]
+                : f.scar === 'cheek' ? [0.052, eye.y - 0.012, 0.03, eye.y - 0.05]
+                : f.scar === 'lip' ? [0.013, mouth.y + 0.014, 0.008, mouth.y - 0.005]
+                : [0.04, eye.y + 0.02, 0.028, eye.y - 0.024];
+              const ds = segDist(x, y, ...seg);
+              if (ds < 0.003) {
+                const core = 1 - smooth(ds, 0.0004, 0.0014);
+                const rim = smooth(ds, 0.0005, 0.0013) * (1 - smooth(ds, 0.0018, 0.003));
+                col = mix(col, mix(skin, rgb(0xeab4a4), 0.7), 0.9 * core);
+                col = mix(col, scale(skin, 0.7), 0.6 * rim);
+                rough = rough - 0.18 * core;
+              }
+            }
+            // War paint, weathered by the broad noise.
+            if (f.paint !== 'none') {
+              let w = 0;
+              if (f.paint === 'stripe') {
+                w = (1 - smooth(Math.abs(x - 0.03), 0.005, 0.0085)) * smooth(y, eye.y - 0.06, eye.y - 0.054) * (1 - smooth(y, eye.y + 0.034, eye.y + 0.04));
+              } else if (f.paint === 'bars') {
+                const along = 1 - smooth(Math.abs(ax - 0.03), 0.016, 0.021);
+                w = along * Math.max(1 - smooth(Math.abs(y - (eye.y - 0.022)), 0.0035, 0.0055), 1 - smooth(Math.abs(y - (eye.y - 0.036)), 0.0035, 0.0055));
+              } else if (f.paint === 'claw') {
+                for (let k = 0; k < 3; k++) {
+                  const d = segDist(x, y, -0.058, eye.y - 0.004 - 0.009 * k, -0.026, eye.y - 0.036 - 0.009 * k);
+                  w = Math.max(w, 1 - smooth(d, 0.0012, 0.0032));
+                }
+              } else {
+                for (const [cx, cy] of [[0.016, eye.y - 0.021], [0.03, eye.y - 0.026], [0.044, eye.y - 0.033]] as const) {
+                  w = Math.max(w, 1 - smooth(Math.hypot(ax - cx, y - cy), 0.0022, 0.0034));
+                }
+              }
+              if (w > 0) {
+                col = mix(col, rgb(f.paintColor), 0.9 * w * (0.75 + 0.25 * nb));
+                rough = Math.max(rough, 0.62);
+              }
+            }
+          }
+        }
+        // Facial hair: over the upper lip, down the chin and along the jaw, denser by style, broken into hairs by the
+        // fine noise; the full beard also hangs as geometry from the chin.
+        if (f.beard !== 'none' && !look.goblin && y < eye.y - 0.015) {
+          const noseBase = nose.y - 0.006;
+          // The bare zone round the lips narrows toward the corners, as the lips do.
+          const lipHalf = mouth.half * 0.72;
+          const taper = 1 - 0.55 * clamp01((ax / lipHalf) * (ax / lipHalf));
+          const lipTop = lipSplit + (mouth.y + 0.004 - lipSplit) * taper;
+          const lipBottom = lipSplit - 0.011 * taper;
+          // The cheek line runs from the sideburn down to the corner of the mouth, higher for a full beard.
+          const earLine = f.beard === 'full' ? eye.y - 0.028 : eye.y - 0.042;
+          const cornerY = f.beard === 'full' ? mouth.y + 0.012 : mouth.y + 0.004;
+          const cheekLine = cornerY + (earLine - cornerY) * clamp01((ax - 0.042) / 0.03);
+          const front = z > mouth.z - 0.06;
+          const moustache = front && ax < mouth.half * 1.3 && y > lipTop && y < noseBase ? smooth(y, lipTop, lipTop + 0.002) * (1 - smooth(y, noseBase - 0.003, noseBase)) * (1 - smooth(ax, mouth.half * 1.05, mouth.half * 1.3)) : 0;
+          const chinPatch = y < lipBottom && z > chin.z - 0.09 ? 1 - smooth(y, lipBottom - 0.003, lipBottom) : 0;
+          const cheekIn = y > lipBottom && y < lipTop ? lipHalf : 0.024; // clear of the lips
+          const cheek = ax > cheekIn && y < cheekLine && z > -0.01 ? smooth(ax, cheekIn, cheekIn + 0.008) * (1 - smooth(y, cheekLine - 0.006, cheekLine)) : 0;
+          let m = f.beard === 'goatee' ? Math.max(moustache, chinPatch * (1 - smooth(ax, 0.018, 0.027))) : Math.max(moustache, chinPatch, cheek);
+          m *= 1 - smooth(chin.bottom - y, 0.008, 0.022); // thinning out under the chin
+          if (m > 0) {
+            // Hashed hairs: fewer texels carry one toward the edges and in stubble.
+            const h = hash(i);
+            const share = f.beard === 'stubble' ? 0.12 + 0.5 * m : 0.4 + 0.6 * m;
+            const grain = h < share ? 0.55 + 0.9 * (h / share) : 0.1;
+            const density = f.beard === 'stubble' ? 0.6 : f.beard === 'goatee' ? 0.85 : f.beard === 'short' ? 0.85 : 0.95;
+            col = mix(col, beardCol, clamp01(density * grain * smooth(m, 0, 0.6)));
+            rough = rough + 0.15 * m;
+          }
         }
         break;
       }

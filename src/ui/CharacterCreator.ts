@@ -4,21 +4,31 @@ import { MorphGroup, MorphSet, morphSet, randomMorphs } from '../render/morphs';
 import { RACES } from '../render/races';
 import {
   Appearance,
+  BEARD_STYLES,
   BODY_PRESETS,
+  BeardStyle,
   CLOTH_COLORS,
   EYE_COLORS,
   FACE_PRESETS,
   HAIR_COLORS,
   HAIR_STYLES,
+  LIP_COLORS,
   MorphPreset,
   NAME_MAX,
+  PAINT_COLORS,
+  PAINT_STYLES,
+  PaintStyle,
   RACE_IDS,
+  SCAR_STYLES,
   SEXES,
+  SHADOW_COLORS,
   SKIN_TONES,
   SLOT_COUNT,
+  ScarStyle,
   applyRace,
   cleanName,
   cloneAppearance,
+  defaultAppearance,
   heightRange,
   loadSlot,
   randomName,
@@ -31,7 +41,8 @@ import './creator.css';
  * The character screen: the figure on the shared stage under its own
  * lighting, with everything about it on buttons, swatches and sliders. Race,
  * sex, name and saved looks sit on the left; the sheet on the right has a tab
- * each for presets, the body, the face, the hair and the clothes. Shown
+ * each for presets, the body, the face, the hair, and the style (brows,
+ * lashes, beard, makeup, marks and clothes). Shown
  * before the world on a first visit; `choose()` resolves with the look when
  * the player enters. `window.__creator` is the test hook.
  */
@@ -47,9 +58,13 @@ const TABS: ReadonlyArray<readonly [Tab, string]> = [
 ];
 
 /** Where the view goes when a tab opens, and how much room it leaves round the figure. */
-const TAB_FRAMING: Record<Tab, [Framing, number]> = { preset: ['full', 1], body: ['full', 1], face: ['head', 1.3], hair: ['head', 1.45], style: ['torso', 1.1] };
+const TAB_FRAMING: Record<Tab, [Framing, number]> = { preset: ['full', 1], body: ['full', 1], face: ['head', 1.3], hair: ['head', 1.45], style: ['head', 1.7] };
 
 const HAIR_LABELS: Record<HairStyle, string> = { long: 'Long', short: 'Short', bald: 'Shaved' };
+const BEARD_LABELS: Record<BeardStyle, string> = { none: 'Clean', stubble: 'Stubble', goatee: 'Goatee', short: 'Short', full: 'Full' };
+const SCAR_LABELS: Record<ScarStyle, string> = { none: 'None', brow: 'Brow', cheek: 'Cheek', lip: 'Lip', eye: 'Eye' };
+const PAINT_LABELS: Record<PaintStyle, string> = { none: 'None', stripe: 'Stripe', bars: 'Bars', claw: 'Claw', dots: 'Dots' };
+const pct = (v: number): string => String(Math.round(v * 100));
 const SEX_LABELS = { male: 'Male', female: 'Female' } as const;
 
 export interface CreatorHandle {
@@ -214,16 +229,34 @@ export class CharacterCreator {
     this.resolve?.(chosen);
   }
 
-  /** A new face, body, hair and name; the race and sex stay. */
+  /** A new face, body, hair, style and name; the race and sex stay. */
   private randomize(): void {
-    const set = morphSet(this.look.sex);
+    const look = this.look;
+    const set = morphSet(look.sex);
     const pick = <T>(list: readonly T[]): T => list[Math.floor(Math.random() * list.length)];
-    if (set) this.look.morphs = { ...randomMorphs(set, 'face', 0.55), ...randomMorphs(set, 'body', 0.45) };
-    this.look.hair = pick(HAIR_STYLES);
-    this.look.hairColor = pick(HAIR_COLORS)[1];
-    this.look.eyes = pick(EYE_COLORS)[1];
-    this.look.tunic = pick(CLOTH_COLORS)[1];
-    this.look.trouser = pick(CLOTH_COLORS)[1];
+    const chance = (p: number): boolean => Math.random() < p;
+    const between = (lo: number, hi: number): number => +(lo + Math.random() * (hi - lo)).toFixed(2);
+    if (set) look.morphs = { ...randomMorphs(set, 'face', 0.55), ...randomMorphs(set, 'body', 0.45) };
+    look.hair = pick(HAIR_STYLES);
+    look.hairColor = pick(HAIR_COLORS)[1];
+    look.eyes = pick(EYE_COLORS)[1];
+    look.tunic = pick(CLOTH_COLORS)[1];
+    look.trouser = pick(CLOTH_COLORS)[1];
+    look.brows = between(0.2, 0.9);
+    look.browColor = chance(0.25) ? pick(HAIR_COLORS)[1] : null;
+    look.lashes = between(0.6, 1.4);
+    look.beard = look.sex === 'male' ? pick(BEARD_STYLES) : 'none';
+    look.beardColor = chance(0.25) ? pick(HAIR_COLORS)[1] : null;
+    const made = look.sex === 'female' ? 0.5 : 0.08;
+    look.lips = chance(made) ? between(0.4, 1) : 0;
+    look.lipColor = pick(LIP_COLORS)[1];
+    look.shadow = chance(made * 0.8) ? between(0.3, 1) : 0;
+    look.shadowColor = pick(SHADOW_COLORS)[1];
+    look.blush = chance(made) ? between(0.3, 0.8) : 0;
+    look.freckles = chance(0.3) ? between(0.2, 0.8) : 0;
+    look.scar = chance(0.15) ? pick(SCAR_STYLES) : 'none';
+    look.paint = chance(0.1) ? pick(PAINT_STYLES) : 'none';
+    look.paintColor = pick(PAINT_COLORS)[1];
     const [lo, hi] = heightRange(this.look.race, this.look.sex);
     this.look.height = +(lo + Math.random() * (hi - lo)).toFixed(2);
     this.look.name = randomName(this.look.sex);
@@ -232,12 +265,9 @@ export class CharacterCreator {
     this.rebuild();
   }
 
-  /** Back to the race's stock body; the name stays. */
+  /** Back to the race's stock body, bare face and plain clothes; the name stays. */
   private reset(): void {
-    applyRace(this.look, this.look.race, this.look.sex);
-    this.look.morphs = {};
-    this.look.tunic = 0x3f7a4a;
-    this.look.trouser = 0x4a4858;
+    Object.assign(this.look, defaultAppearance(this.look.race, this.look.sex), { name: this.look.name });
     this.renderSheet();
     this.rebuild();
   }
@@ -439,29 +469,46 @@ export class CharacterCreator {
   }
 
   private hairSheet(): void {
-    const row = el('div', 'creator-row');
-    row.append(el('span', 'lbl', 'Style'));
-    const choices = el('div', 'creator-choices');
-    for (const h of HAIR_STYLES) {
-      const b = button(HAIR_LABELS[h], 'creator-hair', () => {
-        this.look.hair = h;
-        for (const other of choices.children) other.classList.toggle('active', other === b);
-        this.rebuild();
-      });
-      b.dataset.hair = h;
-      b.classList.toggle('active', h === this.look.hair);
-      choices.append(b);
-    }
-    row.append(choices);
-    this.sheet.append(row);
+    this.choices(this.sheet, 'Style', HAIR_STYLES, HAIR_LABELS, 'hair', () => this.look.hair, (v) => (this.look.hair = v));
     this.swatches(this.sheet, 'Colour', HAIR_COLORS, () => this.look.hairColor, (v) => (this.look.hairColor = v));
   }
 
+  /** Brows, lashes, beard, makeup, marks and clothes: everything painted or grown on the chosen body. */
   private styleSheet(): void {
-    this.sheet.append(el('div', 'creator-label', 'Clothes'));
-    this.swatches(this.sheet, 'Tunic', CLOTH_COLORS, () => this.look.tunic, (v) => (this.look.tunic = v));
-    this.swatches(this.sheet, 'Trousers', CLOTH_COLORS, () => this.look.trouser, (v) => (this.look.trouser = v));
-    this.sheet.append(el('p', 'creator-note', 'What you wear into the world; armour goes over it.'));
+    const look = this.look;
+    const sheet = this.sheet;
+    const strength = (label: string, key: 'brows' | 'lashes' | 'lips' | 'shadow' | 'blush' | 'freckles', max = 1): void => {
+      const input = this.slider(sheet, label, 0, max, 0.01, look[key], (v) => {
+        look[key] = v;
+        this.scheduleRebuild(40);
+      }, pct);
+      input.dataset.style = key;
+      input.classList.add('style-slider');
+    };
+    sheet.append(el('div', 'creator-label', 'Brows and lashes'));
+    strength('Brows', 'brows');
+    this.tintSwatches(sheet, 'Colour', HAIR_COLORS, () => look.browColor, (v) => (look.browColor = v));
+    strength('Lashes', 'lashes', 2);
+    if (look.sex === 'male') {
+      sheet.append(el('div', 'creator-label', 'Beard'));
+      this.choices(sheet, 'Style', BEARD_STYLES, BEARD_LABELS, 'beard', () => look.beard, (v) => (look.beard = v));
+      this.tintSwatches(sheet, 'Colour', HAIR_COLORS, () => look.beardColor, (v) => (look.beardColor = v));
+    }
+    sheet.append(el('div', 'creator-label', 'Makeup'));
+    strength('Lips', 'lips');
+    this.swatches(sheet, 'Colour', LIP_COLORS, () => look.lipColor, (v) => (look.lipColor = v));
+    strength('Shadow', 'shadow');
+    this.swatches(sheet, 'Colour', SHADOW_COLORS, () => look.shadowColor, (v) => (look.shadowColor = v));
+    strength('Blush', 'blush');
+    sheet.append(el('div', 'creator-label', 'Marks'));
+    strength('Freckles', 'freckles');
+    this.choices(sheet, 'Scar', SCAR_STYLES, SCAR_LABELS, 'scar', () => look.scar, (v) => (look.scar = v));
+    this.choices(sheet, 'Paint', PAINT_STYLES, PAINT_LABELS, 'paint', () => look.paint, (v) => (look.paint = v));
+    this.swatches(sheet, 'Colour', PAINT_COLORS, () => look.paintColor, (v) => (look.paintColor = v));
+    sheet.append(el('div', 'creator-label', 'Clothes'));
+    this.swatches(sheet, 'Tunic', CLOTH_COLORS, () => look.tunic, (v) => (look.tunic = v));
+    this.swatches(sheet, 'Trousers', CLOTH_COLORS, () => look.trouser, (v) => (look.trouser = v));
+    sheet.append(el('p', 'creator-note', 'What you wear into the world; armour goes over it.'));
   }
 
   /** One collapsible group per morph group of the tab, the first open, each slider labelled from the bake. */
@@ -547,8 +594,43 @@ export class CharacterCreator {
     return input;
   }
 
+  /** A row of named choices, one active; each button carries `data-<key>` with its value. */
+  private choices<T extends string>(parent: HTMLElement, label: string, list: readonly T[], labels: Record<T, string>, key: string, get: () => T, set: (v: T) => void): void {
+    const row = el('div', 'creator-row');
+    row.append(el('span', 'lbl', label));
+    const wrap = el('div', 'creator-choices');
+    for (const v of list) {
+      const b = button(labels[v], `creator-choice creator-${key}`, () => {
+        set(v);
+        for (const other of wrap.children) other.classList.toggle('active', other === b);
+        this.rebuild();
+      });
+      b.dataset[key] = v;
+      b.classList.toggle('active', v === get());
+      wrap.append(b);
+    }
+    row.append(wrap);
+    parent.append(row);
+  }
+
   /** Named colours as round swatches, and a picker for any other. */
   private swatches(parent: HTMLElement, label: string, list: ReadonlyArray<readonly [string, number]>, get: () => number, set: (v: number) => void): void {
+    this.swatchRow(parent, label, list, get, set);
+  }
+
+  /** Swatches with a leading choice that follows the hair's colour (null). */
+  private tintSwatches(parent: HTMLElement, label: string, list: ReadonlyArray<readonly [string, number]>, get: () => number | null, set: (v: number | null) => void): void {
+    this.swatchRow(parent, label, list, () => get() ?? this.look.hairColor, set, { label: 'Hair', isAuto: () => get() === null, setAuto: () => set(null) });
+  }
+
+  private swatchRow(
+    parent: HTMLElement,
+    label: string,
+    list: ReadonlyArray<readonly [string, number]>,
+    get: () => number,
+    set: (v: number) => void,
+    auto?: { label: string; isAuto: () => boolean; setAuto: () => void },
+  ): void {
     const row = el('div', 'creator-row');
     row.append(el('span', 'lbl', label));
     const wrap = el('div', 'creator-swatches');
@@ -556,12 +638,23 @@ export class CharacterCreator {
     picker.type = 'color';
     picker.value = hex(get());
     picker.title = 'Any colour';
+    let autoButton: HTMLButtonElement | undefined;
     const paint = (): void => {
       for (const b of wrap.querySelectorAll<HTMLButtonElement>('.creator-swatch')) {
-        b.classList.toggle('active', parseInt(b.dataset.colour ?? '', 16) === get());
+        b.classList.toggle('active', !auto?.isAuto() && parseInt(b.dataset.colour ?? '', 16) === get());
       }
+      autoButton?.classList.toggle('active', auto?.isAuto() ?? false);
       picker.value = hex(get());
     };
+    if (auto) {
+      autoButton = button(auto.label, 'creator-swatch auto', () => {
+        auto.setAuto();
+        paint();
+        this.scheduleRebuild(20);
+      });
+      autoButton.title = 'The same as the hair';
+      wrap.append(autoButton);
+    }
     for (const [name, c] of list) {
       const b = button('', 'creator-swatch', () => {
         set(c);

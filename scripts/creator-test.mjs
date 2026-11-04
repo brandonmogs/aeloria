@@ -57,6 +57,20 @@ check(Math.abs((l.morphs.eyeSize ?? 0) - 0.8) < 1e-6, 'a slider writes its value
 await page.waitForTimeout(400);
 await page.screenshot({ path: 'scripts/shots/creator-face.png' });
 
+// The style tab: a makeup slider and a scar choice write into the look.
+await page.click('.creator-tab[data-tab="style"]');
+await page.waitForSelector('.style-slider[data-style="lips"]');
+await page.$eval('.style-slider[data-style="lips"]', (el) => {
+  el.value = '0.7';
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+});
+await page.click('.creator-scar[data-scar="cheek"]');
+await screenReady();
+l = await look();
+check(Math.abs(l.lips - 0.7) < 1e-6 && l.scar === 'cheek', 'the style tab writes makeup and marks into the look');
+await page.waitForTimeout(400);
+await page.screenshot({ path: 'scripts/shots/creator-style.png' });
+
 // Hair, then the name, then into the world.
 await page.click('.creator-tab[data-tab="hair"]');
 await page.click('.creator-hair[data-hair="short"]');
@@ -68,7 +82,7 @@ check((await page.$('.creator')) === null, 'the screen comes down on entering');
 const name = await page.evaluate(() => window.__aeloria.player.name);
 check(name === 'Lysara', `the player carries the chosen name (${name})`);
 const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('aeloria.appearance') ?? 'null'));
-check(saved?.race === 'elf' && saved?.sex === 'female' && saved?.hair === 'short' && Math.abs((saved?.morphs?.eyeSize ?? 0) - 0.8) < 1e-6, 'the look is saved for next time');
+check(saved?.race === 'elf' && saved?.sex === 'female' && saved?.hair === 'short' && saved?.scar === 'cheek' && Math.abs((saved?.lips ?? 0) - 0.7) < 1e-6 && Math.abs((saved?.morphs?.eyeSize ?? 0) - 0.8) < 1e-6, 'the look is saved for next time');
 await page.waitForTimeout(2500);
 await page.screenshot({ path: 'scripts/shots/creator-world.png' });
 

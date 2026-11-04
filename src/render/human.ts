@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { JOINTS, JointName, Rig, RigDims, Sockets, Stance } from './characters';
-import { eyeMaterial, lookMaterial, LookSpec } from './humanSkin';
+import { eyeMaterial, FaceStyle, lookMaterial, LookSpec } from './humanSkin';
 import { buildBaseBoots } from './gear';
 import { HairStyle, SCALP_COLS, SCALP_ROWS, ScalpShape, buildHair } from './hair';
 import { FaceField, buildBrows, buildLashes } from './faceFeatures';
@@ -446,6 +446,8 @@ export interface HumanoidSpec {
   browColor?: number;
   /** Upper eyelash length in metres at the figure's scale; the sex's usual by default, 0 for none. */
   lashes?: number;
+  /** Beard, makeup and marks painted on the face (the full beard is also grown as geometry by the caller). */
+  face?: FaceStyle;
   /** Green skin, no shirt, ragged breeches, bare feet; ears and nose are added by the caller. */
   goblin?: boolean;
   /** Hair style: built as geometry on the skull, with a painted scalp beneath. */
@@ -871,6 +873,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     booted: spec.booted ?? !spec.goblin,
     bracers: spec.bracers ?? false,
     goblin: !!spec.goblin,
+    face: spec.face,
   };
   const mesh = new THREE.SkinnedMesh(geo, lookMaterial(T, look));
   mesh.castShadow = true;

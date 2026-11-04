@@ -4,6 +4,7 @@ import { ACTION_DURATION, ActionKind } from '../../render/characters';
 import { AnimationName, Framing, LightingPreset, Locomotion } from '../../render/CharacterStage';
 import { HairStyle } from '../../render/hair';
 import { Race, Sex } from '../../render/human';
+import { FaceStyle } from '../../render/humanSkin';
 import { MorphValues } from '../../render/morphs';
 import { Equipment, emptyEquipment } from '../../render/outfit';
 import { RACES, RaceDef } from '../../render/races';
@@ -73,6 +74,11 @@ export interface LabConfig {
   ui: boolean;
   /** The creator's sliders (not carried in the URL; set through `apply`). */
   morphs?: MorphValues;
+  /** The creator's Style tab: brows, lashes, beard, makeup and marks (not in the URL; set through `apply`). */
+  brows?: number;
+  browColor?: number;
+  lashes?: number;
+  face?: Partial<FaceStyle>;
 }
 
 export function defaultConfig(race: Race = 'human', sex: Sex = 'male'): LabConfig {

@@ -24,6 +24,10 @@ export class CharacterLab extends CharacterStage {
       trouser: cfg.trouser,
       equipment: cfg.equipment,
       morphs: cfg.morphs,
+      brows: cfg.brows,
+      browColor: cfg.browColor,
+      lashes: cfg.lashes,
+      face: cfg.face,
       enchant: true,
       merged: cfg.merged,
     });
