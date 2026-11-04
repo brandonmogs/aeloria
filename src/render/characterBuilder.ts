@@ -4,6 +4,7 @@ import { Animator, Rig } from './characters';
 import { styleCharacter } from './characterStyle';
 import { HairStyle } from './hair';
 import { HERO_BUILD, HumanoidSpec, Race, Sex, bodyFor, buildHumanoid } from './human';
+import { MorphValues } from './morphs';
 import { Equipment, Outfit, dressRig, emptyEquipment } from './outfit';
 import { raceExtras } from './raceGear';
 import { RACES } from './races';
@@ -31,6 +32,8 @@ export interface CharacterOptions {
   equipment?: Partial<Equipment>;
   /** Proportion knobs on top of the race's build. */
   build?: Partial<HumanoidSpec>;
+  /** The creator's sliders by id (see morphs.ts). */
+  morphs?: MorphValues;
   /** Leather bracers on bare forearms. */
   bracers?: boolean;
   /** Glow the main-hand weapon's metal. */
@@ -57,6 +60,7 @@ export class CharacterBuilder {
       ...race.build[o.sex],
       ...o.build,
       body: bodyFor(o.race, o.sex),
+      morphs: o.morphs,
       height: o.height ?? race.height[o.sex],
       hair: o.hair ?? race.hairStyle[o.sex],
       bracers: o.bracers ?? true,

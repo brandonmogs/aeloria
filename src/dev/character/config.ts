@@ -1,8 +1,10 @@
 import { EquipSlot } from '../../sim/Inventory';
 import { allItemIds, itemDef } from '../../sim/items';
 import { ACTION_DURATION, ActionKind } from '../../render/characters';
+import { AnimationName, Framing, LightingPreset, Locomotion } from '../../render/CharacterStage';
 import { HairStyle } from '../../render/hair';
 import { Race, Sex } from '../../render/human';
+import { MorphValues } from '../../render/morphs';
 import { Equipment, emptyEquipment } from '../../render/outfit';
 import { RACES, RaceDef } from '../../render/races';
 
@@ -15,10 +17,7 @@ import { RACES, RaceDef } from '../../render/races';
 
 export type { Race, Sex, RaceDef };
 export { RACES };
-export type Locomotion = 'idle' | 'walk' | 'run';
-export type AnimationName = Locomotion | ActionKind;
-export type LightingPreset = 'sun' | 'golden' | 'overcast' | 'moonlit' | 'studio';
-export type Framing = 'full' | 'torso' | 'head';
+export type { Locomotion, AnimationName, LightingPreset, Framing };
 export type StyleFeature = 'wrap' | 'spec' | 'rim' | 'glow';
 export type SetName = 'none' | 'cloth' | 'leather' | 'chain' | 'plate';
 
@@ -27,7 +26,7 @@ export const SEXES: readonly Sex[] = ['male', 'female'];
 export const HAIR_STYLES: readonly HairStyle[] = ['long', 'short', 'bald'];
 export const LOCOMOTION: readonly Locomotion[] = ['idle', 'walk', 'run'];
 export const ANIMATIONS: readonly AnimationName[] = [...LOCOMOTION, ...(Object.keys(ACTION_DURATION) as ActionKind[])];
-export const LIGHTING_PRESETS: readonly LightingPreset[] = ['sun', 'golden', 'overcast', 'moonlit', 'studio'];
+export const LIGHTING_PRESETS: readonly LightingPreset[] = ['sun', 'golden', 'overcast', 'moonlit', 'studio', 'creator'];
 export const FRAMINGS: readonly Framing[] = ['full', 'torso', 'head'];
 export const STYLE_FEATURES: readonly StyleFeature[] = ['wrap', 'spec', 'rim', 'glow'];
 export const SET_NAMES: readonly SetName[] = ['none', 'cloth', 'leather', 'chain', 'plate'];
@@ -49,6 +48,7 @@ export const LIGHT_LABELS: Record<LightingPreset, string> = {
   overcast: 'Overcast',
   moonlit: 'Moonlit',
   studio: 'Studio',
+  creator: 'Character screen',
 };
 
 export const SKIN_TONES: ReadonlyArray<readonly [string, number]> = [
@@ -93,6 +93,8 @@ export interface LabConfig {
   merged: boolean;
   /** Show the control panel (off for clean screenshots). */
   ui: boolean;
+  /** The creator's sliders (not carried in the URL; set through `apply`). */
+  morphs?: MorphValues;
 }
 
 export function defaultConfig(race: Race = 'human', sex: Sex = 'male'): LabConfig {

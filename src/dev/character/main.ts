@@ -207,7 +207,7 @@ async function main(): Promise<void> {
   const syncUrl = (): void => history.replaceState(null, '', '?' + configToSearch(cfg));
   const rebuild = (): void => {
     clearTimeout(rebuildTimer);
-    lab.setCharacter(cfg);
+    lab.show(cfg);
     framesSinceBuild = 0;
     handle.ready = false;
     syncUrl();

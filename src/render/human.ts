@@ -4,6 +4,7 @@ import { eyeMaterial, lookMaterial, LookSpec } from './humanSkin';
 import { buildBaseBoots } from './gear';
 import { HairStyle, SCALP_COLS, SCALP_ROWS, ScalpShape, buildHair } from './hair';
 import { Glb, parseGlb, readFloat, readUint16, readUint32 } from './glb';
+import { MorphValues, addMeasures, applyMorphs, cloneMeasures, hasMorphs, loadMorphs, morphSet } from './morphs';
 
 /**
  * People are built from one real human body: MakeHuman's CC0 base mesh,
@@ -88,8 +89,13 @@ export function bodyFor(race: Race, sex: Sex): BodyId {
  */
 export interface HumanTemplate extends TemplateMesh {
   source: TemplateSource;
+  id: BodyId;
+  /** The sex of a pipeline body (its morph set); the legacy template has none. */
+  sex?: Sex;
   /** Standing height in metres. */
   height: number;
+  /** The measurements as the build wrote them, the shape a morph's deltas are added to. */
+  raw: Measurements;
   /** Bone names in skin order. */
   bones: string[];
   boneParent: Array<number | null>;
@@ -119,6 +125,8 @@ export function loadBody(id: BodyId, base = '/models/'): Promise<HumanTemplate> 
   let p = loading.get(id);
   if (!p) {
     p = (id === 'legacy' ? loadLegacyTemplate(base) : loadGlbTemplate(`${base}characters/${id}.glb`)).then((t) => {
+      t.id = id;
+      if (id !== 'legacy') t.sex = id.endsWith('_f') ? 'female' : 'male';
       bodies.set(id, t);
       return t;
     });
@@ -145,7 +153,7 @@ export async function loadHumanTemplate(source: TemplateSource = 'legacy', base 
     return loadBody('legacy', base);
   }
   defaultBody = 'human_m';
-  const all = await Promise.all(BODY_IDS.map((id) => loadBody(id, base)));
+  const [all] = await Promise.all([Promise.all(BODY_IDS.map((id) => loadBody(id, base))), loadMorphs('male', base), loadMorphs('female', base)]);
   return all[0];
 }
 
@@ -195,10 +203,38 @@ interface RawLandmarks {
 
 interface Measurements {
   height: number;
+  /** By bone name; the legacy template keys these by joint. */
+  bonePositions: Record<string, number[]>;
   landmarks: RawLandmarks;
   radii: HumanTemplate['radii'];
   torsoProfile: Array<[number, number]>;
   torsoFlatten: number;
+}
+
+/** The measurements a body is built with, converted from the raw numbers. */
+interface Derived {
+  height: number;
+  bonePositions: THREE.Vector3[];
+  joints: Record<JointName, THREE.Vector3>;
+  landmarks: HumanLandmarks;
+  radii: HumanTemplate['radii'];
+  torsoProfile: Array<readonly [number, number]>;
+  torsoFlatten: number;
+}
+
+/** Convert raw measurements (the GLB's, or those with a morph's deltas added) for a template's bones. */
+function derive(raw: Measurements, bones: string[], jointBone: Record<JointName, number>): Derived {
+  const bonePositions = bones.map((b) => v3(raw.bonePositions[b]));
+  const joints = Object.fromEntries(JOINTS.map((j) => [j, bonePositions[jointBone[j]].clone()])) as Record<JointName, THREE.Vector3>;
+  return {
+    height: raw.height,
+    bonePositions,
+    joints,
+    landmarks: landmarksFrom(raw.landmarks),
+    radii: { ...raw.radii },
+    torsoProfile: raw.torsoProfile.map(([r, y]) => [r, y] as const),
+    torsoFlatten: raw.torsoFlatten,
+  };
 }
 
 const landmarksFrom = (lm: RawLandmarks): HumanLandmarks => ({
@@ -245,26 +281,30 @@ async function loadLegacyTemplate(base: string): Promise<HumanTemplate> {
     view('skinWeight', 'Float32Array'),
     view('index', 'Uint32Array'),
   );
-  const m = meta as Measurements & { jointPositions: Record<JointName, number[]>; parents: Record<JointName, JointName | null> };
-  const joints = Object.fromEntries(JOINTS.map((j) => [j, v3(m.jointPositions[j])])) as Record<JointName, THREE.Vector3>;
+  const m = meta as Omit<Measurements, 'bonePositions'> & { jointPositions: Record<JointName, number[]>; parents: Record<JointName, JointName | null> };
   const bones = [...JOINTS];
+  const jointBone = Object.fromEntries(JOINTS.map((j, i) => [j, i])) as Record<JointName, number>;
+  const raw: Measurements = { height: m.height, bonePositions: m.jointPositions, landmarks: m.landmarks, radii: m.radii, torsoProfile: m.torsoProfile, torsoFlatten: m.torsoFlatten };
+  const d = derive(raw, bones, jointBone);
   return {
     ...mesh,
     source: 'legacy',
-    height: m.height,
+    id: 'legacy',
+    raw,
+    height: d.height,
     bones,
     boneParent: JOINTS.map((j) => {
       const p = m.parents[j];
       return p ? JOINTS.indexOf(p) : null;
     }),
-    bonePositions: JOINTS.map((j) => joints[j]),
+    bonePositions: d.bonePositions,
     owner: bones,
-    jointBone: Object.fromEntries(JOINTS.map((j, i) => [j, i])) as Record<JointName, number>,
-    joints,
-    landmarks: landmarksFrom(m.landmarks),
-    radii: m.radii,
-    torsoProfile: m.torsoProfile,
-    torsoFlatten: m.torsoFlatten,
+    jointBone,
+    joints: d.joints,
+    landmarks: d.landmarks,
+    radii: d.radii,
+    torsoProfile: d.torsoProfile,
+    torsoFlatten: d.torsoFlatten,
     lods: [mesh],
   };
 }
@@ -273,7 +313,6 @@ async function loadLegacyTemplate(base: string): Promise<HumanTemplate> {
 interface GlbMeta extends Measurements {
   bones: string[];
   boneParents: Array<string | null>;
-  bonePositions: Record<string, number[]>;
   gameJoints: Record<JointName, string>;
   boneOwner: JointName[];
 }
@@ -302,9 +341,16 @@ async function loadGlbTemplate(url: string): Promise<HumanTemplate> {
     if (i < 0) throw new Error(`${url}: no bone ${name}`);
     return i;
   };
-  const bonePositions = bones.map((b) => v3(meta.bonePositions[b]));
   const jointBone = Object.fromEntries(JOINTS.map((j) => [j, index(meta.gameJoints[j])])) as Record<JointName, number>;
-  const joints = Object.fromEntries(JOINTS.map((j) => [j, bonePositions[jointBone[j]].clone()])) as Record<JointName, THREE.Vector3>;
+  const raw: Measurements = {
+    height: meta.height,
+    bonePositions: meta.bonePositions,
+    landmarks: meta.landmarks,
+    radii: meta.radii,
+    torsoProfile: meta.torsoProfile,
+    torsoFlatten: meta.torsoFlatten,
+  };
+  const d = derive(raw, bones, jointBone);
   const lods = glb.json.nodes
     .filter((node) => node.mesh !== undefined)
     .map((node) => glb.json.meshes[node.mesh as number])
@@ -314,17 +360,19 @@ async function loadGlbTemplate(url: string): Promise<HumanTemplate> {
   return {
     ...lods[0],
     source: 'glb',
-    height: meta.height,
+    id: 'human_m', // set by loadBody
+    raw,
+    height: d.height,
     bones,
     boneParent: meta.boneParents.map((p) => (p ? index(p) : null)),
-    bonePositions,
+    bonePositions: d.bonePositions,
     owner: meta.boneOwner,
     jointBone,
-    joints,
-    landmarks: landmarksFrom(meta.landmarks),
-    radii: meta.radii,
-    torsoProfile: meta.torsoProfile,
-    torsoFlatten: meta.torsoFlatten,
+    joints: d.joints,
+    landmarks: d.landmarks,
+    radii: d.radii,
+    torsoProfile: d.torsoProfile,
+    torsoFlatten: d.torsoFlatten,
     lods,
   };
 }
@@ -386,6 +434,11 @@ export interface HumanoidSpec {
    * skin's groove show through (the default bare-chested, and on the women).
    */
   sternum?: number;
+  /**
+   * The character creator's sliders by id (see morphs.ts): the face and body
+   * sculpted on top of the race's body, before the proportion knobs above.
+   */
+  morphs?: MorphValues;
   /** Green skin, no shirt, ragged breeches, bare feet; ears and nose are added by the caller. */
   goblin?: boolean;
   /** Hair style: built as geometry on the skull, with a painted scalp beneath. */
@@ -597,15 +650,43 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   // to bridge; the legacy mesh's chest is flat once pressed, and a fill
   // there would stand as a ridge.
   const sternum = spec.sternum ?? (shirt && T.source !== 'legacy' ? 1 : 0);
-  const rest = T.joints;
-  const lm = T.landmarks;
   const n = T.vertexCount;
+
+  // 0. The creator's sliders: baked vertex deltas added to the finest mesh,
+  //    and the measurements (joints, landmarks, radii, torso profile) moved
+  //    with them, so the eyes, hair and gear follow the sculpted face and
+  //    body. Everything below reads these instead of the template's own.
+  const pos = new Float32Array(T.positions);
+  let rest = T.joints;
+  let lm = T.landmarks;
+  let boneRest = T.bonePositions;
+  let radii = T.radii;
+  let torsoProfile = T.torsoProfile;
+  let torsoFlatten = T.torsoFlatten;
+  let morphed = false;
+  const set = hasMorphs(spec.morphs) && T.sex ? morphSet(T.sex) : null;
+  if (set && spec.morphs) {
+    const deltas = applyMorphs(set, spec.morphs, 0, pos);
+    if (deltas.length) {
+      morphed = true;
+      const raw = cloneMeasures(T.raw);
+      for (const [d, w] of deltas) addMeasures(raw, d, w);
+      const m = derive(raw, T.bones, T.jointBone);
+      rest = m.joints;
+      lm = m.landmarks;
+      boneRest = m.bonePositions;
+      radii = m.radii;
+      torsoProfile = m.torsoProfile;
+      torsoFlatten = m.torsoFlatten;
+    }
+  }
+  /** The eyeballs grow and shrink with the eye sockets. */
+  const eyeK = 1 + 0.3 * (spec.morphs?.eyeSize ?? 0);
 
   // 1. Reshape in template space: limbs thicker or thinner about their bone
   //    axes; the torso wider, pinched at the waist, broadened across the ribs,
   //    the belly swelling forward and the chest pushed out; the pelvis
   //    narrowed; the head scaled about its joint and the jaw tapered.
-  const pos = new Float32Array(T.positions);
   const limbK = 1 + (bulk - 1) * 1.0;
   const torsoK = 1 + (bulk - 1) * 0.6;
   const navelY = rest.spine.y + 0.1;
@@ -751,7 +832,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     b.rotation.order = 'YXZ';
     return b;
   });
-  const posedBone = T.bonePositions.map((p, b) => p.clone().add(offset[T.owner[b]]).multiplyScalar(s));
+  const posedBone = boneRest.map((p, b) => p.clone().add(offset[T.owner[b]]).multiplyScalar(s));
   for (let b = 0; b < boneList.length; b++) {
     const parent = T.boneParent[b];
     boneList[b].position.copy(posedBone[b]);
@@ -763,7 +844,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const bones = Object.fromEntries(JOINTS.map((j) => [j, boneList[T.jointBone[j]]])) as Record<JointName, THREE.Bone>;
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-  geo.setAttribute('normal', reshape || moved ? reshapedNormals(T, pos) : T.shared.normal);
+  geo.setAttribute('normal', reshape || moved || morphed ? reshapedNormals(T, pos) : T.shared.normal);
   geo.setAttribute('uv', T.shared.uv);
   geo.setAttribute('skinIndex', T.shared.skinIndex);
   geo.setAttribute('skinWeight', T.shared.skinWeight);
@@ -793,7 +874,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   group.add(mesh);
 
   // 5. Eyes: real eyeballs behind the lids.
-  const eyeR = 0.0122 * s * headK;
+  const eyeR = 0.0122 * s * headK * eyeK;
   const eyeGeo = new THREE.SphereGeometry(eyeR, 18, 12);
   for (const l of [lm.eyeL, lm.eyeR]) {
     const eye = new THREE.Mesh(eyeGeo, eyeMaterial(look.eyes, look.goblin));
@@ -811,7 +892,7 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
   const earY = (earL.y + earR.y) / 2;
   const skullCentre = new THREE.Vector3(0, earY + (headTop - earY) * 0.3, ((lm.skullFront + lm.skullBack) / 2 - rest.head.z) * headK * s);
   const scalp = measureScalp(pos, T, posed.head, skullCentre, [earL, earR], 0.03 * s * headK);
-  const chestBands = T.torsoProfile.filter(([r]) => r > 0.1).map(([r, y]) => [r * torsoWidthAt(y + rest.spine.y), y] as const);
+  const chestBands = torsoProfile.filter(([r]) => r > 0.1).map(([r, y]) => [r * torsoWidthAt(y + rest.spine.y), y] as const);
   const chestR = Math.max(...chestBands.map(([r]) => r)) * s * torsoK;
   const waistR = Math.min(...chestBands.map(([r]) => r)) * s * torsoK;
   const dims: RigDims = {
@@ -828,14 +909,14 @@ export function buildHumanoid(spec: HumanoidSpec): Rig {
     hipHalf: posed.thighL.x,
     headFlatten: (lm.skullFront - lm.skullBack) / (2 * lm.skullHalfWidth),
     torsoProfile: chestBands.map(([r, y]) => [r * s * torsoK * (1 + belly * 0.25), y * s] as const),
-    torsoFlatten: T.torsoFlatten + belly * 0.2,
+    torsoFlatten: torsoFlatten + belly * 0.2,
     chestR,
     waistR,
-    thighR: T.radii.thigh * s * limbK,
-    shinR: T.radii.shin * s * limbK,
-    armR: T.radii.upperArm * s * limbK,
-    forearmR: T.radii.forearm * s * limbK,
-    deltoidR: T.radii.deltoid * s * limbK,
+    thighR: radii.thigh * s * limbK,
+    shinR: radii.shin * s * limbK,
+    armR: radii.upperArm * s * limbK,
+    forearmR: radii.forearm * s * limbK,
+    deltoidR: radii.deltoid * s * limbK,
     ankle: posed.footL.y,
     footL: (lm.footFront - lm.footBack) * s,
     footW: lm.footHalfWidth * 2 * s,

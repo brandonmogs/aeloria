@@ -22,7 +22,12 @@
 //   5. Writes a GLB with the skeleton, the skinned LOD meshes, and the
 //      measurements as glTF extras.
 //
-// Usage: node scripts/build-characters.mjs [body ...]   (needs network access the first time)
+//   6. For the human man and woman, bakes the character creator's sliders
+//      (scripts/morphs.mjs) into morphs_<m|f>.json/.bin beside the GLBs:
+//      per slider pole, the vertex deltas at every LOD and the deltas of
+//      the measurements, which every body of that sex shares.
+//
+// Usage: node scripts/build-characters.mjs [--no-morphs] [body ...]   (needs network access the first time)
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
@@ -30,6 +35,7 @@ import * as THREE from 'three';
 import { relaxHands } from './hands.mjs';
 import { MeshoptSimplifier } from 'meshoptimizer';
 import { GltfBuilder } from './gltf.mjs';
+import { MORPH_GROUPS, morphsFor, poleTargets, polesOf } from './morphs.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const OUT_DIR = path.join(here, '..', 'public', 'models', 'characters');
@@ -343,15 +349,15 @@ for (const [bone, list] of Object.entries(weights)) {
 await MeshoptSimplifier.ready;
 mkdirSync(OUT_DIR, { recursive: true });
 
-// ---- One body ---------------------------------------------------------------------
+// ---- One body's shape ---------------------------------------------------------------
 /**
- * Build one body. `plan` is the decimation worked out on the human man: the
- * same vertex choices and index buffers are reused for every other body, so
- * all bodies share one topology at every LOD and a vertex index means the
- * same spot on every one of them (equipment anchors to those). The first
- * body built makes the plan and returns it.
+ * The base mesh with `targets` layered on, hands relaxed, posed, grounded,
+ * split along the UV seams and measured: everything a GLB carries except the
+ * decimation. The split vertex order depends only on the topology, so two
+ * shapes of the same body line up vertex for vertex (the morph bake relies
+ * on that).
  */
-async function buildBody(id, targets, plan = null) {
+async function bakeShape(id, targets) {
   verts = baseVerts.map((v) => v.clone());
   for (const [name, w] of targets) {
     for (const [vi, dx, dy, dz] of await loadTarget(name)) {
@@ -622,14 +628,69 @@ async function buildBody(id, targets, plan = null) {
     posed.Cape3 = posed.Cape2.clone().add(new THREE.Vector3(0, -0.3, -0.03));
   }
 
+  const v3 = (v) => [+v.x.toFixed(4), +v.y.toFixed(4), +v.z.toFixed(4)];
+  /** What the renderer measures a body by; a morph changes these too, so they are diffed like the vertices. */
+  const measures = {
+    height: +headTop.y.toFixed(4),
+    bonePositions: Object.fromEntries(BONE_NAMES.map((b) => [b, v3(posed[b])])),
+    landmarks: {
+      headTop: v3(headTop),
+      eyeL: v3(eyeLw),
+      eyeR: v3(eyeRw),
+      noseTip: v3(noseTip),
+      mouth: v3(mouth),
+      mouthHalfWidth: +mouthHalf.toFixed(4),
+      chin: v3(chin),
+      chinBottom: v3(chinBottom),
+      earL: v3(earL),
+      earR: v3(earR),
+      brow: brow.map(v3),
+      skullHalfWidth: +skullHalfWidth.toFixed(4),
+      skullFront: +skullFront.toFixed(4),
+      skullBack: +skullBack.toFixed(4),
+      neckFront: v3(neckFront),
+      chestFront: v3(chestFront),
+      chestBack: v3(chestBack),
+      footFront: +footFront.toFixed(4),
+      footBack: +footBack.toFixed(4),
+      footHalfWidth: +footHalf.toFixed(4),
+      handReach: +handReach.toFixed(4),
+    },
+    radii: Object.fromEntries(Object.entries(radii).map(([k, v]) => [k, +v.toFixed(4)])),
+    torsoProfile,
+    torsoFlatten: +(flattenSum / Math.max(1, flattenN)).toFixed(4),
+  };
+
+  return {
+    n: outPos.length / 3,
+    positions: new Float32Array(outPos),
+    normals: new Float32Array(outNor),
+    uvs: new Float32Array(outUv),
+    joints: new Uint8Array(outSi),
+    weights: new Float32Array(outSw),
+    indices: new Uint32Array(outIdx),
+    posed,
+    J,
+    earL,
+    earR,
+    skullHalfWidth,
+    measures,
+  };
+}
+
+// ---- One body ---------------------------------------------------------------------
+/**
+ * Build one body. `plan` is the decimation worked out on the human man: the
+ * same vertex choices and index buffers are reused for every other body, so
+ * all bodies share one topology at every LOD and a vertex index means the
+ * same spot on every one of them (equipment anchors to those). The first
+ * body built makes the plan and returns it.
+ */
+async function buildBody(id, targets, plan = null) {
+  const shape = await bakeShape(id, targets);
+  const { n, positions, normals: normalsArr, uvs: uvArr, joints: jointsArr, weights: weightsArr, indices, posed, J, measures } = shape;
+
   // ---- LODs -----------------------------------------------------------------------
-  const n = outPos.length / 3;
-  const positions = new Float32Array(outPos);
-  const normalsArr = new Float32Array(outNor);
-  const uvArr = new Float32Array(outUv);
-  const jointsArr = new Uint8Array(outSi);
-  const weightsArr = new Float32Array(outSw);
-  const indices = new Uint32Array(outIdx);
   /** Normals and UVs guide the simplifier so seams and shading survive. */
   const attrs = new Float32Array(n * 5);
   for (let i = 0; i < n; i++) {
@@ -693,21 +754,12 @@ async function buildBody(id, targets, plan = null) {
   /** This body's vertices gathered through a plan's choices. */
   function decimate({ indices: idx, remap, unique, kept, error }) {
     if (remap.length !== n) throw new Error(`${id}: ${n} vertices, but the ${PLAN_BODY} plan has ${remap.length}`);
-    const gather = (src, stride, Ctor) => {
-      const out = new Ctor(unique * stride);
-      for (let i = 0; i < n; i++) {
-        const to = remap[i];
-        if (to === 0xffffffff || to >= unique) continue;
-        for (let k = 0; k < stride; k++) out[to * stride + k] = src[i * stride + k];
-      }
-      return out;
-    };
     return {
-      positions: gather(positions, 3, Float32Array),
-      normals: gather(normalsArr, 3, Float32Array),
-      uvs: gather(uvArr, 2, Float32Array),
-      joints: gather(jointsArr, 4, Uint8Array),
-      weights: gather(weightsArr, 4, Float32Array),
+      positions: gatherLod(positions, 3, Float32Array, remap, unique),
+      normals: gatherLod(normalsArr, 3, Float32Array, remap, unique),
+      uvs: gatherLod(uvArr, 2, Float32Array, remap, unique),
+      joints: gatherLod(jointsArr, 4, Uint8Array, remap, unique),
+      weights: gatherLod(weightsArr, 4, Float32Array, remap, unique),
       indices: idx,
       kept,
       error,
@@ -717,47 +769,26 @@ async function buildBody(id, targets, plan = null) {
   const lods = plan.map(decimate);
 
   // ---- Write the GLB --------------------------------------------------------------
-  const v3 = (v) => [+v.x.toFixed(4), +v.y.toFixed(4), +v.z.toFixed(4)];
   const meta = {
     source: 'MakeHuman base mesh, targets, default skeleton and weights (CC0 1.0): https://github.com/makehumancommunity/makehuman',
     units: "metres, y up, +z forward, +x = the character's left",
     body: id,
     targets: targets.map(([t, w]) => `${t} ${w.toFixed(3)}`),
-    height: +headTop.y.toFixed(4),
+    height: measures.height,
     bones: BONE_NAMES,
     boneParents: BONE_NAMES.map((b) => BONE_PARENT[b]),
-    bonePositions: Object.fromEntries(BONE_NAMES.map((b) => [b, v3(posed[b])])),
+    bonePositions: measures.bonePositions,
     gameJoints: GAME_JOINTS,
     boneOwner: BONE_NAMES.map((b) => OWNER[b]),
-    landmarks: {
-      headTop: v3(headTop),
-      eyeL: v3(eyeLw),
-      eyeR: v3(eyeRw),
-      noseTip: v3(noseTip),
-      mouth: v3(mouth),
-      mouthHalfWidth: +mouthHalf.toFixed(4),
-      chin: v3(chin),
-      chinBottom: v3(chinBottom),
-      earL: v3(earL),
-      earR: v3(earR),
-      brow: brow.map(v3),
-      skullHalfWidth: +skullHalfWidth.toFixed(4),
-      skullFront: +skullFront.toFixed(4),
-      skullBack: +skullBack.toFixed(4),
-      neckFront: v3(neckFront),
-      chestFront: v3(chestFront),
-      chestBack: v3(chestBack),
-      footFront: +footFront.toFixed(4),
-      footBack: +footBack.toFixed(4),
-      footHalfWidth: +footHalf.toFixed(4),
-      handReach: +handReach.toFixed(4),
-    },
-    radii: Object.fromEntries(Object.entries(radii).map(([k, v]) => [k, +v.toFixed(4)])),
-    torsoProfile,
-    torsoFlatten: +(flattenSum / Math.max(1, flattenN)).toFixed(4),
+    landmarks: measures.landmarks,
+    radii: measures.radii,
+    torsoProfile: measures.torsoProfile,
+    torsoFlatten: measures.torsoFlatten,
     lods: lods.map((l) => ({ triangles: l.indices.length / 3, ...l.kept, error: +l.error.toFixed(4) })),
     /** Every body shares this body's vertex order and index buffers at each LOD. */
     topology: PLAN_BODY,
+    /** The morph set this body's sliders come from (see bakeMorphs). */
+    morphs: MORPH_BASES[id] ?? (id.endsWith('_f') ? 'morphs_f' : 'morphs_m'),
   };
 
   const g = new GltfBuilder('aeloria scripts/build-characters.mjs');
@@ -793,11 +824,143 @@ async function buildBody(id, targets, plan = null) {
   const split = (k) => `head ${k.head}, hands ${k.hands}, body ${k.body}`;
   console.log(`${id}.glb: ${(glb.length / 1024).toFixed(0)} KB, ${meta.height.toFixed(2)} m, ${n} vertices / ${indices.length / 3} triangles (${split(regionTris)})`);
   for (const [i, l] of lods.entries()) console.log(`  LOD${i}: ${l.positions.length / 3} vertices, ${l.indices.length / 3} triangles (${split(l.kept)}), error ${l.error.toFixed(4)}`);
-  console.log(`  shoulders ${(2 * J.shoulderL.x).toFixed(3)} m, hips ${(2 * J.thighL.x).toFixed(3)} m, legs ${J.thighL.y.toFixed(3)} m, ears at x ${earL.x.toFixed(3)} / ${earR.x.toFixed(3)}, skull half-width ${skullHalfWidth.toFixed(3)}`);
+  console.log(`  shoulders ${(2 * J.shoulderL.x).toFixed(3)} m, hips ${(2 * J.thighL.x).toFixed(3)} m, legs ${J.thighL.y.toFixed(3)} m, ears at x ${shape.earL.x.toFixed(3)} / ${shape.earR.x.toFixed(3)}, skull half-width ${shape.skullHalfWidth.toFixed(3)}`);
+
+  const morphSet = MORPH_BASES[id];
+  if (morphSet && !skipMorphs) await bakeMorphs(id, morphSet, targets, shape, plan);
   return plan;
 }
 
-const wanted = process.argv.slice(2);
+/** One split-vertex attribute gathered through a LOD plan's choices. */
+function gatherLod(src, stride, Ctor, remap, unique) {
+  const n = remap.length;
+  const out = new Ctor(unique * stride);
+  for (let i = 0; i < n; i++) {
+    const to = remap[i];
+    if (to === 0xffffffff || to >= unique) continue;
+    for (let k = 0; k < stride; k++) out[to * stride + k] = src[i * stride + k];
+  }
+  return out;
+}
+
+// ---- Morphs -----------------------------------------------------------------------
+/** The bodies whose sliders every body of that sex uses: the human man and woman. */
+const MORPH_BASES = { human_m: 'morphs_m', human_f: 'morphs_f' };
+
+/**
+ * The difference between two measurement objects of the same shape: numbers
+ * and arrays elementwise, objects by key, with anything smaller than a tenth
+ * of a millimetre dropped. Returns undefined when nothing differs.
+ */
+function diffMeasures(base, morphed) {
+  if (typeof base === 'number') {
+    const d = +(morphed - base).toFixed(5);
+    return Math.abs(d) > 1e-4 ? d : undefined;
+  }
+  if (Array.isArray(base)) {
+    if (!Array.isArray(morphed) || morphed.length !== base.length) return undefined;
+    const out = base.map((b, i) => diffMeasures(b, morphed[i]));
+    return out.some((d) => d !== undefined) ? out.map((d, i) => (d === undefined ? zeroLike(base[i]) : d)) : undefined;
+  }
+  const out = {};
+  let any = false;
+  for (const k of Object.keys(base)) {
+    const d = diffMeasures(base[k], morphed[k]);
+    if (d !== undefined) {
+      out[k] = d;
+      any = true;
+    }
+  }
+  return any ? out : undefined;
+}
+
+/** A measurement's shape filled with zeros, for the unchanged entries of a changed array. */
+function zeroLike(m) {
+  if (typeof m === 'number') return 0;
+  if (Array.isArray(m)) return m.map(zeroLike);
+  return Object.fromEntries(Object.keys(m).map((k) => [k, zeroLike(m[k])]));
+}
+
+/**
+ * Bake the creator's sliders for a sex: each pole of each slider is the body
+ * rebuilt with that target layered on, and what is written is the difference
+ * from the base body, per LOD vertex (sparse, quantised to 16 bits with one
+ * scale per block) and in the measurements the renderer takes (bone
+ * positions, landmarks, limb radii, the torso profile). Every body of the sex
+ * shares the topology, so the same deltas fit the elf, the orc and the dwarf.
+ */
+async function bakeMorphs(id, setName, targets, base, plan) {
+  const sex = id.endsWith('_f') ? 'female' : 'male';
+  const sliders = morphsFor(sex);
+  // Fetch every target first, a batch at a time, so the bake runs offline.
+  const wanted = new Set();
+  for (const m of sliders) for (const pole of polesOf(m)) for (const t of poleTargets(m, pole, sex)) wanted.add(t);
+  const names = [...wanted];
+  for (let i = 0; i < names.length; i += 16) await Promise.all(names.slice(i, i + 16).map(loadTarget));
+
+  const chunks = [];
+  let byteLength = 0;
+  const morphs = {};
+  const t0 = Date.now();
+  for (const m of sliders) {
+    for (const pole of polesOf(m)) {
+      const layered = [...targets, ...poleTargets(m, pole, sex).map((t) => [t, 1])];
+      const shape = await bakeShape(id, layered);
+      const lods = [];
+      for (const { remap, unique } of plan) {
+        const delta = new Float32Array(unique * 3);
+        for (let i = 0; i < base.n; i++) {
+          const to = remap[i];
+          if (to === 0xffffffff || to >= unique) continue;
+          for (let k = 0; k < 3; k++) delta[to * 3 + k] = shape.positions[i * 3 + k] - base.positions[i * 3 + k];
+        }
+        let maxAbs = 0;
+        const touched = [];
+        for (let v = 0; v < unique; v++) {
+          const dx = delta[v * 3];
+          const dy = delta[v * 3 + 1];
+          const dz = delta[v * 3 + 2];
+          const big = Math.max(Math.abs(dx), Math.abs(dy), Math.abs(dz));
+          if (big <= 2e-5) continue; // under a fiftieth of a millimetre: noise from the re-grounding
+          touched.push(v);
+          maxAbs = Math.max(maxAbs, big);
+        }
+        const scale = maxAbs / 32767;
+        const index = new Uint16Array(touched.length);
+        const q = new Int16Array(touched.length * 3);
+        touched.forEach((v, i) => {
+          index[i] = v;
+          q[i * 3] = Math.round(delta[v * 3] / scale);
+          q[i * 3 + 1] = Math.round(delta[v * 3 + 1] / scale);
+          q[i * 3 + 2] = Math.round(delta[v * 3 + 2] / scale);
+        });
+        lods.push({ offset: byteLength, count: touched.length, scale: +scale.toPrecision(6) });
+        chunks.push(new Uint8Array(index.buffer), new Uint8Array(q.buffer));
+        byteLength += index.byteLength + q.byteLength;
+      }
+      const measures = diffMeasures(base.measures, shape.measures);
+      morphs[m.id + pole] = { lods, ...(measures ? { measures } : {}) };
+    }
+  }
+  const bin = Buffer.concat(chunks.map((c) => Buffer.from(c.buffer, c.byteOffset, c.byteLength)));
+  const json = {
+    source: 'MakeHuman targets (CC0 1.0): https://github.com/makehumancommunity/makehuman',
+    body: id,
+    sex,
+    lods: plan.map((p) => p.unique),
+    groups: MORPH_GROUPS,
+    sliders: sliders.map((m) => ({ id: m.id, label: m.label, group: m.group, bipolar: m.min !== undefined })),
+    morphs,
+  };
+  writeFileSync(path.join(OUT_DIR, `${setName}.json`), JSON.stringify(json));
+  writeFileSync(path.join(OUT_DIR, `${setName}.bin`), bin);
+  const poles = Object.keys(morphs).length;
+  console.log(`  ${setName}: ${sliders.length} sliders, ${poles} poles, ${(bin.length / 1024).toFixed(0)} KB of deltas, baked in ${((Date.now() - t0) / 1000).toFixed(0)} s`);
+}
+
+const args = process.argv.slice(2);
+const skipMorphs = args.includes('--no-morphs');
+const wanted = args.filter((a) => !a.startsWith('--'));
 for (const id of wanted) if (!BODIES[id]) throw new Error(`unknown body ${id}; have ${Object.keys(BODIES).join(', ')}`);
 // The human man always goes first: his decimation is the topology of every body.
 const plan = await buildBody(PLAN_BODY, BODIES[PLAN_BODY]);
@@ -806,5 +969,5 @@ for (const id of wanted.length ? wanted : Object.keys(BODIES)) {
 }
 writeFileSync(
   path.join(OUT_DIR, 'ATTRIBUTION.md'),
-  '# Character models\n\nThe `*.glb` files here are generated by `scripts/build-characters.mjs` from the MakeHuman base mesh, morph targets, default skeleton and skin weights, released under CC0 1.0 by the MakeHuman community: https://github.com/makehumancommunity/makehuman\n',
+  '# Character models\n\nThe `*.glb` files here are generated by `scripts/build-characters.mjs` from the MakeHuman base mesh, morph targets, default skeleton and skin weights, released under CC0 1.0 by the MakeHuman community: https://github.com/makehumancommunity/makehuman\n\nThe `morphs_*.json` / `morphs_*.bin` pairs are the character creator\'s sliders, baked from the same targets (see `scripts/morphs.mjs`).\n',
 );
