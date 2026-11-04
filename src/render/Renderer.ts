@@ -8,6 +8,7 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { OrbitCamera } from './OrbitCamera';
 import { LightPool } from './LightPool';
+import { characterStyle, setRimDirection } from './characterStyle';
 
 /**
  * Unit vector toward the sun. It hangs in the north-western sky about 46° up,
@@ -15,6 +16,8 @@ import { LightPool } from './LightPool';
  * to the south-east, the quadrant Old School's fixed light has always come from.
  */
 export const SUN_DIRECTION = new THREE.Vector3(-0.6, 0.85, 0.55).normalize();
+/** Where the characters' rim light comes from: opposite the sun, as on the preview stage. */
+const RIM_DIRECTION = new THREE.Vector3(-SUN_DIRECTION.x, 0.45, -SUN_DIRECTION.z).normalize();
 
 /** Half-width of the block of world the shadow map covers, centred ahead of the camera. */
 const SHADOW_HALF_EXTENT = 34;
@@ -217,6 +220,8 @@ export class Renderer {
     // Manual reset so the counters reflect a full frame when read between frames.
     this.renderer.info.reset();
     this.sky.position.copy(this.camera.camera.position);
+    characterStyle.time.value = t0 / 1000;
+    setRimDirection(RIM_DIRECTION, this.camera.camera);
     this.frameShadow();
     this.renderer.shadowMap.needsUpdate = true;
     for (const fn of this.preRender) fn(this.renderer, this.scene, this.camera.camera);

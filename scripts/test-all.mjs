@@ -24,6 +24,7 @@ const TESTS = [
   'content-test',
   'ranged-magic-test',
   'character-shot',
+  'creator-test',
 ];
 
 const server = await createServer({ server: { port: 5199, open: false } });
@@ -35,7 +36,9 @@ let failed = 0;
 for (const name of TESTS) {
   const start = Date.now();
   const code = await new Promise((resolve) => {
-    const child = spawn(process.execPath, [`scripts/${name}.mjs`, url], { stdio: 'pipe' });
+    // The game tests skip the character screen; the lab shots and the screen's own test navigate themselves.
+    const target = name === 'character-shot' || name === 'creator-test' ? url : `${url}/?play`;
+    const child = spawn(process.execPath, [`scripts/${name}.mjs`, target], { stdio: 'pipe' });
     let out = '';
     child.stdout.on('data', (d) => (out += d));
     child.stderr.on('data', (d) => (out += d));

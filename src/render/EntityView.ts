@@ -6,6 +6,8 @@ import { Npc } from '../sim/Npc';
 import { itemDef } from '../sim/items';
 import { Terrain } from './Terrain';
 import { ACTION_DURATION, ActionKind, Animator, Rig, buildRat } from './characters';
+import { CharacterBuilder, CharacterOptions } from './characterBuilder';
+import { styleCharacter } from './characterStyle';
 import { HERO_BUILD, buildHumanoid } from './human';
 import { goblinBracer, goblinFeatures, goblinGreave, goblinPauldron, goblinShield, goblinStrap, goblinSword } from './goblinGear';
 import { apron, beard, buildWeapon, plume, skullCap, strawHat, toque } from './gear';
@@ -67,6 +69,8 @@ export class EntityView {
     private readonly scene: THREE.Scene,
     private readonly world: World,
     private readonly terrain: Terrain,
+    /** The player's look from the character screen; without one the stock hero is built. */
+    private readonly playerLook?: CharacterOptions,
   ) {}
 
   sync(alpha: number, dt: number): void {
@@ -273,7 +277,8 @@ export class EntityView {
   }
 
   private createAvatar(entity: Entity): Avatar {
-    const rig = rigFor(entity);
+    const rig = rigFor(entity, this.playerLook);
+    styleCharacter(rig.group);
     const hp = attachHealthBar(rig.group, rig.barHeight);
     return {
       rig,
@@ -294,6 +299,7 @@ export class EntityView {
   private rebuildGear(avatar: Avatar, eq: Equipment): void {
     undress(avatar.outfit);
     avatar.outfit = dressRig(avatar.rig, eq);
+    styleCharacter(avatar.rig.group);
   }
 }
 
@@ -324,7 +330,7 @@ function attackClipFor(entity: Entity): ActionKind {
 }
 
 /** Pick a rig for an entity: the monster models, or a dressed-up person. */
-function rigFor(entity: Entity): Rig {
+function rigFor(entity: Entity, playerLook?: CharacterOptions): Rig {
   if (entity instanceof Npc) {
     switch (entity.kind) {
       case 'goblin':
@@ -441,7 +447,9 @@ function rigFor(entity: Entity): Rig {
         });
     }
   }
-  // The player: a Lineage 2 human fighter's build and bearing.
+  // The player: the look from the character screen when there is one (the
+  // gear is this view's to hang, so nothing is merged), else the stock hero.
+  if (playerLook) return CharacterBuilder.build({ ...playerLook, merged: false }).rig;
   return buildHumanoid({
     ...HERO_BUILD,
     height: 1.84,

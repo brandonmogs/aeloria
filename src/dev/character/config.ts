@@ -7,6 +7,7 @@ import { Race, Sex } from '../../render/human';
 import { MorphValues } from '../../render/morphs';
 import { Equipment, emptyEquipment } from '../../render/outfit';
 import { RACES, RaceDef } from '../../render/races';
+import { HAIR_STYLES, RACE_IDS, SEXES } from '../../ui/appearance';
 
 /**
  * What the character lab can show: races and sexes (a body from the pipeline
@@ -18,12 +19,10 @@ import { RACES, RaceDef } from '../../render/races';
 export type { Race, Sex, RaceDef };
 export { RACES };
 export type { Locomotion, AnimationName, LightingPreset, Framing };
+export { HAIR_COLORS, HAIR_STYLES, RACE_IDS, SEXES, SKIN_TONES } from '../../ui/appearance';
 export type StyleFeature = 'wrap' | 'spec' | 'rim' | 'glow';
 export type SetName = 'none' | 'cloth' | 'leather' | 'chain' | 'plate';
 
-export const RACE_IDS: readonly Race[] = ['human', 'elf', 'darkelf', 'orc', 'dwarf'];
-export const SEXES: readonly Sex[] = ['male', 'female'];
-export const HAIR_STYLES: readonly HairStyle[] = ['long', 'short', 'bald'];
 export const LOCOMOTION: readonly Locomotion[] = ['idle', 'walk', 'run'];
 export const ANIMATIONS: readonly AnimationName[] = [...LOCOMOTION, ...(Object.keys(ACTION_DURATION) as ActionKind[])];
 export const LIGHTING_PRESETS: readonly LightingPreset[] = ['sun', 'golden', 'overcast', 'moonlit', 'studio', 'creator'];
@@ -50,27 +49,6 @@ export const LIGHT_LABELS: Record<LightingPreset, string> = {
   studio: 'Studio',
   creator: 'Character screen',
 };
-
-export const SKIN_TONES: ReadonlyArray<readonly [string, number]> = [
-  ['Pale', 0xf2dcc4],
-  ['Fair', 0xe3b48d],
-  ['Tan', 0xd9a06c],
-  ['Olive', 0xc08f5e],
-  ['Brown', 0x8d5a3a],
-  ['Deep', 0x5a3a28],
-  ['Ashen violet', 0x6f6b8f],
-  ['Green', 0x5f7a3a],
-];
-
-export const HAIR_COLORS: ReadonlyArray<readonly [string, number]> = [
-  ['Black', 0x141414],
-  ['Dark brown', 0x4a2f16],
-  ['Chestnut', 0x8b5a2b],
-  ['Red', 0x8b3a1a],
-  ['Blonde', 0xe9d7a0],
-  ['Silver', 0xd0d0d0],
-  ['White', 0xf0eef5],
-];
 
 export interface LabConfig {
   race: Race;

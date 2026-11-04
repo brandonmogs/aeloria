@@ -23,6 +23,15 @@ function note(text: string): HTMLElement {
   return p;
 }
 
+/** A stone button that runs an action. */
+function action(label: string, run: () => void): HTMLButtonElement {
+  const btn = document.createElement('button');
+  btn.className = 'pane-btn';
+  btn.textContent = label;
+  btn.addEventListener('click', run);
+  return btn;
+}
+
 /** A stone toggle button that repaints its label from `read()`. */
 function toggle(label: string, read: () => boolean, flip: () => void): HTMLButtonElement {
   const btn = document.createElement('button');
@@ -46,6 +55,8 @@ export function buildSettingsPane(cb: SettingsCallbacks): HTMLElement {
   pane.append(
     heading('Settings'),
     toggle('Music', cb.musicOn, cb.onToggleMusic),
+    action('Change appearance', () => (location.href = `${location.pathname}?create`)),
+    note('Changing your appearance reopens the character screen and, like logging out, starts a fresh adventurer.'),
     note('Camera: middle-drag or the arrow keys rotate, the scroll wheel zooms, and clicking the compass faces north.'),
     note('Interface: F1–F7 switch tabs, Escape closes windows, F12 shows the debug readout.'),
   );

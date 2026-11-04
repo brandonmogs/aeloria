@@ -128,14 +128,15 @@ export const LIGHT_RIGS: Record<LightingPreset, LightRig> = {
     rimColor: 0xffffff,
     ground: 0x303236,
   },
-  // The character screen: a warm key from high front-left, a cool rim from
-  // behind on the right, a dim room for the reflections, a dark backdrop.
+  // The character screen: a warm key from high in front and a little to the
+  // left (so the hands' shadows fall behind the legs), a cool rim from behind
+  // on the right, a generous fill, a dim room for the reflections, a dark backdrop.
   creator: {
-    sun: dir(0.6, 0.75, 0.75),
+    sun: dir(0.35, 0.8, 0.95),
     sunColor: 0xffe9d2,
-    sunIntensity: 2.4,
+    sunIntensity: 2.3,
     back: { dir: dir(-0.6, 0.5, -0.65), color: 0xbfd4ff, intensity: 2.2 },
-    hemi: [0x9aa6bb, 0x2a2622, 0.5],
+    hemi: [0xa9b4c8, 0x3a3430, 0.8],
     env: 'room',
     roomIntensity: 0.5,
     sky: { turbidity: 4, rayleigh: 1.4, mie: 0.004 },
@@ -354,8 +355,8 @@ export class CharacterStage {
     this.rimWorld.copy(rig.back?.dir ?? dir(-rig.sun.x, 0.45, -rig.sun.z));
   }
 
-  /** Frame the whole figure, the torso, or the head. */
-  frame(kind: Framing): void {
+  /** Frame the whole figure, the torso, or the head; `room` above 1 backs the view off by that factor. */
+  frame(kind: Framing, room = 1): void {
     const h = this.height;
     const o = this.orbit;
     switch (kind) {
@@ -375,6 +376,7 @@ export class CharacterStage {
         o.pitch = 0.02;
         break;
     }
+    o.distance *= room;
   }
 
   /** Move the view: any of the orbit's yaw, pitch, distance and target height. */

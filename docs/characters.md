@@ -37,6 +37,69 @@ Orbit with the left mouse button, raise or lower the view with the right,
 zoom with the wheel. `window.__characterLab` exposes the lab, its config and
 `apply(partial)` for scripts.
 
+## The character screen
+
+The game opens on it the first time a browser visits: the figure on the
+shared stage (`src/render/CharacterStage.ts`, the preview page's stage under
+its own `creator` lighting rig) between two panels (`src/ui/CharacterCreator.ts`,
+styled by `src/ui/creator.css`).
+
+- **Left**: the name (with a random-name button), race, sex, and eight saved
+  looks (pick a slot, then Load, Save or Clear).
+- **Right, by tab**: *Presets* (eight faces, eight bodies, random and reset
+  per tab), *Body* (height, skin tone, and every body slider in groups:
+  build, torso, chest, waist and hips, arms, hands, legs, feet), *Face* (eye
+  colour and the face sliders: face shape, head, forehead, brow, eyes, nose,
+  cheeks, mouth, chin and jaw, ears, neck), *Hair* (style and colour), *Style*
+  (the colours of the clothes worn into the world). Colours come as swatches
+  plus a free picker; a slider label double-clicked goes back to rest.
+- **Bottom**: full / torso / head framing, a turntable toggle, random, reset,
+  and *Enter Aeloria*. Opening a tab frames what it edits.
+
+The look (`Appearance` in `src/ui/appearance.ts`: name, race, sex, height,
+colours, hair, and the slider values by id) is saved to `localStorage` under
+`aeloria.appearance` when the player enters, and read back on the next visit,
+which then skips the screen. `?create` reopens it (the *Change appearance*
+button on the settings tab does that), `?play` skips it even on a first visit
+(the e2e tests pass it), and `?chars=legacy` skips it too, since the legacy
+body cannot be dressed by the character builder.
+
+`src/main.ts` loads the bodies, resolves the look, and builds the world with
+it: the player is named from it and `EntityView` builds the player's rig
+through `CharacterBuilder.build({...look, merged: false})`, hanging gear on
+the bones itself as equipment changes. Every avatar in the world now carries
+the stylised pass (wrap, specular boost, rim, glow), with the rim lit from
+opposite the sun.
+
+`scripts/creator-test.mjs` (part of `npm test`) walks the screen headlessly:
+race, sex, a preset, a slider, a name, entering, the save, the return visit
+and `?create`; it writes `scripts/shots/creator-first.png`, `creator-face.png`
+and `creator-world.png`. `window.__creator` exposes the look, the stage and a
+`ready` flag.
+
+### The sliders
+
+`scripts/morphs.mjs` names the sliders in terms of MakeHuman's targets: 164
+of them in 19 groups (a group has a tab, `face` or `body`), each either
+bipolar (`-1` to `1`, two targets such as `decr`/`incr`) or one-sided (`0`
+to `1`); a `%` in a target name stands for both sides, `$sex` for the body's
+sex. The build script bakes each slider pole as a *full rebake* of the human
+body with that target layered on, diffed against the plain body: sparse
+vertex deltas per LOD (`Uint16` index, `Int16` xyz, one scale per block) and
+the deltas of every measurement the renderer takes (height, bone positions,
+landmarks, radii, torso profile), written to `morphs_m.json`/`.bin` and
+`morphs_f.json`/`.bin` beside the bodies (about 1.6 MB a sex). Because every
+body of a sex shares the human one's topology, one set serves the elf, the
+orc and the dwarf too.
+
+At runtime `src/render/morphs.ts` loads a sex's set once; `buildHumanoid`
+adds the active poles into the LOD0 positions before its reshape and
+re-derives the measurements from the morphed values, so the eyes, hair,
+helmets and gear follow the new shape; a slider change rebuilds a figure in
+about 20 ms. `CharacterOptions.morphs` carries the values; the lab's
+`apply({ morphs })` hook takes them for screenshots. `npm run
+build:characters -- --no-morphs` rebuilds the bodies without the bake.
+
 ## How a figure is drawn today
 
 Two body templates exist; one is chosen when the page loads:
@@ -177,7 +240,10 @@ one GLB per body in `public/models/characters/`:
    choices and index buffers, so all bodies share one topology at every LOD
    (`topology` in the GLB extras) and a vertex index means the same spot on
    each of them. The regions are simplified separately
-   with their borders locked, so they still meet exactly.
+   with their borders locked, so they still meet exactly;
+6. for the human bodies, bakes the creator's sliders (see *The sliders*
+   above): each pole is rebaked through steps 1 to 4 and differenced
+   against the plain body per LOD vertex and per measurement.
 
 | LOD | triangles | head | hands | body |
 | --- | --- | --- | --- | --- |
@@ -202,9 +268,9 @@ scene-graph walk.
 2. Add the id to `BodyId` and `BODY_IDS` in `src/render/human.ts` and teach
    `bodyFor` which race uses it.
 3. Add the race to `Race` (same file), its label, proportion knobs, heights
-   and colours to `RACES` in `src/dev/character/config.ts`, and anything the
-   body cannot carry (tusks, a beard) to `raceExtras` in
-   `src/render/raceGear.ts`.
+   and colours to `RACES` in `src/render/races.ts`, its id to `RACE_IDS` in
+   `src/ui/appearance.ts`, and anything the body cannot carry (tusks, a
+   beard) to `raceExtras` in `src/render/raceGear.ts`.
 4. Add a look to `scripts/character-shot.mjs` so the lab's smoke test
    renders it, and check it under each lighting preset.
 

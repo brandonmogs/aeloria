@@ -27,7 +27,7 @@ import { GameLoop } from './engine/GameLoop';
 import { Renderer } from './render/Renderer';
 import { Terrain } from './render/Terrain';
 import { loadPhotoLibrary } from './render/assets';
-import { loadHumanTemplate } from './render/human';
+import { TemplateSource, loadHumanTemplate } from './render/human';
 import { TileGridView } from './render/TileGridView';
 import { SceneryView } from './render/SceneryView';
 import { GrassView } from './render/GrassView';
@@ -53,6 +53,8 @@ import { DialogueBox } from './ui/DialogueBox';
 import { ShopPanel } from './ui/ShopPanel';
 import { WorldMap } from './ui/WorldMap';
 import { buildSettingsPane, buildMusicPane, buildLogoutPane, buildPlaceholderPane } from './ui/miscTabs';
+import { Appearance, defaultAppearance, loadAppearance, saveAppearance, toCharacterOptions } from './ui/appearance';
+import { CharacterCreator } from './ui/CharacterCreator';
 import { BankPanel } from './ui/BankPanel';
 import { MessageLog } from './ui/MessageLog';
 import { Orbs } from './ui/Orbs';
@@ -96,13 +98,37 @@ function start(): void {
   });
 }
 
+/**
+ * The player's look: the saved one, or the character screen's. The screen
+ * shows on a first visit and on `?create`; `?play` skips it (the tests do),
+ * and so does the legacy body, which the character builder cannot dress.
+ */
+async function chooseAppearance(params: URLSearchParams, source: TemplateSource): Promise<Appearance> {
+  const saved = loadAppearance();
+  if (source === 'legacy' || params.has('play')) return saved ?? defaultAppearance();
+  if (saved && !params.has('create')) return saved;
+  const chosen = await new CharacterCreator(document.body, saved ?? defaultAppearance()).choose();
+  saveAppearance(chosen);
+  // A reload (the logout button) then goes straight into the world with the look just chosen.
+  if (params.has('create')) history.replaceState(null, '', location.pathname);
+  return chosen;
+}
+
 async function runGame(): Promise<void> {
+  const params = new URLSearchParams(location.search);
+  const source: TemplateSource = params.get('chars') === 'legacy' ? 'legacy' : 'glb';
+  // Scanned CC0 textures and the bodies load first: the character screen
+  // stands a body up, and the world is built around the look chosen there.
+  // Any missing texture set falls back to procedural.
+  const [photos] = await Promise.all([loadPhotoLibrary(), loadHumanTemplate(source)]);
+  const appearance = await chooseAppearance(params, source);
+
   // --- Simulation ----------------------------------------------------------
   const map = new TileMap(MAP_W, MAP_H);
   const { props, spawn, moat, fishingSpotGroups, terrain: terrainSpec } = buildStartingWorld(map);
 
   const world = new World(map);
-  const player = world.spawnPlayer(spawn, 'You');
+  const player = world.spawnPlayer(spawn, appearance.name);
   giveStarterKit(player);
 
   // Every tree and rock prop is also a gatherable resource node in the sim,
@@ -137,16 +163,13 @@ async function runGame(): Promise<void> {
   // --- Rendering -----------------------------------------------------------
   const canvas = document.getElementById('game') as HTMLCanvasElement;
   const renderer = new Renderer(canvas);
-  // Scanned CC0 textures and the human body template load before the world is
-  // built; any missing texture set falls back to procedural.
-  const [photos] = await Promise.all([loadPhotoLibrary(), loadHumanTemplate(new URLSearchParams(location.search).get('chars') === 'legacy' ? 'legacy' : 'glb')]);
   const terrain = new Terrain(map, props, terrainSpec, photos);
   renderer.scene.add(terrain.mesh);
   const tileView = new TileGridView(renderer.scene, terrain);
   const scenery = new SceneryView(renderer.scene, props, terrain, photos);
   const grass = new GrassView(renderer.scene, map, terrain);
   const water = new WaterView(renderer, moat, photos);
-  const entityView = new EntityView(renderer.scene, world, terrain);
+  const entityView = new EntityView(renderer.scene, world, terrain, source === 'legacy' ? undefined : toCharacterOptions(appearance));
   const groundView = new GroundItemView(renderer.scene, world, terrain);
   const fireView = new FireView(renderer.scene, world, terrain);
   const spotView = new FishingSpotView(renderer.scene, world);
